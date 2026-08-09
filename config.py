@@ -1,6 +1,8 @@
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
 TEMPLATE_DIR = os.path.join(
     BASE_DIR,
@@ -12,6 +14,7 @@ STATIC_DIR = os.path.join(
     "static"
 )
 
+# Vercel allows temporary writes under /tmp
 UPLOAD_DIR = "/tmp/uploads"
 RESULT_DIR = "/tmp/results"
 
@@ -24,3 +27,15 @@ os.makedirs(
     RESULT_DIR,
     exist_ok=True
 )
+
+
+# -----------------------------
+# IMAGE QUALITY SETTINGS
+# -----------------------------
+
+MIN_BLUR_SCORE = 80
+
+MIN_BRIGHTNESS = 60
+MAX_BRIGHTNESS = 245
+
+MIN_CONTRAST = 20
