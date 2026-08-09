@@ -193,11 +193,11 @@ async function openCamera() {
                     },
 
                     width: {
-                        ideal: 1920
+                        ideal: 2160
                     },
 
                     height: {
-                        ideal: 1080
+                        ideal: 3840
                     }
 
                 },
@@ -205,7 +205,6 @@ async function openCamera() {
                 audio: false
 
             });
-
 
         camera.srcObject =
             cameraStream;
@@ -310,7 +309,6 @@ function captureOMR() {
 
     hideError();
 
-
     if (
         !camera ||
         !camera.videoWidth ||
@@ -318,16 +316,12 @@ function captureOMR() {
     ) {
 
         showError(
-            "Camera is not ready yet."
+            "Camera is not ready. Please wait a moment."
         );
 
         return;
     }
 
-
-    // ========================================================
-    // CAMERA FRAME SIZE
-    // ========================================================
 
     const videoWidth =
         camera.videoWidth;
@@ -337,7 +331,7 @@ function captureOMR() {
 
 
     console.log(
-        "Camera resolution:",
+        "Original camera resolution:",
         videoWidth,
         "x",
         videoHeight
@@ -345,38 +339,20 @@ function captureOMR() {
 
 
     // ========================================================
-    // CROP REGION
+    // IMPORTANT
     //
-    // Must match the visual guide box:
+    // Capture the ENTIRE camera frame.
     //
-    // left   = 8%
-    // top    = 5%
-    // width  = 84%
-    // height = 90%
+    // Do not crop using the yellow guide box.
+    // Python/OpenCV will find the OMR markers and perform
+    // perspective correction.
     // ========================================================
 
-    const cropX =
-        videoWidth * 0.08;
-
-    const cropY =
-        videoHeight * 0.05;
-
-    const cropWidth =
-        videoWidth * 0.84;
-
-    const cropHeight =
-        videoHeight * 0.90;
-
-
     canvas.width =
-        Math.round(
-            cropWidth
-        );
+        videoWidth;
 
     canvas.height =
-        Math.round(
-            cropHeight
-        );
+        videoHeight;
 
 
     const context =
@@ -388,37 +364,35 @@ function captureOMR() {
     if (!context) {
 
         showError(
-            "Could not create image capture canvas."
+            "Could not initialize camera capture."
         );
 
         return;
     }
 
 
-    // ========================================================
-    // DRAW CROPPED CAMERA AREA
-    // ========================================================
+    context.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
 
     context.drawImage(
-
         camera,
 
-        cropX,
-        cropY,
-        cropWidth,
-        cropHeight,
+        0,
+        0,
+        videoWidth,
+        videoHeight,
 
         0,
         0,
         canvas.width,
         canvas.height
-
     );
 
-
-    // ========================================================
-    // CONVERT TO JPEG
-    // ========================================================
 
     canvas.toBlob(
 
@@ -427,7 +401,7 @@ function captureOMR() {
             if (!blob) {
 
                 showError(
-                    "Could not capture OMR image."
+                    "Could not capture the OMR image."
                 );
 
                 return;
@@ -437,8 +411,6 @@ function captureOMR() {
             capturedBlob =
                 blob;
 
-
-            // Revoke old preview URL if needed
 
             if (
                 preview.src &&
@@ -459,7 +431,6 @@ function captureOMR() {
                 );
 
 
-            // Hide live camera
             cameraContainer.classList.add(
                 "hidden"
             );
@@ -470,7 +441,6 @@ function captureOMR() {
             );
 
 
-            // Show captured image
             preview.classList.remove(
                 "hidden"
             );
@@ -487,20 +457,28 @@ function captureOMR() {
 
 
             console.log(
-                "OMR captured:",
-                blob.size,
-                "bytes"
+                "Full OMR frame captured"
+            );
+
+            console.log(
+                "Captured image size:",
+                canvas.width,
+                "x",
+                canvas.height
+            );
+
+            console.log(
+                "JPEG bytes:",
+                blob.size
             );
 
         },
 
         "image/jpeg",
 
-        0.95
-
+        1.0
     );
 }
-
 
 // ============================================================
 // RETAKE

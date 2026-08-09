@@ -260,6 +260,25 @@ input[type="file"] {
     border-radius: 10px;
 }
 
+.omr-detection-box {
+    position: absolute;
+
+    left: 14%;
+    top: 4%;
+
+    width: 72%;
+    height: 92%;
+
+    border: 3px solid #D4AF37;
+
+    box-sizing: border-box;
+
+    pointer-events: none;
+
+    box-shadow:
+        0 0 0 9999px rgba(0, 0, 0, 0.38);
+}
+
 button {
     width: 100%;
 
