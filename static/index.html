@@ -2,158 +2,234 @@
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>
-        OMR Scanner
+        OMR Evaluation Dashboard
     </title>
 
-    <link
-        rel="stylesheet"
-        href="/static/style.css"
-    >
+    <link rel="stylesheet" href="/static/style.css">
+
 </head>
+
 
 <body>
 
-    <div class="container">
+    <header>
 
-        <h1>
-            OMR Scanner
-        </h1>
+        <div class="brand">
 
-        <p class="subtitle">
-            Upload an OMR sheet and calculate marks
-        </p>
+            <div class="logo">
+                OMR
+            </div>
 
-        <div class="card">
+            <div>
 
-            <label>
-                OMR Image
+                <h1>
+                    Manchester Technologies
+                </h1>
+
+                <p>
+                    Optical Mark Recognition System
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="online">
+            ● SCANNER ONLINE
+        </div>
+
+    </header>
+
+
+    <main>
+
+        <!-- ================================================== -->
+        <!-- HERO -->
+        <!-- ================================================== -->
+
+        <section class="hero">
+
+            <h2>
+                OMR Evaluation Dashboard
+            </h2>
+
+            <p>
+                Scan and evaluate NEET,
+                JEE and KCET OMR sheets.
+            </p>
+
+        </section>
+
+
+        <!-- ================================================== -->
+        <!-- SCANNER -->
+        <!-- ================================================== -->
+
+        <section class="card">
+
+            <h3>
+                Scan OMR Sheet
+            </h3>
+
+
+            <!-- EXAM -->
+
+            <label for="exam">
+                Exam
             </label>
 
-            <input
-                type="file"
-                id="imageInput"
-                accept=".jpg,.jpeg,.png"
-            >
+            <select id="exam">
 
-            <label>
-                Template
-            </label>
+                <option value="">
+                    Select Exam
+                </option>
 
-            <select id="templateInput">
+                <option value="neet">
+                    NEET
+                </option>
 
-                <option value="sample_template.json">
-                    Sample 50 Questions
+                <option value="jee">
+                    JEE
+                </option>
+
+                <option value="kcet">
+                    KCET
                 </option>
 
             </select>
 
-            <label>
-                Answer Key
-            </label>
 
-            <textarea
-                id="answerKey"
-                rows="10"
-                placeholder='{"1":"A","2":"B","3":"C"}'
-            ></textarea>
+            <!-- ================================================== -->
+            <!-- CAMERA -->
+            <!-- ================================================== -->
 
-            <div class="marks-grid">
+            <div class="scanner-card">
 
-                <div>
-                    <label>
-                        Correct Marks
-                    </label>
+                <button id="openCameraButton" type="button">
+                    Open Camera
+                </button>
 
-                    <input
-                        id="correctMarks"
-                        type="number"
-                        value="4"
-                        step="0.01"
-                    >
+
+                <!-- CAMERA PREVIEW -->
+
+                <div id="cameraContainer" class="camera-container hidden">
+
+                    <video id="camera" autoplay playsinline muted></video>
+
+
+                    <!-- OMR GUIDE BOX -->
+
+                    <div class="omr-detection-box">
+
+                        <span class="corner tl"></span>
+
+                        <span class="corner tr"></span>
+
+                        <span class="corner bl"></span>
+
+                        <span class="corner br"></span>
+
+
+                        <div class="scan-label">
+                            OMR SHEET
+                        </div>
+
+                    </div>
+
                 </div>
 
-                <div>
-                    <label>
-                        Wrong Marks
-                    </label>
 
-                    <input
-                        id="wrongMarks"
-                        type="number"
-                        value="-1"
-                        step="0.01"
-                    >
-                </div>
+                <!-- Hidden canvas used for capture -->
 
-                <div>
-                    <label>
-                        Blank Marks
-                    </label>
+                <canvas id="captureCanvas" class="hidden"></canvas>
 
-                    <input
-                        id="blankMarks"
-                        type="number"
-                        value="0"
-                        step="0.01"
-                    >
-                </div>
 
-                <div>
-                    <label>
-                        Multiple Marks
-                    </label>
+                <!-- Captured image preview -->
 
-                    <input
-                        id="multipleMarks"
-                        type="number"
-                        value="-1"
-                        step="0.01"
-                    >
-                </div>
+                <img id="capturedPreview" class="captured-preview hidden" alt="Captured OMR">
+
+
+                <!-- CAMERA CONTROLS -->
+
+                <button id="captureButton" type="button" class="hidden">
+                    Capture OMR
+                </button>
+
+
+                <button id="retakeButton" type="button" class="hidden">
+                    Retake
+                </button>
+
+
+                <button id="scanButton" type="button" class="hidden">
+                    Scan & Evaluate
+                </button>
 
             </div>
 
-            <button
-                id="scanButton"
-                onclick="scanOMR()"
-            >
-                Scan OMR
-            </button>
 
-            <div
-                id="loading"
-                class="hidden"
-            >
+            <!-- LOADING -->
+
+            <div id="loading" class="hidden">
                 Processing OMR...
             </div>
 
-            <div
-                id="error"
-                class="error hidden"
-            ></div>
 
-        </div>
+            <!-- ERROR -->
 
-        <div
-            id="resultSection"
-            class="card hidden"
-        >
+            <div id="error" class="error hidden"></div>
 
-            <h2>
+        </section>
+
+
+        <!-- ================================================== -->
+        <!-- RESULT -->
+        <!-- ================================================== -->
+
+        <section id="resultSection" class="card hidden">
+
+            <h3>
                 Result
-            </h2>
+            </h3>
 
-            <div class="result-grid">
+
+            <div class="summary">
 
                 <div class="result-box">
+
+                    <span>
+                        Exam
+                    </span>
+
+                    <strong id="resultExam">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="result-box">
+
+                    <span>
+                        Paper / Series
+                    </span>
+
+                    <strong id="paperCode">
+                        -
+                    </strong>
+
+                </div>
+
+
+                <div class="result-box">
+
                     <span>
                         Score
                     </span>
@@ -161,9 +237,16 @@
                     <strong id="score">
                         -
                     </strong>
+
                 </div>
 
+            </div>
+
+
+            <div class="summary">
+
                 <div class="result-box">
+
                     <span>
                         Correct
                     </span>
@@ -171,9 +254,12 @@
                     <strong id="correct">
                         -
                     </strong>
+
                 </div>
 
+
                 <div class="result-box">
+
                     <span>
                         Wrong
                     </span>
@@ -181,9 +267,12 @@
                     <strong id="wrong">
                         -
                     </strong>
+
                 </div>
 
+
                 <div class="result-box">
+
                     <span>
                         Blank
                     </span>
@@ -191,9 +280,12 @@
                     <strong id="blank">
                         -
                     </strong>
+
                 </div>
 
+
                 <div class="result-box">
+
                     <span>
                         Multiple
                     </span>
@@ -201,60 +293,20 @@
                     <strong id="multiple">
                         -
                     </strong>
+
                 </div>
 
             </div>
 
-            <h3>
-                Image Quality
-            </h3>
 
             <div id="quality"></div>
 
-            <h3>
-                Question-wise Result
-            </h3>
+            <div id="message"></div>
 
-            <div class="table-wrapper">
+        </section>
 
-                <table>
+    </main>
 
-                    <thead>
-
-                        <tr>
-                            <th>
-                                Question
-                            </th>
-
-                            <th>
-                                Detected
-                            </th>
-
-                            <th>
-                                Answer Key
-                            </th>
-
-                            <th>
-                                Status
-                            </th>
-
-                            <th>
-                                Marks
-                            </th>
-                        </tr>
-
-                    </thead>
-
-                    <tbody id="resultTable">
-                    </tbody>
-
-                </table>
-
-            </div>
-
-        </div>
-
-    </div>
 
     <script src="/static/app.js"></script>
 

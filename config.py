@@ -14,6 +14,12 @@ STATIC_DIR = os.path.join(
     "static"
 )
 
+ANSWER_KEY_DIR = os.path.join(
+    BASE_DIR,
+    "answer_keys"
+)
+
+# Vercel writable temporary directories
 UPLOAD_DIR = "/tmp/uploads"
 RESULT_DIR = "/tmp/results"
 
@@ -28,7 +34,9 @@ os.makedirs(
 )
 
 
+# ============================================================
 # IMAGE QUALITY SETTINGS
+# ============================================================
 
 MIN_BLUR_SCORE = 80
 
