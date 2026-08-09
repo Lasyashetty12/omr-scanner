@@ -31,9 +31,11 @@ app = FastAPI(
     title="OMR Scanner API",
     version="1.0.0",
 )
+from config import STATIC_DIR
+
 app.mount(
     "/static",
-    StaticFiles(directory="static"),
+    StaticFiles(directory=STATIC_DIR),
     name="static"
 )
 
@@ -45,9 +47,11 @@ app.mount(
 @app.get("/")
 def home():
     return FileResponse(
-        "static/index.html"
+        os.path.join(
+            STATIC_DIR,
+            "index.html"
+        )
     )
-
 
 # ============================================================
 # HEALTH
