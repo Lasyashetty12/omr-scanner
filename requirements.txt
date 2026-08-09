@@ -1,3 +1,5 @@
-New-Item -ItemType File -Force static\index.html
-New-Item -ItemType File -Force static\style.css
-New-Item -ItemType File -Force static\app.js
+fastapi
+uvicorn
+python-multipart
+opencv-python-headless
+numpy
