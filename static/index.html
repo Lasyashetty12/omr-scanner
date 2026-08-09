@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        OMR Scanner
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>
+            OMR Scanner
+        </h1>
+
+        <p class="subtitle">
+            Upload an OMR sheet and calculate marks
+        </p>
+
+        <div class="card">
+
+            <label>
+                OMR Image
+            </label>
+
+            <input
+                type="file"
+                id="imageInput"
+                accept=".jpg,.jpeg,.png"
+            >
+
+            <label>
+                Template
+            </label>
+
+            <select id="templateInput">
+
+                <option value="sample_template.json">
+                    Sample 50 Questions
+                </option>
+
+            </select>
+
+            <label>
+                Answer Key
+            </label>
+
+            <textarea
+                id="answerKey"
+                rows="10"
+                placeholder='{"1":"A","2":"B","3":"C"}'
+            ></textarea>
+
+            <div class="marks-grid">
+
+                <div>
+                    <label>
+                        Correct Marks
+                    </label>
+
+                    <input
+                        id="correctMarks"
+                        type="number"
+                        value="4"
+                        step="0.01"
+                    >
+                </div>
+
+                <div>
+                    <label>
+                        Wrong Marks
+                    </label>
+
+                    <input
+                        id="wrongMarks"
+                        type="number"
+                        value="-1"
+                        step="0.01"
+                    >
+                </div>
+
+                <div>
+                    <label>
+                        Blank Marks
+                    </label>
+
+                    <input
+                        id="blankMarks"
+                        type="number"
+                        value="0"
+                        step="0.01"
+                    >
+                </div>
+
+                <div>
+                    <label>
+                        Multiple Marks
+                    </label>
+
+                    <input
+                        id="multipleMarks"
+                        type="number"
+                        value="-1"
+                        step="0.01"
+                    >
+                </div>
+
+            </div>
+
+            <button
+                id="scanButton"
+                onclick="scanOMR()"
+            >
+                Scan OMR
+            </button>
+
+            <div
+                id="loading"
+                class="hidden"
+            >
+                Processing OMR...
+            </div>
+
+            <div
+                id="error"
+                class="error hidden"
+            ></div>
+
+        </div>
+
+        <div
+            id="resultSection"
+            class="card hidden"
+        >
+
+            <h2>
+                Result
+            </h2>
+
+            <div class="result-grid">
+
+                <div class="result-box">
+                    <span>
+                        Score
+                    </span>
+
+                    <strong id="score">
+                        -
+                    </strong>
+                </div>
+
+                <div class="result-box">
+                    <span>
+                        Correct
+                    </span>
+
+                    <strong id="correct">
+                        -
+                    </strong>
+                </div>
+
+                <div class="result-box">
+                    <span>
+                        Wrong
+                    </span>
+
+                    <strong id="wrong">
+                        -
+                    </strong>
+                </div>
+
+                <div class="result-box">
+                    <span>
+                        Blank
+                    </span>
+
+                    <strong id="blank">
+                        -
+                    </strong>
+                </div>
+
+                <div class="result-box">
+                    <span>
+                        Multiple
+                    </span>
+
+                    <strong id="multiple">
+                        -
+                    </strong>
+                </div>
+
+            </div>
+
+            <h3>
+                Image Quality
+            </h3>
+
+            <div id="quality"></div>
+
+            <h3>
+                Question-wise Result
+            </h3>
+
+            <div class="table-wrapper">
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+                            <th>
+                                Question
+                            </th>
+
+                            <th>
+                                Detected
+                            </th>
+
+                            <th>
+                                Answer Key
+                            </th>
+
+                            <th>
+                                Status
+                            </th>
+
+                            <th>
+                                Marks
+                            </th>
+                        </tr>
+
+                    </thead>
+
+                    <tbody id="resultTable">
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+
+</body>
+
+</html>
