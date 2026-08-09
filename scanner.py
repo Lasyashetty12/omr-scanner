@@ -17,39 +17,76 @@ from config import (
 # TEMPLATE
 # ============================================================
 
-def load_template(
-    template_path
-):
+def load_template(template_path):
+
     try:
         with open(
             template_path,
             "r",
             encoding="utf-8",
         ) as file:
-            template = json.load(
-                file
-            )
+
+            template = json.load(file)
 
     except FileNotFoundError:
+
         raise ValueError(
-            f"Template not found: "
-            f"{template_path}"
+            f"Template not found: {template_path}"
         )
 
-    required = [
+    # Common fields required for all exams
+    common_required = [
+        "template_name",
+        "exam_name",
         "sheet_width",
         "sheet_height",
-        "total_questions",
-        "questions_per_column",
-        "options",
-        "columns",
     ]
 
-    for field in required:
+    for field in common_required:
+
         if field not in template:
+
             raise ValueError(
-                f"Template missing "
-                f"required field: {field}"
+                f"Template missing required field: {field}"
+            )
+
+    exam_name = (
+        template.get(
+            "exam_name",
+            ""
+        )
+        .strip()
+        .upper()
+    )
+
+    # NEET / KCET use normal MCQ layout
+    if exam_name in [
+        "NEET",
+        "KCET",
+    ]:
+
+        required = [
+            "total_questions",
+            "questions_per_column",
+            "options",
+            "columns",
+        ]
+
+        for field in required:
+
+            if field not in template:
+
+                raise ValueError(
+                    f"Template missing required field: {field}"
+                )
+
+    # JEE may use different sections
+    elif exam_name == "JEE":
+
+        if "series" not in template:
+
+            raise ValueError(
+                "JEE template requires series configuration."
             )
 
     return template
@@ -59,14 +96,14 @@ def load_template(
 # IMAGE
 # ============================================================
 
-def load_image(
-    image_path
-):
+def load_image(image_path):
+
     image = cv2.imread(
         image_path
     )
 
     if image is None:
+
         raise ValueError(
             "Unable to read uploaded image."
         )
@@ -78,9 +115,8 @@ def load_image(
 # QUALITY
 # ============================================================
 
-def calculate_blur_score(
-    image
-):
+def calculate_blur_score(image):
+
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
@@ -94,9 +130,8 @@ def calculate_blur_score(
     )
 
 
-def calculate_brightness(
-    image
-):
+def calculate_brightness(image):
+
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
@@ -107,9 +142,8 @@ def calculate_brightness(
     )
 
 
-def calculate_contrast(
-    image
-):
+def calculate_contrast(image):
+
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
@@ -120,17 +154,14 @@ def calculate_contrast(
     )
 
 
-def validate_image_quality(
-    image
-):
+def validate_image_quality(image):
+
     blur = calculate_blur_score(
         image
     )
 
-    brightness = (
-        calculate_brightness(
-            image
-        )
+    brightness = calculate_brightness(
+        image
     )
 
     contrast = calculate_contrast(
@@ -138,22 +169,25 @@ def validate_image_quality(
     )
 
     if blur < MIN_BLUR_SCORE:
+
         raise ValueError(
-            "Image is too blurry. "
-            "Please scan again."
+            "Image is too blurry. Please scan again."
         )
 
     if brightness < MIN_BRIGHTNESS:
+
         raise ValueError(
             "Image is too dark."
         )
 
     if brightness > MAX_BRIGHTNESS:
+
         raise ValueError(
             "Image is overexposed."
         )
 
     if contrast < MIN_CONTRAST:
+
         raise ValueError(
             "Image contrast is too low."
         )
@@ -178,9 +212,8 @@ def validate_image_quality(
 # REGISTRATION MARKERS
 # ============================================================
 
-def find_marker_candidates(
-    image
-):
+def find_marker_candidates(image):
+
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
@@ -205,9 +238,7 @@ def find_marker_candidates(
         cv2.CHAIN_APPROX_SIMPLE,
     )
 
-    height, width = (
-        image.shape[:2]
-    )
+    height, width = image.shape[:2]
 
     image_area = (
         height * width
@@ -216,6 +247,7 @@ def find_marker_candidates(
     candidates = []
 
     for contour in contours:
+
         area = cv2.contourArea(
             contour
         )
@@ -232,10 +264,8 @@ def find_marker_candidates(
         ):
             continue
 
-        x, y, w, h = (
-            cv2.boundingRect(
-                contour
-            )
+        x, y, w, h = cv2.boundingRect(
+            contour
         )
 
         if h == 0:
@@ -252,7 +282,9 @@ def find_marker_candidates(
         ):
             continue
 
-        rectangle_area = w * h
+        rectangle_area = (
+            w * h
+        )
 
         if rectangle_area == 0:
             continue
@@ -285,10 +317,11 @@ def select_four_markers(
     image,
     candidates,
 ):
+
     if len(candidates) < 4:
+
         raise ValueError(
-            "Could not find all four "
-            "registration markers."
+            "Could not find all four registration markers."
         )
 
     height, width = (
@@ -347,17 +380,16 @@ def select_four_markers(
     )
 
     if len(unique) != 4:
+
         raise ValueError(
-            "Registration marker "
-            "detection is ambiguous."
+            "Registration marker detection is ambiguous."
         )
 
     return corners
 
 
-def detect_corner_markers(
-    image
-):
+def detect_corner_markers(image):
+
     candidates = (
         find_marker_candidates(
             image
@@ -374,9 +406,8 @@ def detect_corner_markers(
 # PERSPECTIVE
 # ============================================================
 
-def order_points(
-    points
-):
+def order_points(points):
+
     points = np.array(
         points,
         dtype="float32",
@@ -424,6 +455,7 @@ def perspective_transform(
     corners,
     template,
 ):
+
     width = int(
         template[
             "sheet_width"
@@ -483,9 +515,8 @@ def perspective_transform(
 # IMAGE NORMALIZATION
 # ============================================================
 
-def normalize_grayscale(
-    image
-):
+def normalize_grayscale(image):
+
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
@@ -509,9 +540,8 @@ def normalize_grayscale(
     return gray
 
 
-def create_threshold_image(
-    image
-):
+def create_threshold_image(image):
+
     gray = normalize_grayscale(
         image
     )
@@ -527,12 +557,13 @@ def create_threshold_image(
 
 
 # ============================================================
-# TEMPLATE COORDINATES
+# MCQ TEMPLATE COORDINATES
 # ============================================================
 
 def generate_bubble_coordinates(
     template
 ):
+
     total_questions = int(
         template[
             "total_questions"
@@ -573,6 +604,7 @@ def generate_bubble_coordinates(
         1,
         total_questions + 1,
     ):
+
         column_index = (
             question - 1
         ) // questions_per_column
@@ -585,15 +617,17 @@ def generate_bubble_coordinates(
             column_index
             >= len(columns)
         ):
+
             raise ValueError(
-                "Template does not "
-                "contain enough columns."
+                "Template does not contain enough columns."
             )
 
         y = (
             start_y
-            + row_index
-            * row_gap
+            +
+            row_index
+            *
+            row_gap
         )
 
         coordinates[
@@ -601,6 +635,7 @@ def generate_bubble_coordinates(
         ] = {}
 
         for option in options:
+
             if (
                 option
                 not in
@@ -608,9 +643,9 @@ def generate_bubble_coordinates(
                     column_index
                 ]
             ):
+
                 raise ValueError(
-                    f"Missing coordinate "
-                    f"for option {option}"
+                    f"Missing coordinate for option {option}"
                 )
 
             x = int(
@@ -639,6 +674,7 @@ def get_fill_ratio(
     y,
     template,
 ):
+
     radius = int(
         template.get(
             "bubble_radius",
@@ -683,6 +719,7 @@ def get_fill_ratio(
     ]
 
     if roi.size == 0:
+
         return 0.0
 
     mask = np.zeros_like(
@@ -690,8 +727,13 @@ def get_fill_ratio(
         dtype=np.uint8,
     )
 
-    local_x = x - x1
-    local_y = y - y1
+    local_x = (
+        x - x1
+    )
+
+    local_y = (
+        y - y1
+    )
 
     cv2.circle(
         mask,
@@ -722,6 +764,7 @@ def get_fill_ratio(
     )
 
     if total_count == 0:
+
         return 0.0
 
     return (
@@ -735,6 +778,7 @@ def detect_question_answer(
     coordinates,
     template,
 ):
+
     options = template[
         "options"
     ]
@@ -763,6 +807,7 @@ def detect_question_answer(
     scores = {}
 
     for option in options:
+
         x, y = coordinates[
             option
         ]
@@ -797,8 +842,10 @@ def detect_question_answer(
 
     filled_options = [
         option
+
         for option, score
         in scores.items()
+
         if (
             score
             >= multiple_threshold
@@ -808,33 +855,37 @@ def detect_question_answer(
     if len(
         filled_options
     ) >= 2:
+
         answer = "MULTIPLE"
 
     elif (
         highest_score
         >= filled_threshold
     ):
-        answer = (
-            highest_option
-        )
+
+        answer = highest_option
 
     elif (
         highest_score
         < blank_threshold
     ):
+
         answer = "BLANK"
 
     else:
+
         answer = "UNCERTAIN"
 
     return {
-        "answer": answer,
+        "answer":
+            answer,
 
         "scores": {
             key: round(
                 float(value),
                 4,
             )
+
             for key, value
             in scores.items()
         },
@@ -858,6 +909,7 @@ def scan_answers(
     corrected_image,
     template,
 ):
+
     gray = normalize_grayscale(
         corrected_image
     )
@@ -874,6 +926,7 @@ def scan_answers(
         question,
         option_coordinates
     ) in coordinates.items():
+
         answers[
             question
         ] = detect_question_answer(
@@ -886,6 +939,313 @@ def scan_answers(
 
 
 # ============================================================
+# QUESTION PAPER CODE
+# NEET + KCET
+# ============================================================
+
+def detect_paper_code(
+    gray_image,
+    template,
+):
+
+    paper_code_config = (
+        template.get(
+            "paper_code"
+        )
+    )
+
+    if not paper_code_config:
+
+        return None
+
+    if not paper_code_config.get(
+        "enabled",
+        False,
+    ):
+
+        return None
+
+    detected_characters = []
+
+    character_details = []
+
+    for character_config in (
+        paper_code_config[
+            "characters"
+        ]
+    ):
+
+        x = int(
+            character_config[
+                "x"
+            ]
+        )
+
+        start_y = int(
+            character_config[
+                "start_y"
+            ]
+        )
+
+        gap = int(
+            character_config[
+                "gap"
+            ]
+        )
+
+        values = (
+            character_config[
+                "values"
+            ]
+        )
+
+        scores = {}
+
+        for index, value in enumerate(
+            values
+        ):
+
+            y = (
+                start_y
+                +
+                index
+                *
+                gap
+            )
+
+            score = get_fill_ratio(
+                gray_image,
+                x,
+                y,
+                template,
+            )
+
+            scores[
+                value
+            ] = score
+
+        ranked = sorted(
+            scores.items(),
+            key=lambda item:
+            item[1],
+            reverse=True,
+        )
+
+        best_value = (
+            ranked[0][0]
+        )
+
+        best_score = float(
+            ranked[0][1]
+        )
+
+        second_score = float(
+            ranked[1][1]
+            if len(ranked) > 1
+            else 0
+        )
+
+        minimum_score = float(
+            template.get(
+                "filled_threshold",
+                0.50,
+            )
+        )
+
+        if (
+            best_score
+            < minimum_score
+        ):
+
+            raise ValueError(
+                "Question paper code could not be detected."
+            )
+
+        detected_characters.append(
+            best_value
+        )
+
+        character_details.append(
+            {
+                "value":
+                    best_value,
+
+                "score":
+                    round(
+                        best_score,
+                        4,
+                    ),
+
+                "confidence_gap":
+                    round(
+                        best_score
+                        - second_score,
+                        4,
+                    ),
+
+                "scores": {
+                    key: round(
+                        float(value),
+                        4,
+                    )
+
+                    for key, value
+                    in scores.items()
+                },
+            }
+        )
+
+    return {
+        "value":
+            "".join(
+                detected_characters
+            ),
+
+        "characters":
+            character_details,
+    }
+
+
+# ============================================================
+# JEE SERIES
+# ============================================================
+
+def detect_jee_series(
+    gray_image,
+    template,
+):
+
+    series_config = (
+        template.get(
+            "series"
+        )
+    )
+
+    if not series_config:
+
+        return None
+
+    if not series_config.get(
+        "enabled",
+        False,
+    ):
+
+        return None
+
+    scores = {}
+
+    for series, position in (
+        series_config[
+            "coordinates"
+        ].items()
+    ):
+
+        x, y = position
+
+        scores[
+            series
+        ] = get_fill_ratio(
+            gray_image,
+            int(x),
+            int(y),
+            template,
+        )
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda item:
+        item[1],
+        reverse=True,
+    )
+
+    selected_series = (
+        ranked[0][0]
+    )
+
+    selected_score = float(
+        ranked[0][1]
+    )
+
+    second_score = float(
+        ranked[1][1]
+        if len(ranked) > 1
+        else 0
+    )
+
+    filled_threshold = float(
+        template.get(
+            "filled_threshold",
+            0.50,
+        )
+    )
+
+    if (
+        selected_score
+        < filled_threshold
+    ):
+
+        raise ValueError(
+            "Unable to detect JEE series."
+        )
+
+    return {
+        "value":
+            selected_series,
+
+        "score":
+            round(
+                selected_score,
+                4,
+            ),
+
+        "confidence_gap":
+            round(
+                selected_score
+                - second_score,
+                4,
+            ),
+
+        "scores": {
+            key: round(
+                float(value),
+                4,
+            )
+
+            for key, value
+            in scores.items()
+        },
+    }
+
+
+# ============================================================
+# JEE MCQ
+# Placeholder until exact JEE calibration is completed
+# ============================================================
+
+def scan_jee_answers(
+    corrected_image,
+    template,
+):
+
+    """
+    JEE has MCQ + numerical answer sections.
+
+    Exact question coordinates still need
+    calibration from the original JEE OMR.
+
+    For now we return empty sections safely
+    instead of crashing.
+    """
+
+    result = {
+        "mcq": {},
+        "numerical": {},
+    }
+
+    return result
+
+
+# ============================================================
 # DEBUG IMAGE
 # ============================================================
 
@@ -894,9 +1254,25 @@ def create_debug_image(
     answers,
     template,
 ):
+
     debug = (
         corrected_image.copy()
     )
+
+    exam_name = (
+        template.get(
+            "exam_name",
+            ""
+        )
+        .strip()
+        .upper()
+    )
+
+    # JEE uses a different layout.
+    # Don't call normal MCQ coordinate generator.
+    if exam_name == "JEE":
+
+        return debug
 
     coordinates = (
         generate_bubble_coordinates(
@@ -920,6 +1296,7 @@ def create_debug_image(
             x,
             y
         ) in options.items():
+
             cv2.circle(
                 debug,
                 (x, y),
@@ -929,7 +1306,9 @@ def create_debug_image(
             )
 
         first_option = (
-            template["options"][0]
+            template[
+                "options"
+            ][0]
         )
 
         x, y = options[
@@ -967,13 +1346,26 @@ def process_omr(
     image_path,
     template_path,
 ):
+
+    # --------------------------------
+    # Load template
+    # --------------------------------
+
     template = load_template(
         template_path
     )
 
+    # --------------------------------
+    # Load image
+    # --------------------------------
+
     image = load_image(
         image_path
     )
+
+    # --------------------------------
+    # Validate image quality
+    # --------------------------------
 
     quality = (
         validate_image_quality(
@@ -981,11 +1373,19 @@ def process_omr(
         )
     )
 
+    # --------------------------------
+    # Detect four registration markers
+    # --------------------------------
+
     corners = (
         detect_corner_markers(
             image
         )
     )
+
+    # --------------------------------
+    # Perspective correction
+    # --------------------------------
 
     corrected = (
         perspective_transform(
@@ -995,10 +1395,99 @@ def process_omr(
         )
     )
 
-    answers = scan_answers(
-        corrected,
-        template,
+    # --------------------------------
+    # Normalized grayscale
+    # --------------------------------
+
+    gray = normalize_grayscale(
+        corrected
     )
+
+    # --------------------------------
+    # Exam
+    # --------------------------------
+
+    exam_name = (
+        template.get(
+            "exam_name",
+            ""
+        )
+        .strip()
+        .upper()
+    )
+
+    paper_code = None
+    jee_series = None
+
+    answers = {}
+
+    # ========================================================
+    # NEET
+    # ========================================================
+
+    if exam_name == "NEET":
+
+        # Paper code MUST be scanned first
+        paper_code = (
+            detect_paper_code(
+                gray,
+                template,
+            )
+        )
+
+        answers = scan_answers(
+            corrected,
+            template,
+        )
+
+    # ========================================================
+    # KCET
+    # ========================================================
+
+    elif exam_name == "KCET":
+
+        # Paper code MUST be scanned first
+        paper_code = (
+            detect_paper_code(
+                gray,
+                template,
+            )
+        )
+
+        answers = scan_answers(
+            corrected,
+            template,
+        )
+
+    # ========================================================
+    # JEE
+    # ========================================================
+
+    elif exam_name == "JEE":
+
+        # Detect series first
+        jee_series = (
+            detect_jee_series(
+                gray,
+                template,
+            )
+        )
+
+        # JEE MCQ + numerical scanning
+        answers = scan_jee_answers(
+            corrected,
+            template,
+        )
+
+    else:
+
+        raise ValueError(
+            f"Unsupported exam type: {exam_name}"
+        )
+
+    # --------------------------------
+    # Threshold image
+    # --------------------------------
 
     threshold = (
         create_threshold_image(
@@ -1006,18 +1495,46 @@ def process_omr(
         )
     )
 
-    debug = create_debug_image(
-        corrected,
-        answers,
-        template,
-    )
+    # --------------------------------
+    # Debug image
+    # --------------------------------
+
+    if exam_name in [
+        "NEET",
+        "KCET",
+    ]:
+
+        debug = create_debug_image(
+            corrected,
+            answers,
+            template,
+        )
+
+    else:
+
+        debug = (
+            corrected.copy()
+        )
+
+    # --------------------------------
+    # Return EVERYTHING
+    # --------------------------------
 
     return {
         "template":
             template,
 
+        "exam_name":
+            exam_name,
+
         "quality":
             quality,
+
+        "paper_code":
+            paper_code,
+
+        "jee_series":
+            jee_series,
 
         "answers":
             answers,
