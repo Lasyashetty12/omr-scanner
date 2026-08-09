@@ -14,7 +14,6 @@ STATIC_DIR = os.path.join(
     "static"
 )
 
-# Vercel allows temporary writes under /tmp
 UPLOAD_DIR = "/tmp/uploads"
 RESULT_DIR = "/tmp/results"
 
@@ -29,13 +28,12 @@ os.makedirs(
 )
 
 
-# -----------------------------
 # IMAGE QUALITY SETTINGS
-# -----------------------------
 
 MIN_BLUR_SCORE = 80
 
 MIN_BRIGHTNESS = 60
+
 MAX_BRIGHTNESS = 245
 
 MIN_CONTRAST = 20
