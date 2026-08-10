@@ -1,5 +1,5 @@
 # scanner.py
-
+from ml_omr.hybrid_reader import scan_answers_ml
 import json
 
 import cv2
@@ -11,6 +11,26 @@ from config import (
     MAX_BRIGHTNESS,
     MIN_CONTRAST,
 )
+
+
+# ============================================================
+# ML MODEL CHECK
+# ============================================================
+
+def ensure_ml_model_available():
+    from pathlib import Path
+
+    model_path = (
+        Path(__file__).resolve().parent
+        / "models"
+        / "bubble_classifier.keras"
+    )
+
+    if not model_path.exists():
+        raise ValueError(
+            "ML bubble model is missing. Expected: "
+            f"{model_path}"
+        )
 
 
 # ============================================================
@@ -1037,38 +1057,90 @@ def detect_question_answer(
 
 
 # ============================================================
-# SCAN NEET / KCET ANSWERS
+# SCAN NEET / KCET ANSWERS WITH ML
 # ============================================================
 
 def scan_answers(
     corrected_image,
     template,
 ):
+    """
+    ML-based answer reader for NEET / KCET.
 
-    gray = normalize_grayscale(
-        corrected_image
+    The return shape remains compatible with the existing
+    scorer/debug code.
+    """
+
+    if corrected_image.ndim == 3:
+        gray = cv2.cvtColor(
+            corrected_image,
+            cv2.COLOR_BGR2GRAY,
+        )
+    else:
+        gray = corrected_image.copy()
+
+    coordinates = generate_bubble_coordinates(
+        template
     )
 
-    coordinates = (
-        generate_bubble_coordinates(
-            template
-        )
+    raw_answers, ml_debug = scan_answers_ml(
+        gray=gray,
+        coordinates=coordinates,
+        crop_radius=int(
+            template.get(
+                "ml_crop_radius",
+                16,
+            )
+        ),
+        filled_confidence=float(
+            template.get(
+                "ml_filled_confidence",
+                0.70,
+            )
+        ),
+        ambiguous_confidence=float(
+            template.get(
+                "ml_ambiguous_confidence",
+                0.60,
+            )
+        ),
     )
 
     answers = {}
 
-    for (
-        question,
-        option_coordinates
-    ) in coordinates.items():
+    for question in coordinates:
 
-        answers[
+        detected = raw_answers.get(
             question
-        ] = detect_question_answer(
-            gray,
-            option_coordinates,
-            template,
         )
+
+        details = ml_debug.get(
+            question,
+            {}
+        )
+
+        status = details.get(
+            "status",
+            "blank",
+        )
+
+        if detected == "MULTIPLE":
+            final_answer = "MULTIPLE"
+
+        elif detected in template["options"]:
+            final_answer = detected
+
+        elif status == "ambiguous":
+            final_answer = "UNCERTAIN"
+
+        else:
+            final_answer = "BLANK"
+
+        answers[question] = {
+            "answer": final_answer,
+            "ml_status": status,
+            "ml": details,
+        }
 
     return answers
 
@@ -2088,6 +2160,8 @@ def process_omr(
 
     if exam_name == "NEET":
 
+        ensure_ml_model_available()
+
         # Scan paper code first
         paper_code = (
             detect_paper_code(
@@ -2109,6 +2183,8 @@ def process_omr(
     # ========================================================
 
     elif exam_name == "KCET":
+
+        ensure_ml_model_available()
 
         # Scan paper code first
         paper_code = (
