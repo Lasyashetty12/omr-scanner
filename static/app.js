@@ -96,7 +96,6 @@ function showError(text) {
     if (!errorBox) {
 
         alert(text);
-
         return;
     }
 
@@ -126,56 +125,39 @@ function hideError() {
 
 function showLoading() {
 
-    if (!loading) {
-        return;
-    }
+    if (loading) {
 
-    loading.classList.remove(
-        "hidden"
-    );
+        loading.classList.remove(
+            "hidden"
+        );
+    }
 }
 
 
 function hideLoading() {
 
-    if (!loading) {
-        return;
-    }
+    if (loading) {
 
-    loading.classList.add(
-        "hidden"
-    );
+        loading.classList.add(
+            "hidden"
+        );
+    }
 }
 
 
 function hideResult() {
 
-    if (!resultSection) {
-        return;
+    if (resultSection) {
+
+        resultSection.classList.add(
+            "hidden"
+        );
     }
-
-    resultSection.classList.add(
-        "hidden"
-    );
-}
-
-
-function setButtonText(
-    button,
-    text
-) {
-
-    if (!button) {
-        return;
-    }
-
-    button.textContent =
-        text;
 }
 
 
 // ============================================================
-// CAMERA SUPPORT CHECK
+// CAMERA SUPPORT
 // ============================================================
 
 function cameraSupported() {
@@ -196,15 +178,10 @@ async function openCamera() {
     hideError();
     hideResult();
 
-    console.log(
-        "Open Camera clicked"
-    );
-
-
     if (!examSelect) {
 
         showError(
-            "Exam selector was not found."
+            "Exam selector not found."
         );
 
         return;
@@ -224,7 +201,7 @@ async function openCamera() {
     if (!cameraSupported()) {
 
         showError(
-            "Camera access is not supported in this browser. Use HTTPS or localhost."
+            "Camera is not supported in this browser. Use HTTPS."
         );
 
         return;
@@ -236,48 +213,35 @@ async function openCamera() {
         stopCamera();
 
 
-        // ====================================================
-        // Prefer rear camera.
-        //
-        // Do NOT request huge 4K frames.
-        // Mobile devices can still provide good quality,
-        // but this reduces browser and Vercel load.
-        // ====================================================
-
-        const constraints = {
-
-            audio: false,
-
-            video: {
-
-                facingMode: {
-                    ideal: "environment"
-                },
-
-                width: {
-                    ideal: 1920
-                },
-
-                height: {
-                    ideal: 1080
-                }
-
-            }
-
-        };
-
-
         cameraStream =
             await navigator.mediaDevices
-                .getUserMedia(
-                    constraints
-                );
+                .getUserMedia({
+
+                    audio: false,
+
+                    video: {
+
+                        facingMode: {
+                            ideal: "environment"
+                        },
+
+                        width: {
+                            ideal: 1920
+                        },
+
+                        height: {
+                            ideal: 1080
+                        }
+
+                    }
+
+                });
 
 
         if (!camera) {
 
             throw new Error(
-                "Camera video element was not found."
+                "Camera video element not found."
             );
         }
 
@@ -285,8 +249,10 @@ async function openCamera() {
         camera.srcObject =
             cameraStream;
 
+
         camera.muted =
             true;
+
 
         camera.setAttribute(
             "playsinline",
@@ -298,7 +264,7 @@ async function openCamera() {
 
 
         console.log(
-            "Camera started:",
+            "Camera resolution:",
             camera.videoWidth,
             "x",
             camera.videoHeight
@@ -366,7 +332,7 @@ async function openCamera() {
 
 
         let errorMessage =
-            "Could not open the camera.";
+            "Could not open camera.";
 
 
         if (
@@ -375,7 +341,7 @@ async function openCamera() {
         ) {
 
             errorMessage =
-                "Camera permission was denied. Allow camera access in your browser settings.";
+                "Camera permission was denied.";
 
         } else if (
             error.name ===
@@ -383,7 +349,7 @@ async function openCamera() {
         ) {
 
             errorMessage =
-                "No camera was found on this device.";
+                "No camera was found.";
 
         } else if (
             error.name ===
@@ -391,15 +357,7 @@ async function openCamera() {
         ) {
 
             errorMessage =
-                "The camera could not be started. Another app may be using it.";
-
-        } else if (
-            error.name ===
-            "OverconstrainedError"
-        ) {
-
-            errorMessage =
-                "The requested camera configuration is not supported by this device.";
+                "Camera is already being used by another app.";
 
         } else if (
             error.name ===
@@ -407,7 +365,7 @@ async function openCamera() {
         ) {
 
             errorMessage =
-                "Camera access was blocked for security reasons. Use the HTTPS site.";
+                "Camera access requires HTTPS.";
 
         } else if (
             error.message
@@ -435,23 +393,14 @@ function captureOMR() {
     hideResult();
 
 
-    if (!camera) {
-
-        showError(
-            "Camera element was not found."
-        );
-
-        return;
-    }
-
-
     if (
+        !camera ||
         !camera.videoWidth ||
         !camera.videoHeight
     ) {
 
         showError(
-            "Camera is not ready yet. Wait a moment and try again."
+            "Camera is not ready yet."
         );
 
         return;
@@ -461,7 +410,7 @@ function captureOMR() {
     if (!canvas) {
 
         showError(
-            "Capture canvas was not found."
+            "Capture canvas not found."
         );
 
         return;
@@ -476,7 +425,7 @@ function captureOMR() {
 
 
     console.log(
-        "Source camera resolution:",
+        "Source frame:",
         sourceWidth,
         "x",
         sourceHeight
@@ -484,26 +433,19 @@ function captureOMR() {
 
 
     // ========================================================
-    // SEND FULL CAMERA FRAME
+    // FULL FRAME CAPTURE
     //
-    // The gold box is ONLY a visual guide.
-    //
-    // Python/OpenCV should detect the corner markers and
-    // perform perspective correction.
-    //
-    // Do not crop according to CSS percentages.
+    // We do NOT crop by the visual guide box.
+    // OpenCV performs actual marker detection and alignment.
     // ========================================================
 
 
     // ========================================================
     // RESIZE FOR VERCEL
-    //
-    // 1400 px wide is enough for OMR while avoiding huge
-    // mobile images.
     // ========================================================
 
     const maxWidth =
-        1400;
+        1100;
 
 
     let outputWidth =
@@ -557,7 +499,7 @@ function captureOMR() {
     if (!context) {
 
         showError(
-            "Could not initialize image capture."
+            "Could not initialize capture canvas."
         );
 
         return;
@@ -596,7 +538,7 @@ function captureOMR() {
             if (!blob) {
 
                 showError(
-                    "Could not capture the OMR image."
+                    "Could not capture OMR image."
                 );
 
                 return;
@@ -616,15 +558,10 @@ function captureOMR() {
 
 
             console.log(
-                "Captured JPEG size:",
-                blob.size,
-                "bytes"
+                "Captured bytes:",
+                blob.size
             );
 
-
-            // =================================================
-            // PREVIEW URL
-            // =================================================
 
             if (previewObjectUrl) {
 
@@ -686,7 +623,7 @@ function captureOMR() {
 
         "image/jpeg",
 
-        0.90
+        0.82
 
     );
 }
@@ -745,12 +682,9 @@ function retakeOMR() {
     }
 
 
-    // If the camera was stopped somehow,
-    // reopen it.
     if (!cameraStream) {
 
         openCamera();
-
         return;
     }
 
@@ -776,15 +710,7 @@ function retakeOMR() {
 // DISPLAY RESULT
 // ============================================================
 
-function displayResult(
-    result
-) {
-
-    console.log(
-        "Displaying result:",
-        result
-    );
-
+function displayResult(result) {
 
     if (resultExam) {
 
@@ -911,10 +837,6 @@ function displayResult(
     }
 
 
-    // ========================================================
-    // MESSAGE
-    // ========================================================
-
     if (message) {
 
         message.textContent =
@@ -922,10 +844,6 @@ function displayResult(
             ?? "";
     }
 
-
-    // ========================================================
-    // SHOW RESULT
-    // ========================================================
 
     if (resultSection) {
 
@@ -936,11 +854,9 @@ function displayResult(
 
         resultSection.scrollIntoView({
 
-            behavior:
-                "smooth",
+            behavior: "smooth",
 
-            block:
-                "start"
+            block: "start"
 
         });
     }
@@ -948,7 +864,7 @@ function displayResult(
 
 
 // ============================================================
-// PARSE API RESPONSE
+// PARSE SERVER RESPONSE
 // ============================================================
 
 async function parseServerResponse(
@@ -958,12 +874,45 @@ async function parseServerResponse(
     const contentType =
         response.headers.get(
             "content-type"
-        )
-        || "";
+        ) || "";
+
+
+    const rawText =
+        await response.text();
+
+
+    console.log(
+        "HTTP status:",
+        response.status
+    );
+
+
+    console.log(
+        "Content-Type:",
+        contentType
+    );
+
+
+    console.log(
+        "Raw response:",
+        rawText
+    );
 
 
     // ========================================================
-    // JSON RESPONSE
+    // EMPTY SERVER RESPONSE
+    // ========================================================
+
+    if (!rawText) {
+
+        throw new Error(
+            `Server returned an empty response. HTTP ${response.status}`
+        );
+    }
+
+
+    // ========================================================
+    // JSON
     // ========================================================
 
     if (
@@ -972,108 +921,89 @@ async function parseServerResponse(
         )
     ) {
 
-        return await response.json();
+        try {
+
+            return JSON.parse(
+                rawText
+            );
+
+        } catch (error) {
+
+            console.error(
+                "JSON parse error:",
+                error
+            );
+
+
+            throw new Error(
+                `Server returned broken JSON. HTTP ${response.status}`
+            );
+        }
     }
 
 
     // ========================================================
-    // NON-JSON RESPONSE
-    //
-    // Vercel may return HTML for:
-    // 500 / 502 / 504 / function crash / timeout
+    // NON JSON
     // ========================================================
 
-    let rawText =
-        "";
-
-
-    try {
-
-        rawText =
-            await response.text();
-
-    } catch (error) {
-
-        console.error(
-            "Could not read server response:",
-            error
-        );
-    }
-
-
     console.error(
-        "NON-JSON SERVER RESPONSE"
-    );
-
-
-    console.error(
-        "HTTP Status:",
-        response.status
-    );
-
-
-    console.error(
-        "Content-Type:",
-        contentType
-    );
-
-
-    console.error(
-        "Body:",
+        "NON-JSON RESPONSE:",
         rawText
     );
-
-
-    let errorMessage =
-        `Server error ${response.status}.`;
 
 
     if (
         response.status === 413
     ) {
 
-        errorMessage =
-            "Captured image is too large for the server.";
+        throw new Error(
+            "Camera image is too large. HTTP 413."
+        );
+    }
 
-    } else if (
+
+    if (
         response.status === 500
     ) {
 
-        errorMessage =
-            "Server error 500. The OMR backend crashed while processing the sheet.";
+        throw new Error(
+            "Backend crashed while processing OMR. HTTP 500."
+        );
+    }
 
-    } else if (
+
+    if (
         response.status === 502
     ) {
 
-        errorMessage =
-            "Server error 502. The OMR processing function failed.";
+        throw new Error(
+            "Vercel function failed. HTTP 502."
+        );
+    }
 
-    } else if (
+
+    if (
         response.status === 504
     ) {
 
-        errorMessage =
-            "Server timeout 504. OMR processing took too long.";
+        throw new Error(
+            "OMR processing timed out. HTTP 504."
+        );
+    }
 
-    } else if (
+
+    if (
         response.status === 404
     ) {
 
-        errorMessage =
-            "Scan API endpoint was not found.";
-
-    } else if (
-        response.status === 405
-    ) {
-
-        errorMessage =
-            "The server does not allow this scan request.";
+        throw new Error(
+            "Scan API endpoint not found. HTTP 404."
+        );
     }
 
 
     throw new Error(
-        errorMessage
+        `Server returned a non-JSON response. HTTP ${response.status}`
     );
 }
 
@@ -1087,10 +1017,6 @@ async function scanOMR() {
     hideError();
     hideResult();
 
-
-    // ========================================================
-    // VALIDATE EXAM
-    // ========================================================
 
     const exam =
         examSelect
@@ -1108,10 +1034,6 @@ async function scanOMR() {
     }
 
 
-    // ========================================================
-    // VALIDATE CAPTURE
-    // ========================================================
-
     if (!capturedBlob) {
 
         showError(
@@ -1125,10 +1047,8 @@ async function scanOMR() {
     // ========================================================
     // FORM DATA
     //
-    // No paper ID.
-    // No answer-key selection.
-    //
-    // Backend detects paper code automatically.
+    // Only exam and image are sent.
+    // Paper code is detected automatically.
     // ========================================================
 
     const formData =
@@ -1148,10 +1068,6 @@ async function scanOMR() {
     );
 
 
-    // ========================================================
-    // UI
-    // ========================================================
-
     showLoading();
 
 
@@ -1160,21 +1076,15 @@ async function scanOMR() {
         scanButton.disabled =
             true;
 
-        setButtonText(
-            scanButton,
-            "Scanning..."
-        );
+        scanButton.textContent =
+            "Scanning...";
     }
 
-
-    // ========================================================
-    // REQUEST
-    // ========================================================
 
     try {
 
         console.log(
-            "Uploading OMR..."
+            "Sending scan request..."
         );
 
 
@@ -1185,7 +1095,7 @@ async function scanOMR() {
 
 
         console.log(
-            "Image bytes:",
+            "Image size:",
             capturedBlob.size
         );
 
@@ -1195,20 +1105,12 @@ async function scanOMR() {
                 "/scan",
                 {
 
-                    method:
-                        "POST",
+                    method: "POST",
 
-                    body:
-                        formData
+                    body: formData
 
                 }
             );
-
-
-        console.log(
-            "HTTP status:",
-            response.status
-        );
 
 
         const result =
@@ -1217,14 +1119,8 @@ async function scanOMR() {
             );
 
 
-        console.log(
-            "Server JSON:",
-            result
-        );
-
-
         // ====================================================
-        // FASTAPI ERROR
+        // FASTAPI JSON ERROR
         // ====================================================
 
         if (!response.ok) {
@@ -1274,6 +1170,12 @@ async function scanOMR() {
         // SUCCESS
         // ====================================================
 
+        console.log(
+            "Scan result:",
+            result
+        );
+
+
         displayResult(
             result
         );
@@ -1307,10 +1209,8 @@ async function scanOMR() {
             scanButton.disabled =
                 false;
 
-            setButtonText(
-                scanButton,
-                "Scan & Evaluate"
-            );
+            scanButton.textContent =
+                "Scan & Evaluate";
         }
     }
 }
@@ -1516,16 +1416,13 @@ document.addEventListener(
 
             examSelect.addEventListener(
                 "change",
-                function () {
-
-                    resetScanner();
-                }
+                resetScanner
             );
 
         } else {
 
             console.error(
-                "exam element not found"
+                "exam selector not found"
             );
         }
 
@@ -1533,13 +1430,12 @@ document.addEventListener(
         console.log(
             "OMR scanner ready"
         );
-
     }
 );
 
 
 // ============================================================
-// CLEANUP
+// PAGE CLEANUP
 // ============================================================
 
 window.addEventListener(
@@ -1555,13 +1451,12 @@ window.addEventListener(
                 previewObjectUrl
             );
         }
-
     }
 );
 
 
 // ============================================================
-// OPTIONAL GLOBAL ACCESS FOR DEBUGGING
+// GLOBAL DEBUG ACCESS
 // ============================================================
 
 window.openCamera =
