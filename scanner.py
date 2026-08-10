@@ -414,13 +414,19 @@ def select_four_markers(
 
     return corners
 
-def detect_corner_markers(image):
+def detect_corner_markers(
+    image,
+    template,
+):
     """
-    Detect the rectangular OMR paper inside a camera image.
+    Detect the actual white OMR sheet.
 
-    Important:
-    - The OMR may occupy only a small portion of the camera frame.
-    - Do NOT silently use the whole camera frame as the sheet.
+    Scores candidate rectangles using:
+    - expected sheet aspect ratio
+    - brightness inside candidate
+    - candidate size
+
+    This avoids selecting a laptop screen / browser / camera frame.
     """
 
     gray = cv2.cvtColor(
@@ -434,17 +440,12 @@ def detect_corner_markers(image):
         0,
     )
 
-    # --------------------------------------------------------
-    # Detect edges
-    # --------------------------------------------------------
-
     edges = cv2.Canny(
         blurred,
         40,
-        140,
+        150,
     )
 
-    # Close small gaps in paper border
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
         (5, 5),
@@ -472,16 +473,26 @@ def detect_corner_markers(image):
         image.shape[:2]
     )
 
-    image_area = (
+    image_area = float(
         image_height
         * image_width
     )
 
-    possible_pages = []
+    expected_width = float(
+        template["sheet_width"]
+    )
 
-    # --------------------------------------------------------
-    # Search largest contours first
-    # --------------------------------------------------------
+    expected_height = float(
+        template["sheet_height"]
+    )
+
+    expected_ratio = (
+        expected_width
+        / expected_height
+    )
+
+    best_candidate = None
+    best_score = -1.0
 
     contours = sorted(
         contours,
@@ -489,19 +500,25 @@ def detect_corner_markers(image):
         reverse=True,
     )
 
-    for contour in contours[:100]:
+    for contour in contours[:150]:
 
-        area = cv2.contourArea(
-            contour
+        area = float(
+            cv2.contourArea(
+                contour
+            )
         )
 
-        # Camera image may contain lots of background.
-        # 8% is enough to consider a candidate sheet.
-        if area < image_area * 0.08:
+        area_ratio = (
+            area
+            / image_area
+        )
+
+        # Sheet can be relatively small in mobile photo.
+        if area_ratio < 0.06:
             continue
 
-        # Avoid considering virtually the entire camera frame.
-        if area > image_area * 0.95:
+        # Never accept almost entire camera frame.
+        if area_ratio > 0.90:
             continue
 
         perimeter = cv2.arcLength(
@@ -512,8 +529,8 @@ def detect_corner_markers(image):
         if perimeter <= 0:
             continue
 
-        # Try several approximation tolerances.
         for epsilon_factor in (
+            0.01,
             0.015,
             0.02,
             0.025,
@@ -522,18 +539,18 @@ def detect_corner_markers(image):
 
             approx = cv2.approxPolyDP(
                 contour,
-                epsilon_factor * perimeter,
+                epsilon_factor
+                * perimeter,
                 True,
             )
 
             if len(approx) != 4:
                 continue
 
-            points = approx.reshape(
-                4,
-                2,
-            ).astype(
-                "float32"
+            points = (
+                approx
+                .reshape(4, 2)
+                .astype("float32")
             )
 
             ordered = order_points(
@@ -542,20 +559,28 @@ def detect_corner_markers(image):
 
             tl, tr, br, bl = ordered
 
-            top_width = np.linalg.norm(
-                tr - tl
+            top_width = float(
+                np.linalg.norm(
+                    tr - tl
+                )
             )
 
-            bottom_width = np.linalg.norm(
-                br - bl
+            bottom_width = float(
+                np.linalg.norm(
+                    br - bl
+                )
             )
 
-            left_height = np.linalg.norm(
-                bl - tl
+            left_height = float(
+                np.linalg.norm(
+                    bl - tl
+                )
             )
 
-            right_height = np.linalg.norm(
-                br - tr
+            right_height = float(
+                np.linalg.norm(
+                    br - tr
+                )
             )
 
             average_width = (
@@ -574,53 +599,118 @@ def detect_corner_markers(image):
             ):
                 continue
 
-            aspect_ratio = (
+            ratio = (
                 average_width
                 / average_height
             )
 
-            # Your canonical sheet is 1600 x 2200,
-            # ratio ~0.727.
+            # Reject obviously wrong shapes.
             if not (
-                0.55
-                <= aspect_ratio
-                <= 0.90
+                expected_ratio * 0.70
+                <= ratio
+                <= expected_ratio * 1.30
             ):
                 continue
 
-            possible_pages.append(
-                (
-                    area,
-                    ordered,
+            # ---------------------------------------------
+            # Measure brightness inside rectangle.
+            # White OMR sheet should be much brighter than
+            # laptop/background.
+            # ---------------------------------------------
+
+            mask = np.zeros(
+                gray.shape,
+                dtype=np.uint8,
+            )
+
+            polygon = (
+                ordered
+                .astype(np.int32)
+                .reshape((-1, 1, 2))
+            )
+
+            cv2.fillConvexPoly(
+                mask,
+                polygon,
+                255,
+            )
+
+            pixels = gray[
+                mask > 0
+            ]
+
+            if pixels.size == 0:
+                continue
+
+            mean_brightness = float(
+                np.mean(
+                    pixels
                 )
             )
 
+            white_fraction = float(
+                np.mean(
+                    pixels > 150
+                )
+            )
+
+            # ---------------------------------------------
+            # Aspect-ratio score
+            # ---------------------------------------------
+
+            ratio_error = abs(
+                ratio
+                - expected_ratio
+            )
+
+            ratio_score = max(
+                0.0,
+                1.0
+                - (
+                    ratio_error
+                    / expected_ratio
+                ),
+            )
+
+            brightness_score = (
+                mean_brightness
+                / 255.0
+            )
+
+            # Prefer reasonably sized sheet, but DON'T simply
+            # select the largest rectangle.
+            size_score = min(
+                area_ratio / 0.40,
+                1.0,
+            )
+
+            score = (
+                ratio_score * 4.0
+                +
+                white_fraction * 4.0
+                +
+                brightness_score * 2.0
+                +
+                size_score
+            )
+
+            if score > best_score:
+
+                best_score = score
+
+                best_candidate = (
+                    ordered
+                )
+
             break
 
-    # --------------------------------------------------------
-    # Use biggest valid paper-shaped rectangle
-    # --------------------------------------------------------
-
-    if possible_pages:
-
-        possible_pages.sort(
-            key=lambda item:
-            item[0],
-            reverse=True,
+    if best_candidate is None:
+        raise ValueError(
+            "Could not locate the white OMR sheet. "
+            "Keep all four paper corners visible and move closer."
         )
 
-        return possible_pages[0][1]
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    # Never use entire camera frame as fallback.
-    # Wrong perspective is worse than rejecting the image.
-    # --------------------------------------------------------
-
-    raise ValueError(
-        "Could not locate the OMR sheet. "
-        "Move closer and keep the entire white OMR paper visible."
-    )
+    return best_candidate
 # ============================================================
 # PERSPECTIVE CORRECTION
 # ============================================================
@@ -2231,10 +2321,11 @@ def process_omr(
     # --------------------------------
 
     corners = (
-        detect_corner_markers(
-            image
-        )
+    detect_corner_markers(
+        image,
+        template,
     )
+)
 
     # --------------------------------
     # Correct orientation / perspective
