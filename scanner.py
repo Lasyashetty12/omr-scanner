@@ -1302,13 +1302,23 @@ def detect_paper_code(
         )
 
         if (
-            confidence_gap
-            < confidence_gap_required
-        ):
-            raise ValueError(
-                "Question paper code is ambiguous "
-                f"at position {position_index}."
-            )
+            confidence_gap < confidence_gap_required
+):
+            readable_scores = ", ".join(
+            f"{key}={value:.4f}"
+            for key, value
+            in scores.items()
+        )
+
+        raise ValueError(
+            "Question paper code is ambiguous "
+            f"at position {position_index}. "
+            f"Best={best_value} "
+            f"score={best_score:.4f}, "
+            f"second={second_score:.4f}, "
+            f"gap={confidence_gap:.4f}. "
+            f"Scores: {readable_scores}"
+    )
 
         detected_characters.append(
             best_value
