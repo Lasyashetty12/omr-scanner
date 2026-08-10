@@ -416,33 +416,51 @@ def select_four_markers(
 
 def detect_corner_markers(image):
     """
-    Detect the outer OMR sheet instead of assuming
-    four identical square registration markers.
+    Detect the rectangular OMR paper inside a camera image.
 
-    Works better for NEET/KCET Manchester sheets.
+    Important:
+    - The OMR may occupy only a small portion of the camera frame.
+    - Do NOT silently use the whole camera frame as the sheet.
     """
 
     gray = cv2.cvtColor(
         image,
-        cv2.COLOR_BGR2GRAY
+        cv2.COLOR_BGR2GRAY,
     )
 
     blurred = cv2.GaussianBlur(
         gray,
         (5, 5),
-        0
+        0,
     )
+
+    # --------------------------------------------------------
+    # Detect edges
+    # --------------------------------------------------------
 
     edges = cv2.Canny(
         blurred,
-        50,
-        150
+        40,
+        140,
+    )
+
+    # Close small gaps in paper border
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (5, 5),
+    )
+
+    edges = cv2.morphologyEx(
+        edges,
+        cv2.MORPH_CLOSE,
+        kernel,
+        iterations=2,
     )
 
     contours, _ = cv2.findContours(
         edges,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE,
     )
 
     if not contours:
@@ -450,69 +468,159 @@ def detect_corner_markers(image):
             "Could not detect OMR sheet."
         )
 
-    contours = sorted(
-        contours,
-        key=cv2.contourArea,
-        reverse=True
+    image_height, image_width = (
+        image.shape[:2]
     )
 
     image_area = (
-        image.shape[0]
-        * image.shape[1]
+        image_height
+        * image_width
     )
 
-    for contour in contours[:20]:
+    possible_pages = []
+
+    # --------------------------------------------------------
+    # Search largest contours first
+    # --------------------------------------------------------
+
+    contours = sorted(
+        contours,
+        key=cv2.contourArea,
+        reverse=True,
+    )
+
+    for contour in contours[:100]:
 
         area = cv2.contourArea(
             contour
         )
 
-        if area < image_area * 0.40:
+        # Camera image may contain lots of background.
+        # 8% is enough to consider a candidate sheet.
+        if area < image_area * 0.08:
+            continue
+
+        # Avoid considering virtually the entire camera frame.
+        if area > image_area * 0.95:
             continue
 
         perimeter = cv2.arcLength(
             contour,
-            True
+            True,
         )
 
-        approx = cv2.approxPolyDP(
-            contour,
-            0.02 * perimeter,
-            True
-        )
+        if perimeter <= 0:
+            continue
 
-        if len(approx) == 4:
+        # Try several approximation tolerances.
+        for epsilon_factor in (
+            0.015,
+            0.02,
+            0.025,
+            0.03,
+        ):
 
-            corners = approx.reshape(
+            approx = cv2.approxPolyDP(
+                contour,
+                epsilon_factor * perimeter,
+                True,
+            )
+
+            if len(approx) != 4:
+                continue
+
+            points = approx.reshape(
                 4,
-                2
+                2,
             ).astype(
                 "float32"
             )
 
-            return corners
+            ordered = order_points(
+                points
+            )
+
+            tl, tr, br, bl = ordered
+
+            top_width = np.linalg.norm(
+                tr - tl
+            )
+
+            bottom_width = np.linalg.norm(
+                br - bl
+            )
+
+            left_height = np.linalg.norm(
+                bl - tl
+            )
+
+            right_height = np.linalg.norm(
+                br - tr
+            )
+
+            average_width = (
+                top_width
+                + bottom_width
+            ) / 2.0
+
+            average_height = (
+                left_height
+                + right_height
+            ) / 2.0
+
+            if (
+                average_width <= 0
+                or average_height <= 0
+            ):
+                continue
+
+            aspect_ratio = (
+                average_width
+                / average_height
+            )
+
+            # Your canonical sheet is 1600 x 2200,
+            # ratio ~0.727.
+            if not (
+                0.55
+                <= aspect_ratio
+                <= 0.90
+            ):
+                continue
+
+            possible_pages.append(
+                (
+                    area,
+                    ordered,
+                )
+            )
+
+            break
 
     # --------------------------------------------------------
-    # Fallback:
-    # Use image corners when scan is already cropped/aligned.
-    # This is useful for PNG/PDF-rendered test sheets.
+    # Use biggest valid paper-shaped rectangle
     # --------------------------------------------------------
 
-    height, width = (
-        image.shape[:2]
+    if possible_pages:
+
+        possible_pages.sort(
+            key=lambda item:
+            item[0],
+            reverse=True,
+        )
+
+        return possible_pages[0][1]
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Never use entire camera frame as fallback.
+    # Wrong perspective is worse than rejecting the image.
+    # --------------------------------------------------------
+
+    raise ValueError(
+        "Could not locate the OMR sheet. "
+        "Move closer and keep the entire white OMR paper visible."
     )
-
-    return np.array(
-        [
-            [0, 0],
-            [width - 1, 0],
-            [width - 1, height - 1],
-            [0, height - 1],
-        ],
-        dtype="float32"
-    )
-
-
 # ============================================================
 # PERSPECTIVE CORRECTION
 # ============================================================
