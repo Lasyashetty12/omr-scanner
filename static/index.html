@@ -40,7 +40,6 @@
 
         </div>
 
-
         <div class="online">
             ● SCANNER ONLINE
         </div>
@@ -107,38 +106,53 @@
 
 
             <!-- ================================================== -->
-            <!-- CAMERA -->
+            <!-- SCAN OPTIONS -->
             <!-- ================================================== -->
 
             <div class="scanner-card">
+
+
+                <!-- CAMERA BUTTON -->
 
                 <button id="openCameraButton" type="button">
                     Open Camera
                 </button>
 
 
-                <!-- CAMERA PREVIEW -->
+                <div class="or-text">
+                    OR
+                </div>
+
+
+                <!-- UPLOAD BUTTON -->
+
+                <label for="imageUpload" class="upload-button">
+                    Upload OMR Image
+                </label>
+
+                <input id="imageUpload" type="file" accept="image/jpeg,image/png" hidden>
+
+
+                <!-- ================================================== -->
+                <!-- CAMERA -->
+                <!-- ================================================== -->
 
                 <div id="cameraContainer" class="camera-container hidden">
 
                     <video id="camera" autoplay playsinline muted></video>
 
 
-                    <!-- OMR GUIDE BOX -->
+                    <!-- OMR GUIDE -->
 
                     <div class="omr-detection-box">
 
                         <span class="corner tl"></span>
-
                         <span class="corner tr"></span>
-
                         <span class="corner bl"></span>
-
                         <span class="corner br"></span>
 
-
                         <div class="scan-label">
-                            OMR SHEET
+                            PLACE FULL OMR INSIDE
                         </div>
 
                     </div>
@@ -146,17 +160,23 @@
                 </div>
 
 
-                <!-- Hidden canvas used for capture -->
+                <!-- ================================================== -->
+                <!-- CAPTURE CANVAS -->
+                <!-- ================================================== -->
 
                 <canvas id="captureCanvas" class="hidden"></canvas>
 
 
-                <!-- Captured image preview -->
+                <!-- ================================================== -->
+                <!-- IMAGE PREVIEW -->
+                <!-- ================================================== -->
 
-                <img id="capturedPreview" class="captured-preview hidden" alt="Captured OMR">
+                <img id="capturedPreview" class="captured-preview hidden" alt="OMR Preview">
 
 
-                <!-- CAMERA CONTROLS -->
+                <!-- ================================================== -->
+                <!-- CONTROLS -->
+                <!-- ================================================== -->
 
                 <button id="captureButton" type="button" class="hidden">
                     Capture OMR
@@ -164,7 +184,7 @@
 
 
                 <button id="retakeButton" type="button" class="hidden">
-                    Retake
+                    Retake / Choose Another
                 </button>
 
 
@@ -175,14 +195,18 @@
             </div>
 
 
+            <!-- ================================================== -->
             <!-- LOADING -->
+            <!-- ================================================== -->
 
             <div id="loading" class="hidden">
                 Processing OMR...
             </div>
 
 
+            <!-- ================================================== -->
             <!-- ERROR -->
+            <!-- ================================================== -->
 
             <div id="error" class="error hidden"></div>
 

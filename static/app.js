@@ -1,6 +1,6 @@
 // static/app.js
 
-console.log("OMR camera scanner loaded");
+console.log("OMR scanner frontend loaded");
 
 
 // ============================================================
@@ -8,7 +8,9 @@ console.log("OMR camera scanner loaded");
 // ============================================================
 
 let cameraStream = null;
+
 let capturedBlob = null;
+
 let previewObjectUrl = null;
 
 
@@ -17,40 +19,69 @@ let previewObjectUrl = null;
 // ============================================================
 
 const examSelect =
-    document.getElementById("exam");
+    document.getElementById(
+        "exam"
+    );
 
 const openCameraButton =
-    document.getElementById("openCameraButton");
+    document.getElementById(
+        "openCameraButton"
+    );
+
+const imageUpload =
+    document.getElementById(
+        "imageUpload"
+    );
 
 const cameraContainer =
-    document.getElementById("cameraContainer");
+    document.getElementById(
+        "cameraContainer"
+    );
 
 const camera =
-    document.getElementById("camera");
-
-const captureButton =
-    document.getElementById("captureButton");
-
-const retakeButton =
-    document.getElementById("retakeButton");
-
-const scanButton =
-    document.getElementById("scanButton");
+    document.getElementById(
+        "camera"
+    );
 
 const canvas =
-    document.getElementById("captureCanvas");
+    document.getElementById(
+        "captureCanvas"
+    );
 
 const preview =
-    document.getElementById("capturedPreview");
+    document.getElementById(
+        "capturedPreview"
+    );
+
+const captureButton =
+    document.getElementById(
+        "captureButton"
+    );
+
+const retakeButton =
+    document.getElementById(
+        "retakeButton"
+    );
+
+const scanButton =
+    document.getElementById(
+        "scanButton"
+    );
 
 const loading =
-    document.getElementById("loading");
+    document.getElementById(
+        "loading"
+    );
 
 const errorBox =
-    document.getElementById("error");
+    document.getElementById(
+        "error"
+    );
 
 const resultSection =
-    document.getElementById("resultSection");
+    document.getElementById(
+        "resultSection"
+    );
 
 
 // ============================================================
@@ -58,49 +89,77 @@ const resultSection =
 // ============================================================
 
 const resultExam =
-    document.getElementById("resultExam");
+    document.getElementById(
+        "resultExam"
+    );
 
 const paperCode =
-    document.getElementById("paperCode");
+    document.getElementById(
+        "paperCode"
+    );
 
 const score =
-    document.getElementById("score");
+    document.getElementById(
+        "score"
+    );
 
 const correct =
-    document.getElementById("correct");
+    document.getElementById(
+        "correct"
+    );
 
 const wrong =
-    document.getElementById("wrong");
+    document.getElementById(
+        "wrong"
+    );
 
 const blank =
-    document.getElementById("blank");
+    document.getElementById(
+        "blank"
+    );
 
 const multiple =
-    document.getElementById("multiple");
+    document.getElementById(
+        "multiple"
+    );
 
 const quality =
-    document.getElementById("quality");
+    document.getElementById(
+        "quality"
+    );
 
 const message =
-    document.getElementById("message");
+    document.getElementById(
+        "message"
+    );
 
 
 // ============================================================
 // UI HELPERS
 // ============================================================
 
-function showError(text) {
+function showError(
+    text
+) {
 
-    console.error(text);
+    console.error(
+        text
+    );
+
 
     if (!errorBox) {
 
-        alert(text);
+        alert(
+            text
+        );
+
         return;
     }
 
+
     errorBox.textContent =
         text;
+
 
     errorBox.classList.remove(
         "hidden"
@@ -114,8 +173,10 @@ function hideError() {
         return;
     }
 
+
     errorBox.textContent =
         "";
+
 
     errorBox.classList.add(
         "hidden"
@@ -157,14 +218,38 @@ function hideResult() {
 
 
 // ============================================================
+// PREVIEW CLEANUP
+// ============================================================
+
+function clearPreviewUrl() {
+
+    if (previewObjectUrl) {
+
+        URL.revokeObjectURL(
+            previewObjectUrl
+        );
+
+        previewObjectUrl =
+            null;
+    }
+}
+
+
+// ============================================================
 // CAMERA SUPPORT
 // ============================================================
 
 function cameraSupported() {
 
     return Boolean(
-        navigator.mediaDevices &&
-        navigator.mediaDevices.getUserMedia
+
+        navigator.mediaDevices
+
+        &&
+
+        navigator.mediaDevices
+            .getUserMedia
+
     );
 }
 
@@ -176,19 +261,14 @@ function cameraSupported() {
 async function openCamera() {
 
     hideError();
+
     hideResult();
 
-    if (!examSelect) {
 
-        showError(
-            "Exam selector not found."
-        );
-
-        return;
-    }
-
-
-    if (!examSelect.value) {
+    if (
+        !examSelect ||
+        !examSelect.value
+    ) {
 
         showError(
             "Please select an exam first."
@@ -201,7 +281,7 @@ async function openCamera() {
     if (!cameraSupported()) {
 
         showError(
-            "Camera is not supported in this browser. Use HTTPS."
+            "Camera is not supported. Use HTTPS or localhost."
         );
 
         return;
@@ -217,20 +297,24 @@ async function openCamera() {
             await navigator.mediaDevices
                 .getUserMedia({
 
-                    audio: false,
+                    audio:
+                        false,
 
                     video: {
 
                         facingMode: {
-                            ideal: "environment"
+                            ideal:
+                                "environment"
                         },
 
                         width: {
-                            ideal: 1920
+                            ideal:
+                                1920
                         },
 
                         height: {
-                            ideal: 1080
+                            ideal:
+                                1080
                         }
 
                     }
@@ -241,7 +325,7 @@ async function openCamera() {
         if (!camera) {
 
             throw new Error(
-                "Camera video element not found."
+                "Camera element was not found."
             );
         }
 
@@ -269,6 +353,21 @@ async function openCamera() {
             "x",
             camera.videoHeight
         );
+
+
+        capturedBlob =
+            null;
+
+
+        clearPreviewUrl();
+
+
+        if (preview) {
+
+            preview.classList.add(
+                "hidden"
+            );
+        }
 
 
         if (cameraContainer) {
@@ -311,18 +410,6 @@ async function openCamera() {
         }
 
 
-        if (preview) {
-
-            preview.classList.add(
-                "hidden"
-            );
-        }
-
-
-        capturedBlob =
-            null;
-
-
     } catch (error) {
 
         console.error(
@@ -331,7 +418,7 @@ async function openCamera() {
         );
 
 
-        let errorMessage =
+        let text =
             "Could not open camera.";
 
 
@@ -340,108 +427,74 @@ async function openCamera() {
             "NotAllowedError"
         ) {
 
-            errorMessage =
-                "Camera permission was denied.";
+            text =
+                "Camera permission was denied. Allow camera permission in your browser.";
 
         } else if (
             error.name ===
             "NotFoundError"
         ) {
 
-            errorMessage =
-                "No camera was found.";
+            text =
+                "No camera was found on this device.";
 
         } else if (
             error.name ===
             "NotReadableError"
         ) {
 
-            errorMessage =
-                "Camera is already being used by another app.";
+            text =
+                "Camera is currently being used by another app.";
 
         } else if (
             error.name ===
             "SecurityError"
         ) {
 
-            errorMessage =
+            text =
                 "Camera access requires HTTPS.";
 
         } else if (
             error.message
         ) {
 
-            errorMessage =
+            text =
                 error.message;
         }
 
 
         showError(
-            errorMessage
+            text
         );
     }
 }
 
 
 // ============================================================
-// CAPTURE OMR
+// PREPARE IMAGE BLOB
 // ============================================================
 
-function captureOMR() {
-
-    hideError();
-    hideResult();
-
-
-    if (
-        !camera ||
-        !camera.videoWidth ||
-        !camera.videoHeight
-    ) {
-
-        showError(
-            "Camera is not ready yet."
-        );
-
-        return;
-    }
-
+function prepareImageFromSource(
+    source,
+    sourceWidth,
+    sourceHeight,
+    callback
+) {
 
     if (!canvas) {
 
         showError(
-            "Capture canvas not found."
+            "Capture canvas was not found."
         );
 
         return;
     }
 
 
-    const sourceWidth =
-        camera.videoWidth;
-
-    const sourceHeight =
-        camera.videoHeight;
-
-
-    console.log(
-        "Source frame:",
-        sourceWidth,
-        "x",
-        sourceHeight
-    );
-
-
     // ========================================================
-    // FULL FRAME CAPTURE
+    // MAX WIDTH
     //
-    // We do NOT crop by the visual guide box.
-    // OpenCV performs actual marker detection and alignment.
-    // ========================================================
-
-
-    // ========================================================
-    // RESIZE FOR VERCEL
+    // Keeps Vercel request reasonably small.
     // ========================================================
 
     const maxWidth =
@@ -483,6 +536,7 @@ function captureOMR() {
     canvas.width =
         outputWidth;
 
+
     canvas.height =
         outputHeight;
 
@@ -491,7 +545,8 @@ function captureOMR() {
         canvas.getContext(
             "2d",
             {
-                alpha: false
+                alpha:
+                    false
             }
         );
 
@@ -499,7 +554,7 @@ function captureOMR() {
     if (!context) {
 
         showError(
-            "Could not initialize capture canvas."
+            "Could not initialize image processor."
         );
 
         return;
@@ -516,7 +571,7 @@ function captureOMR() {
 
     context.drawImage(
 
-        camera,
+        source,
 
         0,
         0,
@@ -533,91 +588,25 @@ function captureOMR() {
 
     canvas.toBlob(
 
-        function (blob) {
+        function (
+            blob
+        ) {
 
             if (!blob) {
 
                 showError(
-                    "Could not capture OMR image."
+                    "Could not prepare OMR image."
                 );
 
                 return;
             }
 
 
-            capturedBlob =
-                blob;
-
-
-            console.log(
-                "Captured image:",
+            callback(
+                blob,
                 outputWidth,
-                "x",
                 outputHeight
             );
-
-
-            console.log(
-                "Captured bytes:",
-                blob.size
-            );
-
-
-            if (previewObjectUrl) {
-
-                URL.revokeObjectURL(
-                    previewObjectUrl
-                );
-            }
-
-
-            previewObjectUrl =
-                URL.createObjectURL(
-                    blob
-                );
-
-
-            if (preview) {
-
-                preview.src =
-                    previewObjectUrl;
-
-                preview.classList.remove(
-                    "hidden"
-                );
-            }
-
-
-            if (cameraContainer) {
-
-                cameraContainer.classList.add(
-                    "hidden"
-                );
-            }
-
-
-            if (captureButton) {
-
-                captureButton.classList.add(
-                    "hidden"
-                );
-            }
-
-
-            if (retakeButton) {
-
-                retakeButton.classList.remove(
-                    "hidden"
-                );
-            }
-
-
-            if (scanButton) {
-
-                scanButton.classList.remove(
-                    "hidden"
-                );
-            }
 
         },
 
@@ -630,12 +619,323 @@ function captureOMR() {
 
 
 // ============================================================
-// RETAKE
+// SET CAPTURED IMAGE
+// ============================================================
+
+function setCapturedImage(
+    blob,
+    width,
+    height
+) {
+
+    capturedBlob =
+        blob;
+
+
+    clearPreviewUrl();
+
+
+    previewObjectUrl =
+        URL.createObjectURL(
+            blob
+        );
+
+
+    console.log(
+        "Prepared OMR image:",
+        width,
+        "x",
+        height
+    );
+
+
+    console.log(
+        "Image bytes:",
+        blob.size
+    );
+
+
+    if (preview) {
+
+        preview.src =
+            previewObjectUrl;
+
+
+        preview.classList.remove(
+            "hidden"
+        );
+    }
+
+
+    if (cameraContainer) {
+
+        cameraContainer.classList.add(
+            "hidden"
+        );
+    }
+
+
+    if (captureButton) {
+
+        captureButton.classList.add(
+            "hidden"
+        );
+    }
+
+
+    if (retakeButton) {
+
+        retakeButton.classList.remove(
+            "hidden"
+        );
+    }
+
+
+    if (scanButton) {
+
+        scanButton.classList.remove(
+            "hidden"
+        );
+    }
+}
+
+
+// ============================================================
+// CAPTURE CAMERA IMAGE
+// ============================================================
+
+function captureOMR() {
+
+    hideError();
+
+    hideResult();
+
+
+    if (
+        !camera ||
+        !camera.videoWidth ||
+        !camera.videoHeight
+    ) {
+
+        showError(
+            "Camera is not ready yet."
+        );
+
+        return;
+    }
+
+
+    const sourceWidth =
+        camera.videoWidth;
+
+
+    const sourceHeight =
+        camera.videoHeight;
+
+
+    console.log(
+        "Capturing camera frame:",
+        sourceWidth,
+        "x",
+        sourceHeight
+    );
+
+
+    // IMPORTANT:
+    // Capture the whole camera frame.
+    // The guide box is visual only.
+    // OpenCV performs alignment.
+
+    prepareImageFromSource(
+
+        camera,
+
+        sourceWidth,
+
+        sourceHeight,
+
+        function (
+            blob,
+            width,
+            height
+        ) {
+
+            setCapturedImage(
+                blob,
+                width,
+                height
+            );
+        }
+
+    );
+}
+
+
+// ============================================================
+// UPLOAD IMAGE
+// ============================================================
+
+function handleImageUpload(
+    event
+) {
+
+    hideError();
+
+    hideResult();
+
+
+    if (
+        !examSelect ||
+        !examSelect.value
+    ) {
+
+        showError(
+            "Please select an exam first."
+        );
+
+
+        event.target.value =
+            "";
+
+
+        return;
+    }
+
+
+    const file =
+        event.target.files
+            ? event.target.files[0]
+            : null;
+
+
+    if (!file) {
+
+        return;
+    }
+
+
+    const allowedTypes = [
+
+        "image/jpeg",
+
+        "image/png"
+
+    ];
+
+
+    if (
+        !allowedTypes.includes(
+            file.type
+        )
+    ) {
+
+        showError(
+            "Only JPG, JPEG and PNG images are supported."
+        );
+
+
+        event.target.value =
+            "";
+
+
+        return;
+    }
+
+
+    console.log(
+        "Selected file:",
+        file.name
+    );
+
+
+    console.log(
+        "Original upload bytes:",
+        file.size
+    );
+
+
+    const img =
+        new Image();
+
+
+    const inputObjectUrl =
+        URL.createObjectURL(
+            file
+        );
+
+
+    img.onload =
+        function () {
+
+
+            console.log(
+                "Uploaded image resolution:",
+                img.naturalWidth,
+                "x",
+                img.naturalHeight
+            );
+
+
+            prepareImageFromSource(
+
+                img,
+
+                img.naturalWidth,
+
+                img.naturalHeight,
+
+                function (
+                    blob,
+                    width,
+                    height
+                ) {
+
+                    URL.revokeObjectURL(
+                        inputObjectUrl
+                    );
+
+
+                    stopCamera();
+
+
+                    setCapturedImage(
+                        blob,
+                        width,
+                        height
+                    );
+                }
+
+            );
+        };
+
+
+    img.onerror =
+        function () {
+
+            URL.revokeObjectURL(
+                inputObjectUrl
+            );
+
+
+            showError(
+                "Could not read the uploaded image."
+            );
+        };
+
+
+    img.src =
+        inputObjectUrl;
+}
+
+
+// ============================================================
+// RETAKE / RESET IMAGE
 // ============================================================
 
 function retakeOMR() {
 
     hideError();
+
     hideResult();
 
 
@@ -643,15 +943,7 @@ function retakeOMR() {
         null;
 
 
-    if (previewObjectUrl) {
-
-        URL.revokeObjectURL(
-            previewObjectUrl
-        );
-
-        previewObjectUrl =
-            null;
-    }
+    clearPreviewUrl();
 
 
     if (preview) {
@@ -659,6 +951,7 @@ function retakeOMR() {
         preview.removeAttribute(
             "src"
         );
+
 
         preview.classList.add(
             "hidden"
@@ -682,26 +975,45 @@ function retakeOMR() {
     }
 
 
-    if (!cameraStream) {
+    if (openCameraButton) {
 
-        openCamera();
-        return;
-    }
-
-
-    if (cameraContainer) {
-
-        cameraContainer.classList.remove(
+        openCameraButton.classList.remove(
             "hidden"
         );
     }
 
 
-    if (captureButton) {
+    if (imageUpload) {
 
-        captureButton.classList.remove(
-            "hidden"
-        );
+        imageUpload.value =
+            "";
+    }
+
+
+    if (cameraStream) {
+
+        if (cameraContainer) {
+
+            cameraContainer.classList.remove(
+                "hidden"
+            );
+        }
+
+
+        if (captureButton) {
+
+            captureButton.classList.remove(
+                "hidden"
+            );
+        }
+
+
+        if (openCameraButton) {
+
+            openCameraButton.classList.add(
+                "hidden"
+            );
+        }
     }
 }
 
@@ -710,7 +1022,15 @@ function retakeOMR() {
 // DISPLAY RESULT
 // ============================================================
 
-function displayResult(result) {
+function displayResult(
+    result
+) {
+
+    console.log(
+        "Displaying result:",
+        result
+    );
+
 
     if (resultExam) {
 
@@ -723,10 +1043,15 @@ function displayResult(result) {
     if (paperCode) {
 
         paperCode.textContent =
+
             result.paper_code
+
             ??
+
             result.series
+
             ??
+
             "-";
     }
 
@@ -784,21 +1109,51 @@ function displayResult(result) {
         if (q) {
 
             const blurValue =
-                typeof q.blur === "number"
-                    ? q.blur.toFixed(2)
-                    : q.blur ?? "-";
+
+                typeof q.blur ===
+                    "number"
+
+                    ?
+
+                    q.blur.toFixed(
+                        2
+                    )
+
+                    :
+
+                    q.blur ?? "-";
 
 
             const brightnessValue =
-                typeof q.brightness === "number"
-                    ? q.brightness.toFixed(2)
-                    : q.brightness ?? "-";
+
+                typeof q.brightness ===
+                    "number"
+
+                    ?
+
+                    q.brightness.toFixed(
+                        2
+                    )
+
+                    :
+
+                    q.brightness ?? "-";
 
 
             const contrastValue =
-                typeof q.contrast === "number"
-                    ? q.contrast.toFixed(2)
-                    : q.contrast ?? "-";
+
+                typeof q.contrast ===
+                    "number"
+
+                    ?
+
+                    q.contrast.toFixed(
+                        2
+                    )
+
+                    :
+
+                    q.contrast ?? "-";
 
 
             quality.innerHTML = `
@@ -827,6 +1182,7 @@ function displayResult(result) {
                         ${contrastValue}
                     </strong>
                 </p>
+
             `;
 
         } else {
@@ -854,9 +1210,11 @@ function displayResult(result) {
 
         resultSection.scrollIntoView({
 
-            behavior: "smooth",
+            behavior:
+                "smooth",
 
-            block: "start"
+            block:
+                "start"
 
         });
     }
@@ -864,7 +1222,7 @@ function displayResult(result) {
 
 
 // ============================================================
-// PARSE SERVER RESPONSE
+// SERVER RESPONSE PARSER
 // ============================================================
 
 async function parseServerResponse(
@@ -874,7 +1232,8 @@ async function parseServerResponse(
     const contentType =
         response.headers.get(
             "content-type"
-        ) || "";
+        )
+        || "";
 
 
     const rawText =
@@ -888,7 +1247,7 @@ async function parseServerResponse(
 
 
     console.log(
-        "Content-Type:",
+        "Response content-type:",
         contentType
     );
 
@@ -899,10 +1258,6 @@ async function parseServerResponse(
     );
 
 
-    // ========================================================
-    // EMPTY SERVER RESPONSE
-    // ========================================================
-
     if (!rawText) {
 
         throw new Error(
@@ -912,7 +1267,7 @@ async function parseServerResponse(
 
 
     // ========================================================
-    // JSON
+    // JSON RESPONSE
     // ========================================================
 
     if (
@@ -930,20 +1285,20 @@ async function parseServerResponse(
         } catch (error) {
 
             console.error(
-                "JSON parse error:",
+                "JSON parsing error:",
                 error
             );
 
 
             throw new Error(
-                `Server returned broken JSON. HTTP ${response.status}`
+                `Server returned invalid JSON. HTTP ${response.status}`
             );
         }
     }
 
 
     // ========================================================
-    // NON JSON
+    // NON-JSON RESPONSE
     // ========================================================
 
     console.error(
@@ -953,17 +1308,19 @@ async function parseServerResponse(
 
 
     if (
-        response.status === 413
+        response.status ===
+        413
     ) {
 
         throw new Error(
-            "Camera image is too large. HTTP 413."
+            "OMR image is too large for the server. HTTP 413."
         );
     }
 
 
     if (
-        response.status === 500
+        response.status ===
+        500
     ) {
 
         throw new Error(
@@ -973,17 +1330,19 @@ async function parseServerResponse(
 
 
     if (
-        response.status === 502
+        response.status ===
+        502
     ) {
 
         throw new Error(
-            "Vercel function failed. HTTP 502."
+            "Vercel backend function failed. HTTP 502."
         );
     }
 
 
     if (
-        response.status === 504
+        response.status ===
+        504
     ) {
 
         throw new Error(
@@ -993,17 +1352,18 @@ async function parseServerResponse(
 
 
     if (
-        response.status === 404
+        response.status ===
+        404
     ) {
 
         throw new Error(
-            "Scan API endpoint not found. HTTP 404."
+            "Scan API endpoint was not found. HTTP 404."
         );
     }
 
 
     throw new Error(
-        `Server returned a non-JSON response. HTTP ${response.status}`
+        `Server returned a non-JSON response. HTTP ${response.status}.`
     );
 }
 
@@ -1015,13 +1375,21 @@ async function parseServerResponse(
 async function scanOMR() {
 
     hideError();
+
     hideResult();
 
 
     const exam =
+
         examSelect
-            ? examSelect.value
-            : "";
+
+            ?
+
+            examSelect.value
+
+            :
+
+            "";
 
 
     if (!exam) {
@@ -1037,7 +1405,7 @@ async function scanOMR() {
     if (!capturedBlob) {
 
         showError(
-            "Please capture the OMR sheet first."
+            "Please capture or upload an OMR image first."
         );
 
         return;
@@ -1047,8 +1415,12 @@ async function scanOMR() {
     // ========================================================
     // FORM DATA
     //
-    // Only exam and image are sent.
-    // Paper code is detected automatically.
+    // Only these are sent:
+    //
+    // exam
+    // image
+    //
+    // Paper code / answer key is automatic.
     // ========================================================
 
     const formData =
@@ -1064,7 +1436,7 @@ async function scanOMR() {
     formData.append(
         "image",
         capturedBlob,
-        "camera_omr.jpg"
+        "omr_scan.jpg"
     );
 
 
@@ -1076,6 +1448,7 @@ async function scanOMR() {
         scanButton.disabled =
             true;
 
+
         scanButton.textContent =
             "Scanning...";
     }
@@ -1084,7 +1457,7 @@ async function scanOMR() {
     try {
 
         console.log(
-            "Sending scan request..."
+            "Sending OMR scan..."
         );
 
 
@@ -1095,21 +1468,26 @@ async function scanOMR() {
 
 
         console.log(
-            "Image size:",
+            "Image bytes:",
             capturedBlob.size
         );
 
 
         const response =
             await fetch(
+
                 "/scan",
+
                 {
 
-                    method: "POST",
+                    method:
+                        "POST",
 
-                    body: formData
+                    body:
+                        formData
 
                 }
+
             );
 
 
@@ -1120,7 +1498,7 @@ async function scanOMR() {
 
 
         // ====================================================
-        // FASTAPI JSON ERROR
+        // FASTAPI ERROR
         // ====================================================
 
         if (!response.ok) {
@@ -1170,12 +1548,6 @@ async function scanOMR() {
         // SUCCESS
         // ====================================================
 
-        console.log(
-            "Scan result:",
-            result
-        );
-
-
         displayResult(
             result
         );
@@ -1193,9 +1565,13 @@ async function scanOMR() {
 
 
         showError(
+
             error.message
+
             ||
+
             "OMR scan failed."
+
         );
 
 
@@ -1208,6 +1584,7 @@ async function scanOMR() {
 
             scanButton.disabled =
                 false;
+
 
             scanButton.textContent =
                 "Scan & Evaluate";
@@ -1264,7 +1641,9 @@ function stopCamera() {
 function resetScanner() {
 
     hideError();
+
     hideResult();
+
     hideLoading();
 
 
@@ -1272,15 +1651,10 @@ function resetScanner() {
         null;
 
 
-    if (previewObjectUrl) {
+    clearPreviewUrl();
 
-        URL.revokeObjectURL(
-            previewObjectUrl
-        );
 
-        previewObjectUrl =
-            null;
-    }
+    stopCamera();
 
 
     if (preview) {
@@ -1288,6 +1662,7 @@ function resetScanner() {
         preview.removeAttribute(
             "src"
         );
+
 
         preview.classList.add(
             "hidden"
@@ -1335,7 +1710,11 @@ function resetScanner() {
     }
 
 
-    stopCamera();
+    if (imageUpload) {
+
+        imageUpload.value =
+            "";
+    }
 }
 
 
@@ -1344,19 +1723,29 @@ function resetScanner() {
 // ============================================================
 
 document.addEventListener(
+
     "DOMContentLoaded",
+
     function () {
+
 
         console.log(
             "DOM loaded"
         );
 
 
+        // ====================================================
+        // CAMERA
+        // ====================================================
+
         if (openCameraButton) {
 
             openCameraButton.addEventListener(
+
                 "click",
+
                 openCamera
+
             );
 
         } else {
@@ -1367,11 +1756,18 @@ document.addEventListener(
         }
 
 
+        // ====================================================
+        // CAPTURE
+        // ====================================================
+
         if (captureButton) {
 
             captureButton.addEventListener(
+
                 "click",
+
                 captureOMR
+
             );
 
         } else {
@@ -1382,11 +1778,40 @@ document.addEventListener(
         }
 
 
+        // ====================================================
+        // UPLOAD
+        // ====================================================
+
+        if (imageUpload) {
+
+            imageUpload.addEventListener(
+
+                "change",
+
+                handleImageUpload
+
+            );
+
+        } else {
+
+            console.error(
+                "imageUpload not found"
+            );
+        }
+
+
+        // ====================================================
+        // RETAKE
+        // ====================================================
+
         if (retakeButton) {
 
             retakeButton.addEventListener(
+
                 "click",
+
                 retakeOMR
+
             );
 
         } else {
@@ -1397,11 +1822,18 @@ document.addEventListener(
         }
 
 
+        // ====================================================
+        // SCAN
+        // ====================================================
+
         if (scanButton) {
 
             scanButton.addEventListener(
+
                 "click",
+
                 scanOMR
+
             );
 
         } else {
@@ -1412,11 +1844,18 @@ document.addEventListener(
         }
 
 
+        // ====================================================
+        // EXAM CHANGE
+        // ====================================================
+
         if (examSelect) {
 
             examSelect.addEventListener(
+
                 "change",
+
                 resetScanner
+
             );
 
         } else {
@@ -1431,6 +1870,7 @@ document.addEventListener(
             "OMR scanner ready"
         );
     }
+
 );
 
 
@@ -1439,19 +1879,19 @@ document.addEventListener(
 // ============================================================
 
 window.addEventListener(
+
     "beforeunload",
+
     function () {
+
 
         stopCamera();
 
 
-        if (previewObjectUrl) {
+        clearPreviewUrl();
 
-            URL.revokeObjectURL(
-                previewObjectUrl
-            );
-        }
     }
+
 );
 
 
@@ -1465,11 +1905,11 @@ window.openCamera =
 window.captureOMR =
     captureOMR;
 
-window.retakeOMR =
-    retakeOMR;
-
 window.scanOMR =
     scanOMR;
+
+window.retakeOMR =
+    retakeOMR;
 
 window.stopCamera =
     stopCamera;
