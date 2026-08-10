@@ -108,7 +108,7 @@
     "paper_code": {
         "enabled": true,
         "filled_threshold": 0.35,
-        "minimum_confidence_gap": 0.03,
+        "minimum_confidence_gap": 0.01,
         "characters": [
             {
                 "type": "letter",
