@@ -743,91 +743,17 @@ def _decide_question(
     # BLANK
     # --------------------------------------------------------
 
-    # Relative normalization always creates a "winner", even when
-    # all four bubbles are actually empty. Therefore blank detection
-    # must primarily use ABSOLUTE evidence.
-    #
-    # For a true blank row:
-    #   - all four absolute scores stay low
-    #   - the strongest classical center-fill score stays low
-    #   - ML should not have strong filled confidence
-    #
-    # This prevents empty rows from being forced into A/B/C/D.
-
-    absolute_scores = [
-        float(
-            info[
-                "absolute_score"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    classical_scores = [
-        float(
-            info[
-                "metrics"
-            ][
-                "classical_score"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    ml_fill_scores = [
-        float(
-            info[
-                "ml_filled_probability"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    max_absolute = max(
-        absolute_scores
-    )
-
-    max_classical = max(
-        classical_scores
-    )
-
-    max_ml_fill = max(
-        ml_fill_scores
-    )
-
-    mean_absolute = float(
-        np.mean(
-            absolute_scores
-        )
-    )
-
-    # Strong blank:
-    # all four bubbles look empty in absolute terms.
-    strong_blank = (
-        max_absolute < 0.43
+    # If even the strongest bubble has weak absolute evidence,
+    # do not force a relative winner.
+    if (
+        best_absolute
+        <=
+        BLANK_MAX_SCORE
         and
-        max_classical < 0.40
-        and
-        max_ml_fill < 0.72
-    )
-
-    # Soft blank:
-    # sometimes one empty printed outline gets a modest ML score,
-    # but the whole row still has weak evidence.
-    soft_blank = (
-        max_absolute < 0.48
-        and
-        mean_absolute < 0.30
-        and
-        max_classical < 0.46
-        and
-        best_absolute < 0.48
-    )
-
-    if strong_blank or soft_blank:
+        best
+        <
+        0.58
+    ):
         return {
             "answer":
                 None,
@@ -852,30 +778,6 @@ def _decide_question(
 
             "second_third_gap":
                 second_third_gap,
-
-            "max_absolute":
-                round(
-                    max_absolute,
-                    4,
-                ),
-
-            "mean_absolute":
-                round(
-                    mean_absolute,
-                    4,
-                ),
-
-            "max_classical":
-                round(
-                    max_classical,
-                    4,
-                ),
-
-            "max_ml_fill":
-                round(
-                    max_ml_fill,
-                    4,
-                ),
         }
 
     # --------------------------------------------------------
