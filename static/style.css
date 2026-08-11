@@ -1,399 +1,643 @@
+:root {
+    --bg: #0b0b0b;
+    --panel: #111111;
+    --panel-soft: #171717;
+
+    --gold: #e0b632;
+    --gold-light: #f1d675;
+    --gold-dark: #ad8618;
+
+    --text: #f4f4f4;
+    --muted: #a9a9a9;
+
+    --danger: #ff7373;
+    --danger-bg: #351416;
+
+    --success: #69d391;
+
+    --border: #2b2b2b;
+
+    --radius: 16px;
+}
+
+
 * {
     box-sizing: border-box;
 }
 
+
+html,
 body {
     margin: 0;
-    font-family: Arial, sans-serif;
+    padding: 0;
 
-    background: #080808;
-    color: #f5f5f5;
+    min-height: 100%;
+
+    background:
+        radial-gradient(circle at top,
+            #17130a 0%,
+            #0b0b0b 40%,
+            #050505 100%);
+
+    color: var(--text);
+
+    font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
 }
 
-header {
-    display: flex;
 
-    justify-content: space-between;
-    align-items: center;
-
-    padding: 18px 30px;
-
-    background: #111111;
-
-    border-bottom: 1px solid #2d2818;
+body {
+    min-height: 100vh;
 }
 
-.brand {
-    display: flex;
-    align-items: center;
 
-    gap: 15px;
-}
-
-.logo {
-    width: 55px;
-    height: 55px;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    background: #D4AF37;
-    color: #080808;
-
-    font-weight: bold;
-    border-radius: 10px;
-}
-
-header h1 {
-    margin: 0;
-
-    color: #F1D675;
-}
-
-header p {
-    margin: 5px 0 0;
-
-    color: #999999;
-}
-
-.online {
-    color: #4CAF50;
-
-    font-size: 13px;
-    font-weight: bold;
-}
-
-main {
-    width: min(1100px,
-            92%);
-
-    margin: 35px auto;
-}
-
-.hero {
-    margin-bottom: 25px;
-}
-
-.hero h2 {
-    color: #F1D675;
-
-    margin-bottom: 5px;
-}
-
-.hero p {
-    color: #aaaaaa;
-}
-
-.card {
-    background: #111111;
-
-    border: 1px solid #2d2818;
-
-    border-radius: 12px;
-
-    padding: 25px;
-
-    margin-bottom: 25px;
-}
-
-.card h3 {
-    margin-top: 0;
-
-    color: #D4AF37;
-}
-
-label {
-    display: block;
-
-    margin-top: 15px;
-    margin-bottom: 7px;
-
-    color: #dddddd;
-}
-
+button,
 select,
-input[type="file"] {
-
-    width: 100%;
-
-    padding: 12px;
-
-    background: #080808;
-
-    color: #f5f5f5;
-
-    border: 1px solid #3b3520;
-
-    border-radius: 7px;
+input {
+    font: inherit;
 }
 
-.camera-container {
-    position: relative;
 
+button {
+    cursor: pointer;
+}
+
+
+.app-shell {
     width: 100%;
     max-width: 520px;
 
-    margin: 20px auto;
+    min-height: 100vh;
+
+    margin: 0 auto;
+
+    padding:
+        22px 20px 40px;
+}
+
+
+.header {
+    margin-bottom: 22px;
+
+    text-align: center;
+}
+
+
+.header h1 {
+    margin: 0;
+
+    color: var(--gold);
+
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+}
+
+
+.header p {
+    margin:
+        8px 0 0;
+
+    color: var(--muted);
+
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+
+.card {
+    padding: 20px;
+
+    background: var(--panel);
+
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+
+    box-shadow:
+        0 16px 40px rgba(0, 0, 0, 0.25);
+}
+
+
+.field {
+    margin-bottom: 18px;
+}
+
+
+.field label {
+    display: block;
+
+    margin-bottom: 8px;
+
+    color: var(--gold-light);
+
+    font-size: 14px;
+    font-weight: 700;
+}
+
+
+select {
+    width: 100%;
+
+    padding:
+        13px 14px;
+
+    color: var(--text);
+
+    background: var(--panel-soft);
+
+    border:
+        1px solid #343434;
+
+    border-radius: 10px;
+
+    outline: none;
+}
+
+
+select:focus {
+    border-color: var(--gold);
+}
+
+
+/* ==========================================================
+   ACTION BUTTONS
+   ========================================================== */
+
+.primary-button,
+.secondary-button,
+.upload-button {
+    width: 100%;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    min-height: 58px;
+
+    padding:
+        14px 18px;
+
+    border: none;
+    border-radius: 11px;
+
+    font-size: 18px;
+    font-weight: 800;
+
+    text-align: center;
+
+    text-decoration: none;
+
+    transition:
+        transform 0.15s ease,
+        opacity 0.15s ease,
+        background 0.15s ease;
+}
+
+
+.primary-button {
+    color: #111;
+
+    background:
+        linear-gradient(180deg,
+            var(--gold-light),
+            var(--gold));
+}
+
+
+.secondary-button,
+.upload-button {
+    color: #111;
+
+    background: var(--gold);
+}
+
+
+.primary-button:active,
+.secondary-button:active,
+.upload-button:active {
+    transform: scale(0.985);
+}
+
+
+button:disabled {
+    cursor: not-allowed;
+
+    opacity: 0.45;
+}
+
+
+.button-gap {
+    height: 14px;
+}
+
+
+/* ==========================================================
+   CAMERA AREA
+   ========================================================== */
+
+#cameraContainer {
+    position: relative;
+
+    width: min(88vw,
+            430px);
+
+    /*
+        Exact A4 portrait aspect ratio:
+        210mm x 297mm
+    */
+    aspect-ratio: 210 / 297;
+
+    margin:
+        18px auto 22px;
 
     overflow: hidden;
 
-    border-radius: 12px;
+    background: #000;
+
+    border:
+        3px solid var(--gold);
+
+    border-radius: 14px;
+
+    box-shadow:
+        0 0 0 1px rgba(224, 182, 50, 0.15);
+}
+
+
+/*
+    Camera fills the A4 guide.
+
+    object-fit: cover means some camera pixels
+    may be cropped visually.
+
+    app.js performs the matching A4 crop
+    before upload.
+*/
+#camera {
+    width: 100%;
+    height: 100%;
+
+    display: block;
+
+    object-fit: cover;
 
     background: #000;
 }
 
 
-.camera-container video {
+/*
+    Preview after capture/upload.
+*/
+#capturedPreview {
     width: 100%;
+    height: 100%;
+
     display: block;
+
+    object-fit: contain;
+
+    background: #000;
 }
 
 
-.hidden {
-    display: none !important;
+/*
+    Hidden working canvas.
+*/
+#captureCanvas {
+    display: none;
 }
 
 
-/* ==========================================
-   YOLO-STYLE OMR SCAN BOX
-   ========================================== */
+/* ==========================================================
+   A4 GUIDE OVERLAY
+   ========================================================== */
 
-.omr-detection-box {
+.camera-guide {
     position: absolute;
 
-    left: 8%;
-    top: 5%;
-
-    width: 84%;
-    height: 90%;
-
-    border: 2px solid #D4AF37;
-
-    box-sizing: border-box;
+    inset: 3.5%;
 
     pointer-events: none;
 
-    box-shadow:
-        0 0 0 9999px rgba(0, 0, 0, 0.38);
+    border:
+        2px solid rgba(255, 220, 90, 0.7);
+
+    border-radius: 7px;
 }
 
 
-.scan-label {
+.camera-guide::before {
+    content:
+        "FIT FULL A4 OMR INSIDE";
+
     position: absolute;
 
-    top: -32px;
-    left: 0;
+    top: 10px;
+    left: 50%;
 
-    background: #D4AF37;
-    color: #080808;
+    transform:
+        translateX(-50%);
 
-    padding: 5px 10px;
+    width: max-content;
+    max-width: 90%;
 
-    font-size: 12px;
-    font-weight: bold;
+    padding:
+        5px 9px;
 
-    letter-spacing: 1px;
+    color: #111;
 
-    border-radius: 4px;
+    background:
+        rgba(241,
+            214,
+            117,
+            0.92);
+
+    border-radius: 6px;
+
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.3px;
 }
 
 
-/* Corner markers */
+/* Corner guides */
 
-.corner {
+.guide-corner {
     position: absolute;
 
     width: 28px;
     height: 28px;
-
-    border-color: #F1D675;
 }
 
 
-.corner.tl {
-    top: -3px;
-    left: -3px;
+.guide-corner::before,
+.guide-corner::after {
+    content: "";
 
-    border-top: 5px solid #F1D675;
-    border-left: 5px solid #F1D675;
-}
-
-
-.corner.tr {
-    top: -3px;
-    right: -3px;
-
-    border-top: 5px solid #F1D675;
-    border-right: 5px solid #F1D675;
-}
-
-
-.corner.bl {
-    bottom: -3px;
-    left: -3px;
-
-    border-bottom: 5px solid #F1D675;
-    border-left: 5px solid #F1D675;
-}
-
-
-.corner.br {
-    bottom: -3px;
-    right: -3px;
-
-    border-bottom: 5px solid #F1D675;
-    border-right: 5px solid #F1D675;
-}
-
-
-.captured-preview {
-    display: block;
-
-    width: 100%;
-    max-width: 520px;
-
-    margin: 15px auto;
-
-    border: 2px solid #D4AF37;
-
-    border-radius: 10px;
-}
-
-.omr-detection-box {
     position: absolute;
 
-    left: 14%;
-    top: 4%;
-
-    width: 72%;
-    height: 92%;
-
-    border: 3px solid #D4AF37;
-
-    box-sizing: border-box;
-
-    pointer-events: none;
-
-    box-shadow:
-        0 0 0 9999px rgba(0, 0, 0, 0.38);
+    background: var(--gold-light);
 }
 
-button {
-    width: 100%;
 
-    margin-top: 20px;
-
-    padding: 14px;
-
-    background: #D4AF37;
-
-    color: #080808;
-
-    border: none;
-
-    border-radius: 7px;
-
-    font-weight: bold;
-
-    cursor: pointer;
+.guide-corner::before {
+    width: 28px;
+    height: 3px;
 }
 
-button:hover {
-    background: #F1D675;
+
+.guide-corner::after {
+    width: 3px;
+    height: 28px;
 }
 
-.hidden {
-    display: none;
+
+.guide-top-left {
+    top: 12px;
+    left: 12px;
 }
+
+
+.guide-top-right {
+    top: 12px;
+    right: 12px;
+
+    transform:
+        rotate(90deg);
+}
+
+
+.guide-bottom-right {
+    right: 12px;
+    bottom: 12px;
+
+    transform:
+        rotate(180deg);
+}
+
+
+.guide-bottom-left {
+    left: 12px;
+    bottom: 12px;
+
+    transform:
+        rotate(270deg);
+}
+
+
+/* ==========================================================
+   CAMERA HELP TEXT
+   ========================================================== */
+
+.camera-help {
+    margin:
+        0 auto 18px;
+
+    color: var(--muted);
+
+    font-size: 13px;
+    line-height: 1.5;
+
+    text-align: center;
+}
+
+
+.camera-help strong {
+    color: var(--gold-light);
+}
+
+
+/* ==========================================================
+   LOADING
+   ========================================================== */
 
 #loading {
-    margin-top: 20px;
+    margin-top: 18px;
 
-    color: #F1D675;
+    padding: 16px;
+
+    color: var(--gold-light);
+
+    background: #1b180f;
+
+    border:
+        1px solid #493d14;
+
+    border-radius: 10px;
+
+    text-align: center;
+
+    font-weight: 700;
 }
 
-.error {
-    margin-top: 20px;
 
-    padding: 12px;
+/* ==========================================================
+   ERROR
+   ========================================================== */
 
-    border-radius: 7px;
+#error {
+    margin-top: 18px;
 
-    background: #2b1111;
+    padding:
+        14px 16px;
 
-    color: #ff7777;
+    color: var(--danger);
+
+    background: var(--danger-bg);
+
+    border:
+        1px solid #5b1e22;
+
+    border-radius: 10px;
+
+    font-size: 16px;
+    line-height: 1.35;
 }
 
-.summary {
-    display: grid;
 
-    grid-template-columns:
-        repeat(auto-fit,
-            minmax(150px,
-                1fr));
+/* ==========================================================
+   RESULT
+   ========================================================== */
 
-    gap: 15px;
-
-    margin-top: 20px;
-}
-
-.result-box {
-    background: #080808;
-
-    border: 1px solid #2d2818;
+#resultSection {
+    margin-top: 22px;
 
     padding: 18px;
 
-    border-radius: 10px;
+    background: #101510;
+
+    border:
+        1px solid #293a2b;
+
+    border-radius: 12px;
 }
 
-.result-box span {
-    display: block;
 
-    color: #999999;
+#resultSection h2 {
+    margin:
+        0 0 16px;
 
-    font-size: 13px;
+    color: var(--gold-light);
 
-    margin-bottom: 8px;
+    font-size: 22px;
 }
 
-.result-box strong {
-    color: #F1D675;
 
-    font-size: 24px;
+.result-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,
+            minmax(0, 1fr));
+
+    gap: 12px;
 }
 
-#quality {
-    margin-top: 25px;
 
-    padding-top: 15px;
+.result-item {
+    padding: 13px;
 
-    border-top: 1px solid #2d2818;
+    background: #171717;
+
+    border:
+        1px solid #2d2d2d;
+
+    border-radius: 9px;
 }
 
-#quality h4 {
-    color: #D4AF37;
+
+.result-label {
+    margin-bottom: 4px;
+
+    color: var(--muted);
+
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
 }
+
+
+.result-value {
+    color: var(--text);
+
+    font-size: 20px;
+    font-weight: 800;
+}
+
+
+#score {
+    color: var(--gold-light);
+}
+
 
 #message {
-    margin-top: 15px;
+    margin-top: 14px;
 
-    color: #F1D675;
+    color: var(--success);
+
+    font-weight: 700;
 }
 
-@media (max-width: 600px) {
 
-    header {
-        padding: 15px;
+#quality {
+    margin-top: 14px;
+
+    color: var(--muted);
+
+    font-size: 12px;
+    line-height: 1.5;
+
+    word-break: break-word;
+}
+
+
+/* ==========================================================
+   UTILITIES
+   ========================================================== */
+
+[hidden] {
+    display: none !important;
+}
+
+
+/* ==========================================================
+   SMALL PHONE
+   ========================================================== */
+
+@media (max-width: 420px) {
+
+    .app-shell {
+        padding:
+            18px 16px 32px;
     }
 
-    .online {
-        display: none;
+
+    .card {
+        padding: 16px;
     }
 
-    main {
-        margin-top: 20px;
+
+    #cameraContainer {
+        width: 100%;
     }
 
+
+    .primary-button,
+    .secondary-button,
+    .upload-button {
+        min-height: 56px;
+
+        font-size: 17px;
+    }
+
+
+    .result-grid {
+        grid-template-columns: 1fr 1fr;
+    }
 }

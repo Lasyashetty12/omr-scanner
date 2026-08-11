@@ -2,3 +2,6 @@ numpy
 opencv-python-headless
 tensorflow-cpu
 Pillow
+tf2onnx
+onnx
+onnxruntime

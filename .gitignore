@@ -1,11 +1,6 @@
 venv/
+.venv/
+dataset/
+models/bubble_saved_model/
 __pycache__/
 *.pyc
-
-uploads/*
-results/*
-
-!uploads/.gitkeep
-!results/.gitkeep
-
-.env

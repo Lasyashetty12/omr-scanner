@@ -1,11 +1,145 @@
-// static/app.js
-
-console.log("OMR scanner frontend loaded");
+"use strict";
 
 
-// ============================================================
-// STATE
-// ============================================================
+/* ==========================================================
+   ELEMENTS
+   ========================================================== */
+
+const examSelect =
+    document.getElementById(
+        "exam"
+    );
+
+
+const openCameraButton =
+    document.getElementById(
+        "openCameraButton"
+    );
+
+
+const imageUpload =
+    document.getElementById(
+        "imageUpload"
+    );
+
+
+const cameraContainer =
+    document.getElementById(
+        "cameraContainer"
+    );
+
+
+const camera =
+    document.getElementById(
+        "camera"
+    );
+
+
+const captureCanvas =
+    document.getElementById(
+        "captureCanvas"
+    );
+
+
+const capturedPreview =
+    document.getElementById(
+        "capturedPreview"
+    );
+
+
+const captureButton =
+    document.getElementById(
+        "captureButton"
+    );
+
+
+const retakeButton =
+    document.getElementById(
+        "retakeButton"
+    );
+
+
+const scanButton =
+    document.getElementById(
+        "scanButton"
+    );
+
+
+const loading =
+    document.getElementById(
+        "loading"
+    );
+
+
+const errorBox =
+    document.getElementById(
+        "error"
+    );
+
+
+const resultSection =
+    document.getElementById(
+        "resultSection"
+    );
+
+
+const resultExam =
+    document.getElementById(
+        "resultExam"
+    );
+
+
+const paperCode =
+    document.getElementById(
+        "paperCode"
+    );
+
+
+const score =
+    document.getElementById(
+        "score"
+    );
+
+
+const correct =
+    document.getElementById(
+        "correct"
+    );
+
+
+const wrong =
+    document.getElementById(
+        "wrong"
+    );
+
+
+const blank =
+    document.getElementById(
+        "blank"
+    );
+
+
+const multiple =
+    document.getElementById(
+        "multiple"
+    );
+
+
+const quality =
+    document.getElementById(
+        "quality"
+    );
+
+
+const message =
+    document.getElementById(
+        "message"
+    );
+
+
+/* ==========================================================
+   STATE
+   ========================================================== */
 
 let cameraStream = null;
 
@@ -14,145 +148,55 @@ let capturedBlob = null;
 let previewObjectUrl = null;
 
 
-// ============================================================
-// ELEMENTS
-// ============================================================
+/*
+    True when current image came from live camera.
+    False when image came from file upload.
+*/
+let capturedFromCamera = false;
 
-const examSelect =
-    document.getElementById(
-        "exam"
-    );
 
-const openCameraButton =
-    document.getElementById(
-        "openCameraButton"
-    );
+/* ==========================================================
+   CONSTANTS
+   ========================================================== */
 
-const imageUpload =
-    document.getElementById(
-        "imageUpload"
-    );
+/*
+    A4 portrait:
+    210mm x 297mm
+*/
+const A4_RATIO =
+    210 / 297;
 
-const cameraContainer =
-    document.getElementById(
-        "cameraContainer"
-    );
 
-const camera =
-    document.getElementById(
-        "camera"
-    );
+/*
+    Output image resolution.
 
-const canvas =
-    document.getElementById(
-        "captureCanvas"
-    );
+    1200px width gives enough detail for OMR
+    while keeping upload size manageable.
+*/
+const CAMERA_OUTPUT_WIDTH =
+    1200;
 
-const preview =
-    document.getElementById(
-        "capturedPreview"
-    );
 
-const captureButton =
-    document.getElementById(
-        "captureButton"
-    );
-
-const retakeButton =
-    document.getElementById(
-        "retakeButton"
-    );
-
-const scanButton =
-    document.getElementById(
-        "scanButton"
-    );
-
-const loading =
-    document.getElementById(
-        "loading"
-    );
-
-const errorBox =
-    document.getElementById(
-        "error"
-    );
-
-const resultSection =
-    document.getElementById(
-        "resultSection"
+const CAMERA_OUTPUT_HEIGHT =
+    Math.round(
+        CAMERA_OUTPUT_WIDTH
+        / A4_RATIO
     );
 
 
-// ============================================================
-// RESULT ELEMENTS
-// ============================================================
-
-const resultExam =
-    document.getElementById(
-        "resultExam"
-    );
-
-const paperCode =
-    document.getElementById(
-        "paperCode"
-    );
-
-const score =
-    document.getElementById(
-        "score"
-    );
-
-const correct =
-    document.getElementById(
-        "correct"
-    );
-
-const wrong =
-    document.getElementById(
-        "wrong"
-    );
-
-const blank =
-    document.getElementById(
-        "blank"
-    );
-
-const multiple =
-    document.getElementById(
-        "multiple"
-    );
-
-const quality =
-    document.getElementById(
-        "quality"
-    );
-
-const message =
-    document.getElementById(
-        "message"
-    );
+const JPEG_QUALITY =
+    0.92;
 
 
-// ============================================================
-// UI HELPERS
-// ============================================================
+/* ==========================================================
+   UI HELPERS
+   ========================================================== */
 
 function showError(
     text
 ) {
 
-    console.error(
-        text
-    );
-
-
     if (!errorBox) {
-
-        alert(
-            text
-        );
-
         return;
     }
 
@@ -161,13 +205,12 @@ function showError(
         text;
 
 
-    errorBox.classList.remove(
-        "hidden"
-    );
+    errorBox.hidden =
+        false;
 }
 
 
-function hideError() {
+function clearError() {
 
     if (!errorBox) {
         return;
@@ -178,56 +221,67 @@ function hideError() {
         "";
 
 
-    errorBox.classList.add(
-        "hidden"
-    );
+    errorBox.hidden =
+        true;
 }
 
 
-function showLoading() {
+function showLoading(
+    text = "Processing OMR..."
+) {
 
-    if (loading) {
-
-        loading.classList.remove(
-            "hidden"
-        );
+    if (!loading) {
+        return;
     }
+
+
+    loading.textContent =
+        text;
+
+
+    loading.hidden =
+        false;
 }
 
 
 function hideLoading() {
 
-    if (loading) {
-
-        loading.classList.add(
-            "hidden"
-        );
+    if (!loading) {
+        return;
     }
+
+
+    loading.hidden =
+        true;
 }
 
 
 function hideResult() {
 
-    if (resultSection) {
-
-        resultSection.classList.add(
-            "hidden"
-        );
+    if (!resultSection) {
+        return;
     }
+
+
+    resultSection.hidden =
+        true;
 }
 
 
-// ============================================================
-// PREVIEW CLEANUP
-// ============================================================
+/* ==========================================================
+   PREVIEW URL CLEANUP
+   ========================================================== */
 
 function clearPreviewUrl() {
 
-    if (previewObjectUrl) {
+    if (
+        previewObjectUrl
+    ) {
 
         URL.revokeObjectURL(
             previewObjectUrl
         );
+
 
         previewObjectUrl =
             null;
@@ -235,314 +289,330 @@ function clearPreviewUrl() {
 }
 
 
-// ============================================================
-// CAMERA SUPPORT
-// ============================================================
+/* ==========================================================
+   CAMERA STOP
+   ========================================================== */
 
-function cameraSupported() {
+function stopCamera() {
 
-    return Boolean(
+    if (
+        cameraStream
+    ) {
 
-        navigator.mediaDevices
+        const tracks =
+            cameraStream.getTracks();
 
-        &&
 
-        navigator.mediaDevices
-            .getUserMedia
+        tracks.forEach(
+            function (
+                track
+            ) {
 
-    );
+                track.stop();
+            }
+        );
+
+
+        cameraStream =
+            null;
+    }
+
+
+    if (
+        camera
+    ) {
+
+        camera.srcObject =
+            null;
+    }
 }
 
 
-// ============================================================
-// OPEN CAMERA
-// ============================================================
+/* ==========================================================
+   CAMERA OPEN
+   ========================================================== */
 
 async function openCamera() {
 
-    hideError();
+    clearError();
 
     hideResult();
 
 
     if (
-        !examSelect ||
-        !examSelect.value
+        !navigator.mediaDevices
+        ||
+        !navigator.mediaDevices.getUserMedia
     ) {
 
         showError(
-            "Please select an exam first."
+            "Camera is not available in this browser."
         );
 
         return;
     }
 
 
-    if (!cameraSupported()) {
+    stopCamera();
 
-        showError(
-            "Camera is not supported. Use HTTPS or localhost."
-        );
+    clearPreviewUrl();
 
-        return;
-    }
+
+    capturedBlob =
+        null;
+
+
+    capturedFromCamera =
+        false;
 
 
     try {
 
-        stopCamera();
+        const constraints = {
+
+            audio:
+                false,
+
+            video: {
+
+                facingMode: {
+                    ideal:
+                        "environment"
+                },
+
+                width: {
+                    ideal:
+                        1920
+                },
+
+                height: {
+                    ideal:
+                        1080
+                },
+
+                /*
+                    Some mobile browsers support
+                    continuous autofocus implicitly.
+                */
+            }
+        };
 
 
         cameraStream =
             await navigator.mediaDevices
-                .getUserMedia({
-
-                    audio:
-                        false,
-
-                    video: {
-
-                        facingMode: {
-                            ideal:
-                                "environment"
-                        },
-
-                        width: {
-                            ideal:
-                                1920
-                        },
-
-                        height: {
-                            ideal:
-                                1080
-                        }
-
-                    }
-
-                });
-
-
-        if (!camera) {
-
-            throw new Error(
-                "Camera element was not found."
-            );
-        }
+                .getUserMedia(
+                    constraints
+                );
 
 
         camera.srcObject =
             cameraStream;
 
 
-        camera.muted =
+        camera.hidden =
+            false;
+
+
+        capturedPreview.hidden =
             true;
 
 
-        camera.setAttribute(
-            "playsinline",
-            ""
-        );
+        cameraContainer.hidden =
+            false;
+
+
+        captureButton.hidden =
+            false;
+
+
+        retakeButton.hidden =
+            true;
+
+
+        scanButton.disabled =
+            true;
 
 
         await camera.play();
 
 
-        console.log(
-            "Camera resolution:",
-            camera.videoWidth,
-            "x",
-            camera.videoHeight
-        );
-
-
-        capturedBlob =
-            null;
-
-
-        clearPreviewUrl();
-
-
-        if (preview) {
-
-            preview.classList.add(
-                "hidden"
-            );
-        }
-
-
-        if (cameraContainer) {
-
-            cameraContainer.classList.remove(
-                "hidden"
-            );
-        }
-
-
-        if (captureButton) {
-
-            captureButton.classList.remove(
-                "hidden"
-            );
-        }
-
-
-        if (openCameraButton) {
-
-            openCameraButton.classList.add(
-                "hidden"
-            );
-        }
-
-
-        if (retakeButton) {
-
-            retakeButton.classList.add(
-                "hidden"
-            );
-        }
-
-
-        if (scanButton) {
-
-            scanButton.classList.add(
-                "hidden"
-            );
-        }
-
-
-    } catch (error) {
+    } catch (
+    error
+    ) {
 
         console.error(
-            "Camera error:",
             error
         );
 
 
-        let text =
-            "Could not open camera.";
-
-
-        if (
-            error.name ===
-            "NotAllowedError"
-        ) {
-
-            text =
-                "Camera permission was denied. Allow camera permission in your browser.";
-
-        } else if (
-            error.name ===
-            "NotFoundError"
-        ) {
-
-            text =
-                "No camera was found on this device.";
-
-        } else if (
-            error.name ===
-            "NotReadableError"
-        ) {
-
-            text =
-                "Camera is currently being used by another app.";
-
-        } else if (
-            error.name ===
-            "SecurityError"
-        ) {
-
-            text =
-                "Camera access requires HTTPS.";
-
-        } else if (
-            error.message
-        ) {
-
-            text =
-                error.message;
-        }
-
-
         showError(
-            text
+            "Unable to open camera. Allow camera permission and try again."
         );
     }
 }
 
 
-// ============================================================
-// PREPARE IMAGE BLOB
-// ============================================================
+/* ==========================================================
+   CALCULATE A4 CROP FROM CAMERA
+   ========================================================== */
 
-function prepareImageFromSource(
-    source,
-    sourceWidth,
-    sourceHeight,
-    callback
+function calculateA4Crop(
+    videoWidth,
+    videoHeight
 ) {
 
-    if (!canvas) {
+    const sourceRatio =
+        videoWidth
+        / videoHeight;
+
+
+    let cropWidth;
+
+    let cropHeight;
+
+    let cropX;
+
+    let cropY;
+
+
+    /*
+        Camera frame wider than A4:
+        crop left/right.
+    */
+    if (
+        sourceRatio
+        > A4_RATIO
+    ) {
+
+        cropHeight =
+            videoHeight;
+
+
+        cropWidth =
+            cropHeight
+            * A4_RATIO;
+
+
+        cropX =
+            (
+                videoWidth
+                - cropWidth
+            )
+            / 2;
+
+
+        cropY =
+            0;
+    }
+
+
+    /*
+        Camera frame taller/narrower than A4:
+        crop top/bottom.
+    */
+    else {
+
+        cropWidth =
+            videoWidth;
+
+
+        cropHeight =
+            cropWidth
+            / A4_RATIO;
+
+
+        cropX =
+            0;
+
+
+        cropY =
+            (
+                videoHeight
+                - cropHeight
+            )
+            / 2;
+    }
+
+
+    return {
+
+        x:
+            cropX,
+
+        y:
+            cropY,
+
+        width:
+            cropWidth,
+
+        height:
+            cropHeight
+    };
+}
+
+
+/* ==========================================================
+   CAPTURE CAMERA
+   ========================================================== */
+
+function captureCameraImage() {
+
+    clearError();
+
+    hideResult();
+
+
+    if (
+        !cameraStream
+    ) {
 
         showError(
-            "Capture canvas was not found."
+            "Camera is not active."
         );
 
         return;
     }
 
 
-    // ========================================================
-    // MAX WIDTH
-    //
-    // Keeps Vercel request reasonably small.
-    // ========================================================
-
-    const maxWidth =
-        1100;
+    const videoWidth =
+        camera.videoWidth;
 
 
-    let outputWidth =
-        sourceWidth;
-
-    let outputHeight =
-        sourceHeight;
+    const videoHeight =
+        camera.videoHeight;
 
 
     if (
-        outputWidth >
-        maxWidth
+        !videoWidth
+        ||
+        !videoHeight
     ) {
 
-        const resizeScale =
-            maxWidth /
-            outputWidth;
+        showError(
+            "Camera is still starting. Try again."
+        );
 
-
-        outputWidth =
-            Math.round(
-                outputWidth *
-                resizeScale
-            );
-
-
-        outputHeight =
-            Math.round(
-                outputHeight *
-                resizeScale
-            );
+        return;
     }
 
 
-    canvas.width =
-        outputWidth;
+    const crop =
+        calculateA4Crop(
+            videoWidth,
+            videoHeight
+        );
 
 
-    canvas.height =
-        outputHeight;
+    captureCanvas.width =
+        CAMERA_OUTPUT_WIDTH;
+
+
+    captureCanvas.height =
+        CAMERA_OUTPUT_HEIGHT;
 
 
     const context =
-        canvas.getContext(
+        captureCanvas.getContext(
             "2d",
             {
                 alpha:
@@ -551,390 +621,414 @@ function prepareImageFromSource(
         );
 
 
-    if (!context) {
+    if (
+        !context
+    ) {
 
         showError(
-            "Could not initialize image processor."
+            "Unable to prepare camera image."
         );
 
         return;
     }
 
 
-    context.clearRect(
+    /*
+        White background prevents transparent
+        or undefined regions.
+    */
+    context.fillStyle =
+        "#ffffff";
+
+
+    context.fillRect(
         0,
         0,
-        outputWidth,
-        outputHeight
+        CAMERA_OUTPUT_WIDTH,
+        CAMERA_OUTPUT_HEIGHT
     );
 
 
+    /*
+        Crop the center of the actual camera frame
+        to exact A4 portrait ratio.
+    */
     context.drawImage(
 
-        source,
+        camera,
+
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
 
         0,
         0,
-        sourceWidth,
-        sourceHeight,
 
-        0,
-        0,
-        outputWidth,
-        outputHeight
-
+        CAMERA_OUTPUT_WIDTH,
+        CAMERA_OUTPUT_HEIGHT
     );
 
 
-    canvas.toBlob(
+    captureCanvas.toBlob(
 
         function (
             blob
         ) {
 
-            if (!blob) {
+            if (
+                !blob
+            ) {
 
                 showError(
-                    "Could not prepare OMR image."
+                    "Could not capture the camera image."
                 );
 
                 return;
             }
 
 
-            callback(
-                blob,
-                outputWidth,
-                outputHeight
-            );
+            capturedBlob =
+                blob;
+
+
+            capturedFromCamera =
+                true;
+
+
+            clearPreviewUrl();
+
+
+            previewObjectUrl =
+                URL.createObjectURL(
+                    blob
+                );
+
+
+            capturedPreview.src =
+                previewObjectUrl;
+
+
+            capturedPreview.hidden =
+                false;
+
+
+            camera.hidden =
+                true;
+
+
+            captureButton.hidden =
+                true;
+
+
+            retakeButton.hidden =
+                false;
+
+
+            scanButton.disabled =
+                false;
+
+
+            /*
+                Camera is no longer needed after capture.
+            */
+            stopCamera();
 
         },
 
         "image/jpeg",
 
-        0.82
-
+        JPEG_QUALITY
     );
 }
 
 
-// ============================================================
-// SET CAPTURED IMAGE
-// ============================================================
+/* ==========================================================
+   PREPARE UPLOADED IMAGE
+   ========================================================== */
 
-function setCapturedImage(
-    blob,
-    width,
-    height
+function prepareUploadedImage(
+    file
 ) {
 
-    capturedBlob =
-        blob;
-
-
-    clearPreviewUrl();
-
-
-    previewObjectUrl =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    console.log(
-        "Prepared OMR image:",
-        width,
-        "x",
-        height
-    );
-
-
-    console.log(
-        "Image bytes:",
-        blob.size
-    );
-
-
-    if (preview) {
-
-        preview.src =
-            previewObjectUrl;
-
-
-        preview.classList.remove(
-            "hidden"
-        );
-    }
-
-
-    if (cameraContainer) {
-
-        cameraContainer.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (captureButton) {
-
-        captureButton.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (retakeButton) {
-
-        retakeButton.classList.remove(
-            "hidden"
-        );
-    }
-
-
-    if (scanButton) {
-
-        scanButton.classList.remove(
-            "hidden"
-        );
-    }
-}
-
-
-// ============================================================
-// CAPTURE CAMERA IMAGE
-// ============================================================
-
-function captureOMR() {
-
-    hideError();
+    clearError();
 
     hideResult();
 
 
     if (
-        !camera ||
-        !camera.videoWidth ||
-        !camera.videoHeight
+        !file
     ) {
 
-        showError(
-            "Camera is not ready yet."
-        );
-
         return;
     }
 
 
-    const sourceWidth =
-        camera.videoWidth;
-
-
-    const sourceHeight =
-        camera.videoHeight;
-
-
-    console.log(
-        "Capturing camera frame:",
-        sourceWidth,
-        "x",
-        sourceHeight
-    );
-
-
-    // IMPORTANT:
-    // Capture the whole camera frame.
-    // The guide box is visual only.
-    // OpenCV performs alignment.
-
-    prepareImageFromSource(
-
-        camera,
-
-        sourceWidth,
-
-        sourceHeight,
-
-        function (
-            blob,
-            width,
-            height
-        ) {
-
-            setCapturedImage(
-                blob,
-                width,
-                height
-            );
-        }
-
-    );
-}
-
-
-// ============================================================
-// UPLOAD IMAGE
-// ============================================================
-
-function handleImageUpload(
-    event
-) {
-
-    hideError();
-
-    hideResult();
-
-
-    if (
-        !examSelect ||
-        !examSelect.value
-    ) {
-
-        showError(
-            "Please select an exam first."
-        );
-
-
-        event.target.value =
-            "";
-
-
-        return;
-    }
-
-
-    const file =
-        event.target.files
-            ? event.target.files[0]
-            : null;
-
-
-    if (!file) {
-
-        return;
-    }
-
-
-    const allowedTypes = [
-
+    const validTypes = [
         "image/jpeg",
-
         "image/png"
-
     ];
 
 
     if (
-        !allowedTypes.includes(
+        !validTypes.includes(
             file.type
         )
     ) {
 
         showError(
-            "Only JPG, JPEG and PNG images are supported."
+            "Please upload a JPG or PNG image."
         );
-
-
-        event.target.value =
-            "";
-
 
         return;
     }
 
 
-    console.log(
-        "Selected file:",
-        file.name
-    );
-
-
-    console.log(
-        "Original upload bytes:",
-        file.size
-    );
-
-
-    const img =
-        new Image();
-
-
-    const inputObjectUrl =
+    const objectUrl =
         URL.createObjectURL(
             file
         );
 
 
-    img.onload =
+    const image =
+        new Image();
+
+
+    image.onload =
         function () {
 
+            try {
 
-            console.log(
-                "Uploaded image resolution:",
-                img.naturalWidth,
-                "x",
-                img.naturalHeight
-            );
+                const sourceWidth =
+                    image.naturalWidth;
 
 
-            prepareImageFromSource(
+                const sourceHeight =
+                    image.naturalHeight;
 
-                img,
 
-                img.naturalWidth,
-
-                img.naturalHeight,
-
-                function (
-                    blob,
-                    width,
-                    height
+                if (
+                    !sourceWidth
+                    ||
+                    !sourceHeight
                 ) {
 
-                    URL.revokeObjectURL(
-                        inputObjectUrl
-                    );
-
-
-                    stopCamera();
-
-
-                    setCapturedImage(
-                        blob,
-                        width,
-                        height
+                    throw new Error(
+                        "Invalid uploaded image."
                     );
                 }
 
-            );
+
+                /*
+                    Uploaded images should NOT be forcibly
+                    cropped to A4 because some existing
+                    calibrated files may already be correctly
+                    prepared.
+
+                    Resize only.
+                */
+
+                const maximumWidth =
+                    1400;
+
+
+                let outputWidth =
+                    sourceWidth;
+
+
+                let outputHeight =
+                    sourceHeight;
+
+
+                if (
+                    outputWidth
+                    > maximumWidth
+                ) {
+
+                    const scale =
+                        maximumWidth
+                        / outputWidth;
+
+
+                    outputWidth =
+                        Math.round(
+                            outputWidth
+                            * scale
+                        );
+
+
+                    outputHeight =
+                        Math.round(
+                            outputHeight
+                            * scale
+                        );
+                }
+
+
+                captureCanvas.width =
+                    outputWidth;
+
+
+                captureCanvas.height =
+                    outputHeight;
+
+
+                const context =
+                    captureCanvas
+                        .getContext(
+                            "2d",
+                            {
+                                alpha:
+                                    false
+                            }
+                        );
+
+
+                context.fillStyle =
+                    "#ffffff";
+
+
+                context.fillRect(
+                    0,
+                    0,
+                    outputWidth,
+                    outputHeight
+                );
+
+
+                context.drawImage(
+                    image,
+                    0,
+                    0,
+                    outputWidth,
+                    outputHeight
+                );
+
+
+                captureCanvas.toBlob(
+
+                    function (
+                        blob
+                    ) {
+
+                        URL.revokeObjectURL(
+                            objectUrl
+                        );
+
+
+                        if (
+                            !blob
+                        ) {
+
+                            showError(
+                                "Could not prepare uploaded image."
+                            );
+
+                            return;
+                        }
+
+
+                        capturedBlob =
+                            blob;
+
+
+                        capturedFromCamera =
+                            false;
+
+
+                        clearPreviewUrl();
+
+
+                        previewObjectUrl =
+                            URL.createObjectURL(
+                                blob
+                            );
+
+
+                        capturedPreview.src =
+                            previewObjectUrl;
+
+
+                        capturedPreview.hidden =
+                            false;
+
+
+                        camera.hidden =
+                            true;
+
+
+                        cameraContainer.hidden =
+                            false;
+
+
+                        captureButton.hidden =
+                            true;
+
+
+                        retakeButton.hidden =
+                            false;
+
+
+                        scanButton.disabled =
+                            false;
+
+                    },
+
+                    "image/jpeg",
+
+                    0.92
+                );
+
+
+            } catch (
+            error
+            ) {
+
+                URL.revokeObjectURL(
+                    objectUrl
+                );
+
+
+                console.error(
+                    error
+                );
+
+
+                showError(
+                    error.message
+                    ||
+                    "Unable to prepare uploaded image."
+                );
+            }
         };
 
 
-    img.onerror =
+    image.onerror =
         function () {
 
             URL.revokeObjectURL(
-                inputObjectUrl
+                objectUrl
             );
 
 
             showError(
-                "Could not read the uploaded image."
+                "Unable to read uploaded image."
             );
         };
 
 
-    img.src =
-        inputObjectUrl;
+    image.src =
+        objectUrl;
 }
 
 
-// ============================================================
-// RETAKE / RESET IMAGE
-// ============================================================
+/* ==========================================================
+   RETAKE
+   ========================================================== */
 
-function retakeOMR() {
+async function retakeImage() {
 
-    hideError();
+    clearError();
 
     hideResult();
 
@@ -943,332 +1037,58 @@ function retakeOMR() {
         null;
 
 
+    capturedFromCamera =
+        false;
+
+
     clearPreviewUrl();
 
 
-    if (preview) {
-
-        preview.removeAttribute(
-            "src"
-        );
+    capturedPreview.src =
+        "";
 
 
-        preview.classList.add(
-            "hidden"
-        );
-    }
+    capturedPreview.hidden =
+        true;
 
 
-    if (retakeButton) {
-
-        retakeButton.classList.add(
-            "hidden"
-        );
-    }
+    scanButton.disabled =
+        true;
 
 
-    if (scanButton) {
+    /*
+        If the user originally used camera,
+        reopen camera.
 
-        scanButton.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (openCameraButton) {
-
-        openCameraButton.classList.remove(
-            "hidden"
-        );
-    }
-
-
-    if (imageUpload) {
-
-        imageUpload.value =
-            "";
-    }
-
-
-    if (cameraStream) {
-
-        if (cameraContainer) {
-
-            cameraContainer.classList.remove(
-                "hidden"
-            );
-        }
-
-
-        if (captureButton) {
-
-            captureButton.classList.remove(
-                "hidden"
-            );
-        }
-
-
-        if (openCameraButton) {
-
-            openCameraButton.classList.add(
-                "hidden"
-            );
-        }
-    }
+        Otherwise return to initial state.
+    */
+    await openCamera();
 }
 
 
-// ============================================================
-// DISPLAY RESULT
-// ============================================================
-
-function displayResult(
-    result
-) {
-
-    console.log(
-        "Displaying result:",
-        result
-    );
-
-
-    if (resultExam) {
-
-        resultExam.textContent =
-            result.exam
-            ?? "-";
-    }
-
-
-    if (paperCode) {
-
-        paperCode.textContent =
-
-            result.paper_code
-
-            ??
-
-            result.series
-
-            ??
-
-            "-";
-    }
-
-
-    if (score) {
-
-        score.textContent =
-            result.score
-            ?? "-";
-    }
-
-
-    if (correct) {
-
-        correct.textContent =
-            result.correct
-            ?? "-";
-    }
-
-
-    if (wrong) {
-
-        wrong.textContent =
-            result.wrong
-            ?? "-";
-    }
-
-
-    if (blank) {
-
-        blank.textContent =
-            result.blank
-            ?? "-";
-    }
-
-
-    if (multiple) {
-
-        multiple.textContent =
-            result.multiple
-            ?? "-";
-    }
-
-
-    // ========================================================
-    // QUALITY
-    // ========================================================
-
-    if (quality) {
-
-        const q =
-            result.quality;
-
-
-        if (q) {
-
-            const blurValue =
-
-                typeof q.blur ===
-                    "number"
-
-                    ?
-
-                    q.blur.toFixed(
-                        2
-                    )
-
-                    :
-
-                    q.blur ?? "-";
-
-
-            const brightnessValue =
-
-                typeof q.brightness ===
-                    "number"
-
-                    ?
-
-                    q.brightness.toFixed(
-                        2
-                    )
-
-                    :
-
-                    q.brightness ?? "-";
-
-
-            const contrastValue =
-
-                typeof q.contrast ===
-                    "number"
-
-                    ?
-
-                    q.contrast.toFixed(
-                        2
-                    )
-
-                    :
-
-                    q.contrast ?? "-";
-
-
-            quality.innerHTML = `
-
-                <h4>
-                    Scan Quality
-                </h4>
-
-                <p>
-                    Blur:
-                    <strong>
-                        ${blurValue}
-                    </strong>
-                </p>
-
-                <p>
-                    Brightness:
-                    <strong>
-                        ${brightnessValue}
-                    </strong>
-                </p>
-
-                <p>
-                    Contrast:
-                    <strong>
-                        ${contrastValue}
-                    </strong>
-                </p>
-
-            `;
-
-        } else {
-
-            quality.innerHTML =
-                "";
-        }
-    }
-
-
-    if (message) {
-
-        message.textContent =
-            result.message
-            ?? "";
-    }
-
-
-    if (resultSection) {
-
-        resultSection.classList.remove(
-            "hidden"
-        );
-
-
-        resultSection.scrollIntoView({
-
-            behavior:
-                "smooth",
-
-            block:
-                "start"
-
-        });
-    }
-}
-
-
-// ============================================================
-// SERVER RESPONSE PARSER
-// ============================================================
-
-async function parseServerResponse(
+/* ==========================================================
+   RESPONSE PARSER
+   ========================================================== */
+
+async function readServerResponse(
     response
 ) {
 
     const contentType =
-        response.headers.get(
-            "content-type"
-        )
+        response.headers
+            .get(
+                "content-type"
+            )
         || "";
 
 
-    const rawText =
+    const text =
         await response.text();
 
 
-    console.log(
-        "HTTP status:",
-        response.status
-    );
+    let data =
+        null;
 
-
-    console.log(
-        "Response content-type:",
-        contentType
-    );
-
-
-    console.log(
-        "Raw response:",
-        rawText
-    );
-
-
-    if (!rawText) {
-
-        throw new Error(
-            `Server returned an empty response. HTTP ${response.status}`
-        );
-    }
-
-
-    // ========================================================
-    // JSON RESPONSE
-    // ========================================================
 
     if (
         contentType.includes(
@@ -1278,300 +1098,397 @@ async function parseServerResponse(
 
         try {
 
-            return JSON.parse(
-                rawText
-            );
+            data =
+                JSON.parse(
+                    text
+                );
 
-        } catch (error) {
+        } catch (
+        error
+        ) {
 
             console.error(
-                "JSON parsing error:",
+                "JSON parse error:",
                 error
-            );
-
-
-            throw new Error(
-                `Server returned invalid JSON. HTTP ${response.status}`
             );
         }
     }
 
 
-    // ========================================================
-    // NON-JSON RESPONSE
-    // ========================================================
+    /*
+        Sometimes Vercel / proxy may return JSON
+        without correct content-type.
+    */
+    if (
+        !data
+        &&
+        text
+    ) {
 
-    console.error(
-        "NON-JSON RESPONSE:",
-        rawText
-    );
+        try {
+
+            data =
+                JSON.parse(
+                    text
+                );
+
+        } catch (
+        error
+        ) {
+
+            /*
+                Ignore. We'll produce a readable
+                status error below.
+            */
+        }
+    }
 
 
     if (
-        response.status ===
-        413
+        !response.ok
     ) {
 
+        if (
+            data
+            &&
+            data.detail
+        ) {
+
+            throw new Error(
+                data.detail
+            );
+        }
+
+
+        if (
+            data
+            &&
+            data.error
+        ) {
+
+            throw new Error(
+                data.error
+            );
+        }
+
+
+        if (
+            response.status
+            === 413
+        ) {
+
+            throw new Error(
+                "Image is too large for the server."
+            );
+        }
+
+
+        if (
+            response.status
+            === 500
+        ) {
+
+            throw new Error(
+                "Backend crashed while processing OMR. HTTP 500."
+            );
+        }
+
+
+        if (
+            response.status
+            === 502
+        ) {
+
+            throw new Error(
+                "Backend service failed. HTTP 502."
+            );
+        }
+
+
+        if (
+            response.status
+            === 504
+        ) {
+
+            throw new Error(
+                "OMR processing timed out. HTTP 504."
+            );
+        }
+
+
         throw new Error(
-            "OMR image is too large for the server. HTTP 413."
+            `Server error. HTTP ${response.status}.`
         );
     }
 
 
     if (
-        response.status ===
-        500
+        !data
     ) {
 
         throw new Error(
-            "Backend crashed while processing OMR. HTTP 500."
+            "Server returned an invalid response."
         );
     }
 
 
-    if (
-        response.status ===
-        502
-    ) {
-
-        throw new Error(
-            "Vercel backend function failed. HTTP 502."
-        );
-    }
-
-
-    if (
-        response.status ===
-        504
-    ) {
-
-        throw new Error(
-            "OMR processing timed out. HTTP 504."
-        );
-    }
-
-
-    if (
-        response.status ===
-        404
-    ) {
-
-        throw new Error(
-            "Scan API endpoint was not found. HTTP 404."
-        );
-    }
-
-
-    throw new Error(
-        `Server returned a non-JSON response. HTTP ${response.status}.`
-    );
+    return data;
 }
 
 
-// ============================================================
-// SCAN OMR
-// ============================================================
+/* ==========================================================
+   DISPLAY RESULT
+   ========================================================== */
+
+function displayResult(
+    data
+) {
+
+    const result =
+        data.result
+        || data;
+
+
+    if (
+        resultExam
+    ) {
+
+        resultExam.textContent =
+            result.exam
+            ||
+            result.exam_name
+            ||
+            "-";
+    }
+
+
+    if (
+        paperCode
+    ) {
+
+        paperCode.textContent =
+            result.paper_code
+            ||
+            result.series
+            ||
+            result.jee_series
+            ||
+            "-";
+    }
+
+
+    if (
+        score
+    ) {
+
+        score.textContent =
+            result.score
+            ?? "-";
+    }
+
+
+    if (
+        correct
+    ) {
+
+        correct.textContent =
+            result.correct
+            ?? 0;
+    }
+
+
+    if (
+        wrong
+    ) {
+
+        wrong.textContent =
+            result.wrong
+            ?? 0;
+    }
+
+
+    if (
+        blank
+    ) {
+
+        blank.textContent =
+            result.blank
+            ?? 0;
+    }
+
+
+    if (
+        multiple
+    ) {
+
+        multiple.textContent =
+            result.multiple
+            ?? 0;
+    }
+
+
+    if (
+        quality
+    ) {
+
+        const qualityData =
+            result.quality
+            ||
+            data.quality;
+
+
+        if (
+            qualityData
+        ) {
+
+            quality.textContent =
+                `Blur: ${qualityData.blur
+                ?? "-"
+                } | Brightness: ${qualityData.brightness
+                ?? "-"
+                } | Contrast: ${qualityData.contrast
+                ?? "-"
+                }`;
+
+        } else {
+
+            quality.textContent =
+                "";
+        }
+    }
+
+
+    if (
+        message
+    ) {
+
+        message.textContent =
+            result.message
+            ||
+            data.message
+            ||
+            "";
+    }
+
+
+    if (
+        resultSection
+    ) {
+
+        resultSection.hidden =
+            false;
+    }
+}
+
+
+/* ==========================================================
+   SCAN
+   ========================================================== */
 
 async function scanOMR() {
 
-    hideError();
+    clearError();
 
     hideResult();
 
 
     const exam =
-
         examSelect
-
-            ?
-
-            examSelect.value
-
-            :
-
-            "";
+            ?.value
+            ?.trim();
 
 
-    if (!exam) {
+    if (
+        !exam
+    ) {
 
         showError(
-            "Please select an exam."
+            "Select an exam first."
         );
 
         return;
     }
 
 
-    if (!capturedBlob) {
+    if (
+        !capturedBlob
+    ) {
 
         showError(
-            "Please capture or upload an OMR image first."
+            "Capture or upload an OMR image first."
         );
 
         return;
     }
 
 
-    // ========================================================
-    // FORM DATA
-    //
-    // Only these are sent:
-    //
-    // exam
-    // image
-    //
-    // Paper code / answer key is automatic.
-    // ========================================================
-
-    const formData =
-        new FormData();
+    scanButton.disabled =
+        true;
 
 
-    formData.append(
-        "exam",
-        exam
+    showLoading(
+        "Scanning OMR..."
     );
-
-
-    formData.append(
-        "image",
-        capturedBlob,
-        "omr_scan.jpg"
-    );
-
-
-    showLoading();
-
-
-    if (scanButton) {
-
-        scanButton.disabled =
-            true;
-
-
-        scanButton.textContent =
-            "Scanning...";
-    }
 
 
     try {
 
-        console.log(
-            "Sending OMR scan..."
-        );
+        const formData =
+            new FormData();
 
 
-        console.log(
-            "Exam:",
+        formData.append(
+            "exam",
             exam
         );
 
 
-        console.log(
-            "Image bytes:",
-            capturedBlob.size
+        formData.append(
+            "image",
+            capturedBlob,
+            capturedFromCamera
+                ? "camera_omr.jpg"
+                : "uploaded_omr.jpg"
         );
 
 
         const response =
             await fetch(
-
                 "/scan",
-
                 {
-
                     method:
                         "POST",
 
                     body:
                         formData
-
                 }
-
             );
 
 
-        const result =
-            await parseServerResponse(
+        const data =
+            await readServerResponse(
                 response
             );
 
 
-        // ====================================================
-        // FASTAPI ERROR
-        // ====================================================
-
-        if (!response.ok) {
-
-            let errorMessage =
-                "OMR scan failed.";
-
-
-            if (
-                result &&
-                result.detail
-            ) {
-
-                if (
-                    typeof result.detail ===
-                    "string"
-                ) {
-
-                    errorMessage =
-                        result.detail;
-
-                } else {
-
-                    errorMessage =
-                        JSON.stringify(
-                            result.detail
-                        );
-                }
-
-            } else if (
-                result &&
-                result.message
-            ) {
-
-                errorMessage =
-                    result.message;
-            }
-
-
-            throw new Error(
-                errorMessage
-            );
-        }
-
-
-        // ====================================================
-        // SUCCESS
-        // ====================================================
-
         displayResult(
-            result
+            data
         );
 
 
-        stopCamera();
-
-
-    } catch (error) {
+    } catch (
+    error
+    ) {
 
         console.error(
-            "Scan failed:",
             error
         );
 
 
         showError(
-
             error.message
-
             ||
-
-            "OMR scan failed."
-
+            "OMR processing failed."
         );
 
 
@@ -1580,336 +1497,175 @@ async function scanOMR() {
         hideLoading();
 
 
-        if (scanButton) {
-
-            scanButton.disabled =
-                false;
-
-
-            scanButton.textContent =
-                "Scan & Evaluate";
-        }
+        scanButton.disabled =
+            false;
     }
 }
 
 
-// ============================================================
-// STOP CAMERA
-// ============================================================
+/* ==========================================================
+   EVENTS
+   ========================================================== */
 
-function stopCamera() {
+if (
+    openCameraButton
+) {
 
-    if (!cameraStream) {
-
-        return;
-    }
-
-
-    const tracks =
-        cameraStream.getTracks();
-
-
-    for (
-        const track of tracks
-    ) {
-
-        track.stop();
-    }
-
-
-    cameraStream =
-        null;
-
-
-    if (camera) {
-
-        camera.srcObject =
-            null;
-    }
-
-
-    console.log(
-        "Camera stopped"
+    openCameraButton.addEventListener(
+        "click",
+        openCamera
     );
 }
 
 
-// ============================================================
-// RESET SCANNER
-// ============================================================
+if (
+    captureButton
+) {
 
-function resetScanner() {
-
-    hideError();
-
-    hideResult();
-
-    hideLoading();
-
-
-    capturedBlob =
-        null;
-
-
-    clearPreviewUrl();
-
-
-    stopCamera();
-
-
-    if (preview) {
-
-        preview.removeAttribute(
-            "src"
-        );
-
-
-        preview.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (cameraContainer) {
-
-        cameraContainer.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (captureButton) {
-
-        captureButton.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (retakeButton) {
-
-        retakeButton.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (scanButton) {
-
-        scanButton.classList.add(
-            "hidden"
-        );
-    }
-
-
-    if (openCameraButton) {
-
-        openCameraButton.classList.remove(
-            "hidden"
-        );
-    }
-
-
-    if (imageUpload) {
-
-        imageUpload.value =
-            "";
-    }
+    captureButton.addEventListener(
+        "click",
+        captureCameraImage
+    );
 }
 
 
-// ============================================================
-// EVENT LISTENERS
-// ============================================================
+if (
+    retakeButton
+) {
 
-document.addEventListener(
-
-    "DOMContentLoaded",
-
-    function () {
-
-
-        console.log(
-            "DOM loaded"
-        );
+    retakeButton.addEventListener(
+        "click",
+        retakeImage
+    );
+}
 
 
-        // ====================================================
-        // CAMERA
-        // ====================================================
+if (
+    scanButton
+) {
 
-        if (openCameraButton) {
+    scanButton.addEventListener(
+        "click",
+        scanOMR
+    );
+}
 
-            openCameraButton.addEventListener(
 
-                "click",
+if (
+    imageUpload
+) {
 
-                openCamera
+    imageUpload.addEventListener(
+        "change",
+        function (
+            event
+        ) {
 
-            );
+            const file =
+                event.target
+                    .files?.[0];
 
-        } else {
 
-            console.error(
-                "openCameraButton not found"
-            );
+            if (
+                file
+            ) {
+
+                stopCamera();
+
+                prepareUploadedImage(
+                    file
+                );
+            }
+
+
+            /*
+                Allows selecting the same image again.
+            */
+            event.target.value =
+                "";
         }
+    );
+}
 
 
-        // ====================================================
-        // CAPTURE
-        // ====================================================
-
-        if (captureButton) {
-
-            captureButton.addEventListener(
-
-                "click",
-
-                captureOMR
-
-            );
-
-        } else {
-
-            console.error(
-                "captureButton not found"
-            );
-        }
-
-
-        // ====================================================
-        // UPLOAD
-        // ====================================================
-
-        if (imageUpload) {
-
-            imageUpload.addEventListener(
-
-                "change",
-
-                handleImageUpload
-
-            );
-
-        } else {
-
-            console.error(
-                "imageUpload not found"
-            );
-        }
-
-
-        // ====================================================
-        // RETAKE
-        // ====================================================
-
-        if (retakeButton) {
-
-            retakeButton.addEventListener(
-
-                "click",
-
-                retakeOMR
-
-            );
-
-        } else {
-
-            console.error(
-                "retakeButton not found"
-            );
-        }
-
-
-        // ====================================================
-        // SCAN
-        // ====================================================
-
-        if (scanButton) {
-
-            scanButton.addEventListener(
-
-                "click",
-
-                scanOMR
-
-            );
-
-        } else {
-
-            console.error(
-                "scanButton not found"
-            );
-        }
-
-
-        // ====================================================
-        // EXAM CHANGE
-        // ====================================================
-
-        if (examSelect) {
-
-            examSelect.addEventListener(
-
-                "change",
-
-                resetScanner
-
-            );
-
-        } else {
-
-            console.error(
-                "exam selector not found"
-            );
-        }
-
-
-        console.log(
-            "OMR scanner ready"
-        );
-    }
-
-);
-
-
-// ============================================================
-// PAGE CLEANUP
-// ============================================================
+/* ==========================================================
+   PAGE CLEANUP
+   ========================================================== */
 
 window.addEventListener(
-
     "beforeunload",
-
     function () {
-
 
         stopCamera();
 
-
         clearPreviewUrl();
-
     }
-
 );
 
 
-// ============================================================
-// GLOBAL DEBUG ACCESS
-// ============================================================
+/* ==========================================================
+   INITIAL UI
+   ========================================================== */
 
-window.openCamera =
-    openCamera;
+(function initializeUI() {
 
-window.captureOMR =
-    captureOMR;
+    hideLoading();
 
-window.scanOMR =
-    scanOMR;
+    clearError();
 
-window.retakeOMR =
-    retakeOMR;
+    hideResult();
 
-window.stopCamera =
-    stopCamera;
+
+    if (
+        cameraContainer
+    ) {
+
+        cameraContainer.hidden =
+            true;
+    }
+
+
+    if (
+        camera
+    ) {
+
+        camera.hidden =
+            false;
+    }
+
+
+    if (
+        capturedPreview
+    ) {
+
+        capturedPreview.hidden =
+            true;
+    }
+
+
+    if (
+        captureButton
+    ) {
+
+        captureButton.hidden =
+            true;
+    }
+
+
+    if (
+        retakeButton
+    ) {
+
+        retakeButton.hidden =
+            true;
+    }
+
+
+    if (
+        scanButton
+    ) {
+
+        scanButton.disabled =
+            true;
+    }
+})();
