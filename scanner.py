@@ -1,6 +1,7 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
 import json
+import os
 
 import cv2
 import numpy as np
@@ -23,7 +24,7 @@ def ensure_ml_model_available():
     model_path = (
         Path(__file__).resolve().parent
         / "models"
-        / "bubble_classifier.keras"
+        / "bubble_classifier.onnx"
     )
 
     if not model_path.exists():
@@ -419,14 +420,15 @@ def detect_corner_markers(
     template,
 ):
     """
-    Detect the actual white OMR sheet.
+    Detect the actual white OMR sheet inside a mobile-camera image.
 
-    Scores candidate rectangles using:
-    - expected sheet aspect ratio
-    - brightness inside candidate
+    Candidate quadrilaterals are ranked using:
+    - expected template aspect ratio
+    - brightness / white-paper fraction
     - candidate size
 
-    This avoids selecting a laptop screen / browser / camera frame.
+    This prevents the laptop screen, browser frame, table, or the
+    complete camera frame from being mistaken for the OMR sheet.
     """
 
     gray = cv2.cvtColor(
@@ -469,9 +471,7 @@ def detect_corner_markers(
             "Could not detect OMR sheet."
         )
 
-    image_height, image_width = (
-        image.shape[:2]
-    )
+    image_height, image_width = image.shape[:2]
 
     image_area = float(
         image_height
@@ -513,12 +513,12 @@ def detect_corner_markers(
             / image_area
         )
 
-        # Sheet can be relatively small in mobile photo.
+        # The paper may occupy only part of the mobile frame.
         if area_ratio < 0.06:
             continue
 
-        # Never accept almost entire camera frame.
-        if area_ratio > 0.90:
+        # Never accept almost the entire camera frame.
+        if area_ratio > 0.92:
             continue
 
         perimeter = cv2.arcLength(
@@ -604,19 +604,13 @@ def detect_corner_markers(
                 / average_height
             )
 
-            # Reject obviously wrong shapes.
+            # Allow perspective variation around the template ratio.
             if not (
-                expected_ratio * 0.70
+                expected_ratio * 0.68
                 <= ratio
-                <= expected_ratio * 1.30
+                <= expected_ratio * 1.35
             ):
                 continue
-
-            # ---------------------------------------------
-            # Measure brightness inside rectangle.
-            # White OMR sheet should be much brighter than
-            # laptop/background.
-            # ---------------------------------------------
 
             mask = np.zeros(
                 gray.shape,
@@ -654,10 +648,6 @@ def detect_corner_markers(
                 )
             )
 
-            # ---------------------------------------------
-            # Aspect-ratio score
-            # ---------------------------------------------
-
             ratio_error = abs(
                 ratio
                 - expected_ratio
@@ -677,8 +667,6 @@ def detect_corner_markers(
                 / 255.0
             )
 
-            # Prefer reasonably sized sheet, but DON'T simply
-            # select the largest rectangle.
             size_score = min(
                 area_ratio / 0.40,
                 1.0,
@@ -686,31 +674,28 @@ def detect_corner_markers(
 
             score = (
                 ratio_score * 4.0
-                +
-                white_fraction * 4.0
-                +
-                brightness_score * 2.0
-                +
-                size_score
+                + white_fraction * 4.0
+                + brightness_score * 2.0
+                + size_score
             )
 
             if score > best_score:
-
                 best_score = score
-
-                best_candidate = (
-                    ordered
-                )
+                best_candidate = ordered
 
             break
 
     if best_candidate is None:
         raise ValueError(
             "Could not locate the white OMR sheet. "
-            "Keep all four paper corners visible and move closer."
+            "Keep all four paper corners visible, "
+            "hold the phone parallel to the page, "
+            "and let the paper fill most of the yellow A4 guide."
         )
 
     return best_candidate
+
+
 # ============================================================
 # PERSPECTIVE CORRECTION
 # ============================================================
@@ -1519,7 +1504,6 @@ def detect_paper_code(
                 f"Scores: {readable_scores}"
             )
 
-
         detected_characters.append(
             best_value
         )
@@ -2147,6 +2131,121 @@ def scan_jee_answers(
 
 
 # ============================================================
+# PAPER CODE DEBUG IMAGE
+# ============================================================
+
+def draw_paper_code_debug(
+    corrected_image,
+    template,
+):
+    """
+    Draw the exact paper-code sampling circles on the corrected
+    1600 x 2200 image. Useful for coordinate calibration.
+    """
+
+    debug = corrected_image.copy()
+
+    config = template.get(
+        "paper_code",
+        {},
+    )
+
+    characters = config.get(
+        "characters",
+        [],
+    )
+
+    for position_index, character in enumerate(
+        characters,
+        start=1,
+    ):
+
+        x = int(
+            character["x"]
+        )
+
+        start_y = int(
+            character["start_y"]
+        )
+
+        gap = int(
+            character["gap"]
+        )
+
+        values = character[
+            "values"
+        ]
+
+        for index, value in enumerate(
+            values
+        ):
+
+            y = (
+                start_y
+                + index * gap
+            )
+
+            cv2.circle(
+                debug,
+                (
+                    int(x),
+                    int(y),
+                ),
+                14,
+                (
+                    0,
+                    0,
+                    255,
+                ),
+                2,
+            )
+
+            cv2.putText(
+                debug,
+                str(value),
+                (
+                    int(x) + 18,
+                    int(y) + 5,
+                ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (
+                    255,
+                    0,
+                    0,
+                ),
+                1,
+                cv2.LINE_AA,
+            )
+
+        cv2.putText(
+            debug,
+            f"CODE POS {position_index}",
+            (
+                max(
+                    0,
+                    int(x) - 80,
+                ),
+                max(
+                    25,
+                    int(start_y) - 20,
+                ),
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (
+                0,
+                255,
+                255,
+            ),
+            2,
+            cv2.LINE_AA,
+        )
+
+    return debug
+
+
+# ============================================================
 # DEBUG IMAGE
 # ============================================================
 
@@ -2323,11 +2422,11 @@ def process_omr(
     # --------------------------------
 
     corners = (
-    detect_corner_markers(
-        image,
-        template,
+        detect_corner_markers(
+            image,
+            template,
+        )
     )
-)
 
     # --------------------------------
     # Correct orientation / perspective
@@ -2348,6 +2447,26 @@ def process_omr(
     gray = normalize_grayscale(
         corrected
     )
+
+    # --------------------------------
+    # Paper-code coordinate debug
+    # Local only: never write into the Vercel deployment root.
+    # --------------------------------
+
+    paper_code_debug = (
+        draw_paper_code_debug(
+            corrected,
+            template,
+        )
+    )
+
+    if not os.environ.get(
+        "VERCEL"
+    ):
+        cv2.imwrite(
+            "paper_code_debug.jpg",
+            paper_code_debug,
+        )
 
     exam_name = (
         str(
