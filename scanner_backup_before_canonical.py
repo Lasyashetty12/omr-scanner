@@ -1,6 +1,5 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
-from omr_preprocess import canonicalize_omr
 import json
 import os
 
@@ -12,11 +11,6 @@ from config import (
     MIN_BRIGHTNESS,
     MAX_BRIGHTNESS,
     MIN_CONTRAST,
-)
-from ml_omr.column_calibration import (
-    auto_calibrate_neet_columns,
-    generate_calibrated_bubble_coordinates,
-    draw_calibration_debug,
 )
 
 
@@ -32,10 +26,10 @@ from ml_omr.column_calibration import (
 #
 CANONICAL_REGISTRATION_MARKERS = np.array(
     [
-        [81.2, 78.3],
-        [1522.0, 78.3],
-        [1523.3, 2124.2],
-        [79.9, 2120.4],
+        [81.3, 78.1],
+        [1522.7, 78.1],
+        [1524.2, 2124.2],
+        [81.3, 2119.9],
     ],
     dtype="float32",
 )
@@ -159,134 +153,6 @@ def load_image(image_path):
         )
 
     return image
-
-
-
-# ============================================================
-# CANONICAL PREPROCESSING
-# ============================================================
-
-def preprocess_to_canonical(
-    image,
-    template,
-):
-    """
-    Convert a mobile photo into the same geometry as the clean
-    canonical NEET/KCET reference before any paper-code or answer
-    reading occurs.
-
-    Pipeline:
-      1. generous registration-marker crop
-      2. detect registration marks inside crop
-      3. marker-to-marker homography
-      4. force exact template size
-      5. mild grayscale normalization for downstream reading
-
-    The template JSON coordinates are never modified.
-    """
-
-    cropped_image, crop_debug = (
-        crop_omr_by_corner_boxes(
-            image
-        )
-    )
-
-    registration_markers = (
-        detect_registration_markers_in_crop(
-            cropped_image
-        )
-    )
-
-    corrected = (
-        perspective_transform_from_registration_markers(
-            cropped_image,
-            registration_markers,
-            template,
-        )
-    )
-
-    expected_width = int(
-        template["sheet_width"]
-    )
-
-    expected_height = int(
-        template["sheet_height"]
-    )
-
-    actual_height, actual_width = (
-        corrected.shape[:2]
-    )
-
-    if (
-        actual_width != expected_width
-        or actual_height != expected_height
-    ):
-        corrected = cv2.resize(
-            corrected,
-            (
-                expected_width,
-                expected_height,
-            ),
-            interpolation=cv2.INTER_LINEAR,
-        )
-
-    gray = cv2.cvtColor(
-        corrected,
-        cv2.COLOR_BGR2GRAY,
-    )
-
-    clahe = cv2.createCLAHE(
-        clipLimit=2.0,
-        tileGridSize=(
-            8,
-            8,
-        ),
-    )
-
-    normalized_gray = clahe.apply(
-        gray
-    )
-
-    normalized_gray = cv2.GaussianBlur(
-        normalized_gray,
-        (3, 3),
-        0,
-    )
-
-    debug = {
-        "crop":
-            crop_debug,
-
-        "registration_markers": [
-            [
-                round(
-                    float(point[0]),
-                    2,
-                ),
-                round(
-                    float(point[1]),
-                    2,
-                ),
-            ]
-            for point
-            in registration_markers
-        ],
-
-        "output_size": {
-            "width":
-                int(expected_width),
-
-            "height":
-                int(expected_height),
-        },
-    }
-
-    return (
-        corrected,
-        normalized_gray,
-        cropped_image,
-        debug,
-    )
 
 
 # ============================================================
@@ -1965,69 +1831,61 @@ def perspective_transform_from_registration_markers(
     template,
 ):
     """
-    Warp detected registration-marker centres to the exact marker
-    centres measured from the blank reference sheet.
+    Warp the photographed OMR into the exact template coordinate
+    system required by neet.json.
 
-    This is different from mapping marker centres to the OUTER image
-    corners. Mapping them to the canvas edges caused the previously
-    observed clipped / 'halved' corrected image.
+    Output MUST be exactly:
+        sheet_width x sheet_height
     """
 
-    width = int(
-        template[
-            "sheet_width"
-        ]
+    output_width = int(
+        template["sheet_width"]
     )
 
-    height = int(
-        template[
-            "sheet_height"
-        ]
+    output_height = int(
+        template["sheet_height"]
     )
 
     source = order_points(
         source_markers
+    ).astype(
+        np.float32
     )
 
-    # Scale the canonical NEET reference positions if another
-    # Manchester template uses a different canonical canvas size.
-    scale_x = (
-        width
+    # Canonical registration marker centers measured from the
+    # blank NEET reference sheet in the 1600 x 2200 coordinate system.
+    destination = np.array(
+        [
+            [81.3, 78.1],
+            [1522.7, 78.1],
+            [1524.2, 2124.2],
+            [81.3, 2119.9],
+        ],
+        dtype=np.float32,
+    )
+
+    # Scale only if another template uses different dimensions.
+    destination[:, 0] *= (
+        output_width
         / 1600.0
     )
 
-    scale_y = (
-        height
+    destination[:, 1] *= (
+        output_height
         / 2200.0
     )
 
-    destination = (
-        CANONICAL_REGISTRATION_MARKERS.copy()
-    )
-
-    destination[:, 0] *= (
-        scale_x
-    )
-
-    destination[:, 1] *= (
-        scale_y
-    )
-
     matrix = cv2.getPerspectiveTransform(
-        source.astype(
-            "float32"
-        ),
-        destination.astype(
-            "float32"
-        ),
+        source,
+        destination,
     )
 
     corrected = cv2.warpPerspective(
         image,
         matrix,
         (
-            width,
-            height,
+            output_width,
+            output_height,
         ),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
@@ -2037,6 +1895,21 @@ def perspective_transform_from_registration_markers(
             255,
         ),
     )
+
+    # Absolute safety:
+    # ensure final image exactly matches template geometry.
+    if (
+        corrected.shape[1] != output_width
+        or corrected.shape[0] != output_height
+    ):
+        corrected = cv2.resize(
+            corrected,
+            (
+                output_width,
+                output_height,
+            ),
+            interpolation=cv2.INTER_LINEAR,
+        )
 
     return corrected
 
@@ -2595,14 +2468,8 @@ def scan_answers(
     """
     ML-based answer reader for NEET / KCET.
 
-    Runtime flow:
-      1. convert corrected image to grayscale
-      2. auto-calibrate the four response columns
-      3. build calibrated bubble coordinates
-      4. run the relative hybrid ML reader
-      5. convert its output to the existing scanner/scorer format
-
-    The template JSON itself is never modified.
+    The return shape remains compatible with the existing
+    scorer/debug code.
     """
 
     if corrected_image.ndim == 3:
@@ -2613,66 +2480,31 @@ def scan_answers(
     else:
         gray = corrected_image.copy()
 
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
+    coordinates = generate_bubble_coordinates(
+        template
     )
 
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    if not os.environ.get(
-        "VERCEL"
-    ):
-        calibration_debug_base = (
-            cv2.cvtColor(
-                gray,
-                cv2.COLOR_GRAY2BGR,
+    raw_answers, ml_debug = scan_answers_ml(
+        gray=gray,
+        coordinates=coordinates,
+        crop_radius=int(
+            template.get(
+                "ml_crop_radius",
+                16,
             )
-        )
-
-        calibration_debug = (
-            draw_calibration_debug(
-                calibration_debug_base,
-                template,
-                column_offsets,
+        ),
+        filled_confidence=float(
+            template.get(
+                "ml_filled_confidence",
+                0.70,
             )
-        )
-
-        cv2.imwrite(
-            "column_calibration_debug.jpg",
-            calibration_debug,
-        )
-
-    raw_answers, ml_debug = (
-        scan_answers_ml(
-            gray=gray,
-            coordinates=coordinates,
-            crop_radius=int(
-                template.get(
-                    "ml_crop_radius",
-                    16,
-                )
-            ),
-            filled_confidence=float(
-                template.get(
-                    "ml_filled_confidence",
-                    0.70,
-                )
-            ),
-            ambiguous_confidence=float(
-                template.get(
-                    "ml_ambiguous_confidence",
-                    0.60,
-                )
-            ),
-        )
+        ),
+        ambiguous_confidence=float(
+            template.get(
+                "ml_ambiguous_confidence",
+                0.60,
+            )
+        ),
     )
 
     answers = {}
@@ -2685,7 +2517,7 @@ def scan_answers(
 
         details = ml_debug.get(
             question,
-            {},
+            {}
         )
 
         status = details.get(
@@ -2696,9 +2528,7 @@ def scan_answers(
         if detected == "MULTIPLE":
             final_answer = "MULTIPLE"
 
-        elif detected in template[
-            "options"
-        ]:
+        elif detected in template["options"]:
             final_answer = detected
 
         elif status == "ambiguous":
@@ -2707,266 +2537,13 @@ def scan_answers(
         else:
             final_answer = "BLANK"
 
-        answers[
-            question
-        ] = {
-            "answer":
-                final_answer,
-
-            "ml_status":
-                status,
-
-            "ml":
-                details,
+        answers[question] = {
+            "answer": final_answer,
+            "ml_status": status,
+            "ml": details,
         }
 
     return answers
-
-
-def draw_answer_analysis(
-    corrected_image,
-    template,
-    answers,
-):
-    """
-    Draw the final OMR decisions on the corrected image.
-
-    IMPORTANT:
-    This recalculates the same per-column calibration used by scan_answers(),
-    so the circles shown here correspond to the actual runtime sampling
-    positions rather than the raw JSON coordinates.
-
-    Green  = selected single answer
-    Red    = multiple
-    Yellow = uncertain
-    Gray   = blank/unselected
-    """
-
-    debug_image = (
-        corrected_image.copy()
-    )
-
-    if corrected_image.ndim == 3:
-        gray = cv2.cvtColor(
-            corrected_image,
-            cv2.COLOR_BGR2GRAY,
-        )
-    else:
-        gray = corrected_image.copy()
-
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
-    )
-
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    option_colors = {
-        "selected":
-            (0, 200, 0),
-
-        "multiple":
-            (0, 0, 255),
-
-        "uncertain":
-            (0, 215, 255),
-
-        "blank":
-            (160, 160, 160),
-    }
-
-    radius = (
-        int(
-            template.get(
-                "bubble_radius",
-                11,
-            )
-        )
-        + 5
-    )
-
-    for question, option_map in (
-        coordinates.items()
-    ):
-
-        result = answers.get(
-            question,
-            {},
-        )
-
-        final_answer = result.get(
-            "answer",
-            "BLANK",
-        )
-
-        ml_details = result.get(
-            "ml",
-            {},
-        )
-
-        multiple_options = (
-            ml_details.get(
-                "multiple_options",
-                [],
-            )
-        )
-
-        best_option = (
-            ml_details.get(
-                "best_option"
-            )
-        )
-
-        for option, (
-            x,
-            y,
-        ) in option_map.items():
-
-            color = option_colors[
-                "blank"
-            ]
-
-            thickness = 1
-
-            if (
-                final_answer
-                in template["options"]
-                and option == final_answer
-            ):
-                color = option_colors[
-                    "selected"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "MULTIPLE"
-                and option
-                in multiple_options
-            ):
-                color = option_colors[
-                    "multiple"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "UNCERTAIN"
-                and option
-                == best_option
-            ):
-                color = option_colors[
-                    "uncertain"
-                ]
-
-                thickness = 3
-
-            cv2.circle(
-                debug_image,
-                (
-                    int(x),
-                    int(y),
-                ),
-                radius,
-                color,
-                thickness,
-            )
-
-        first_option = (
-            template["options"][0]
-        )
-
-        label_x = int(
-            option_map[
-                first_option
-            ][0]
-            - 80
-        )
-
-        label_y = int(
-            option_map[
-                first_option
-            ][1]
-            + 5
-        )
-
-        if (
-            final_answer
-            == "MULTIPLE"
-        ):
-            text_color = (
-                0,
-                0,
-                255,
-            )
-
-            label = (
-                f"{question}:MULTI"
-            )
-
-        elif (
-            final_answer
-            == "UNCERTAIN"
-        ):
-            text_color = (
-                0,
-                165,
-                255,
-            )
-
-            label = (
-                f"{question}:?"
-            )
-
-        elif (
-            final_answer
-            == "BLANK"
-        ):
-            text_color = (
-                100,
-                100,
-                100,
-            )
-
-            label = (
-                f"{question}:-"
-            )
-
-        else:
-            text_color = (
-                0,
-                180,
-                0,
-            )
-
-            label = (
-                f"{question}:{final_answer}"
-            )
-
-        cv2.putText(
-            debug_image,
-            label,
-            (
-                label_x,
-                label_y,
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            text_color,
-            1,
-            cv2.LINE_AA,
-        )
-
-    return debug_image
 
 
 # ============================================================
@@ -3916,25 +3493,9 @@ def create_debug_image(
         "KCET",
     ]:
 
-        if corrected_image.ndim == 3:
-            calibration_gray = cv2.cvtColor(
-                corrected_image,
-                cv2.COLOR_BGR2GRAY,
-            )
-        else:
-            calibration_gray = corrected_image.copy()
-
-        column_offsets = (
-            auto_calibrate_neet_columns(
-                calibration_gray,
-                template,
-            )
-        )
-
         coordinates = (
-            generate_calibrated_bubble_coordinates(
-                template,
-                column_offsets,
+            generate_bubble_coordinates(
+                template
             )
         )
 
@@ -4074,182 +3635,90 @@ def process_omr(
         )
     )
 
-    # --------------------------------
-    # Determine exam before alignment
-    # --------------------------------
+    # ========================================================
+    # STEP 1:
+    # USE REGISTRATION MARKS ONLY FOR A GENEROUS INITIAL CROP.
+    # ========================================================
 
-    template_exam_name = (
-        str(
-            template.get(
-                "exam_name",
-                ""
-            )
+    cropped_image, crop_debug = (
+        crop_omr_by_corner_boxes(
+            image
         )
-        .strip()
-        .upper()
+    )
+
+    if not os.environ.get(
+        "VERCEL"
+    ):
+        cv2.imwrite(
+            "cropped_omr.jpg",
+            cropped_image,
+        )
+
+    # ========================================================
+    # STEP 2:
+    # DETECT THE FOUR LARGE BLACK REGISTRATION MARKS INSIDE
+    # THE GENEROUS CROP.
+    # ========================================================
+
+    registration_markers = (
+        detect_registration_markers_in_crop(
+            cropped_image
+        )
     )
 
     # ========================================================
-    # NEET / KCET:
-    # PREPROCESS TO THE SAME CANONICAL GEOMETRY AS THE CLEAN
-    # REFERENCE SHEET BEFORE USING ANY JSON COORDINATES.
+    # STEP 3:
+    # MAP THOSE MARKERS TO THEIR CANONICAL POSITIONS FROM THE
+    # BLANK MANCHESTER REFERENCE SHEET.
+    #
+    # This preserves the outer margins and aligns the image with
+    # the unchanged 1600 x 2200 NEET JSON coordinate system.
     # ========================================================
 
-    if template_exam_name in [
-        "NEET",
-        "KCET",
-    ]:
+    corrected = (
+        perspective_transform_from_registration_markers(
+            cropped_image,
+            registration_markers,
+            template,
+        )
+    )
+    expected_width = int(
+        template["sheet_width"]
+    )
 
-        project_dir = os.path.dirname(
-            os.path.abspath(__file__)
+    expected_height = int(
+        template["sheet_height"]
+    )
+
+    actual_height, actual_width = (
+        corrected.shape[:2]
+    )
+
+    if (
+        actual_width != expected_width
+        or actual_height != expected_height
+    ):
+        raise ValueError(
+            "Corrected OMR size mismatch. "
+            f"Expected {expected_width}x{expected_height}, "
+            f"got {actual_width}x{actual_height}."
         )
 
-        reference_path = os.path.join(
-            project_dir,
-            "references",
-            "neet_reference.png",
+    if not os.environ.get(
+        "VERCEL"
+    ):
+        cv2.imwrite(
+            "corrected_omr.jpg",
+            corrected,
         )
-
-        local_debug_dir = (
-            os.path.join(
-                project_dir,
-                "alignment_debug",
-            )
-            if not os.environ.get("VERCEL")
-            else None
-        )
-
-        corrected, alignment_debug = (
-            canonicalize_omr(
-                image=image,
-                reference_path=reference_path,
-                output_size=(
-                    int(template["sheet_width"]),
-                    int(template["sheet_height"]),
-                ),
-                use_orb=True,
-                use_ecc=True,
-                ecc_minimum_score=0.75,
-                debug_dir=local_debug_dir,
-            )
-        )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "canonical_reference_alignment",
-
-            "document_quad":
-                alignment_debug.get(
-                    "document_quad"
-                ),
-
-            "orb_applied":
-                alignment_debug.get(
-                    "orb_applied",
-                    False,
-                ),
-
-            "orb_inliers":
-                alignment_debug.get(
-                    "orb_inliers",
-                    0,
-                ),
-
-            "ecc_applied":
-                alignment_debug.get(
-                    "ecc_applied",
-                    False,
-                ),
-
-            "ecc_score":
-                alignment_debug.get(
-                    "ecc_score"
-                ),
-        }
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            cv2.imwrite(
-                "corrected_omr.jpg",
-                corrected,
-            )
-
-    # ========================================================
-    # JEE:
-    # RETAIN EXISTING OUTER-PAGE CORRECTION
-    # ========================================================
-
-    else:
-
-        corners = (
-            detect_corner_markers(
-                image,
-                template,
-            )
-        )
-
-        corrected = (
-            perspective_transform(
-                image,
-                corners,
-                template,
-            )
-        )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "white_page_contour",
-
-            "corners": [
-                [
-                    round(
-                        float(point[0]),
-                        2,
-                    ),
-                    round(
-                        float(point[1]),
-                        2,
-                    ),
-                ]
-                for point
-                in corners
-            ],
-        }
-
-        alignment_debug = {
-            "crop":
-                crop_debug,
-
-            "output_size": {
-                "width":
-                    int(
-                        template[
-                            "sheet_width"
-                        ]
-                    ),
-
-                "height":
-                    int(
-                        template[
-                            "sheet_height"
-                        ]
-                    ),
-            },
-        }
-
 
     # --------------------------------
-    # Grayscale is already prepared by canonical preprocessing.
+    # Prepare grayscale
     # --------------------------------
+
+    gray = normalize_grayscale(
+        corrected
+    )
 
     # --------------------------------
     # Paper-code coordinate debug
@@ -4310,22 +3779,6 @@ def process_omr(
                 template,
             )
         )
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            answer_debug = (
-                draw_answer_analysis(
-                    corrected,
-                    template,
-                    answers,
-                )
-            )
-
-            cv2.imwrite(
-                "bubble_analysis_debug.jpg",
-                answer_debug,
-            )
 
     # ========================================================
     # KCET
@@ -4417,9 +3870,6 @@ def process_omr(
 
         "crop_debug":
             crop_debug,
-
-        "alignment_debug":
-            alignment_debug,
 
         "paper_code":
             paper_code,

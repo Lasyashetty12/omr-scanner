@@ -13,11 +13,6 @@ from config import (
     MAX_BRIGHTNESS,
     MIN_CONTRAST,
 )
-from ml_omr.column_calibration import (
-    auto_calibrate_neet_columns,
-    generate_calibrated_bubble_coordinates,
-    draw_calibration_debug,
-)
 
 
 # ============================================================
@@ -2595,14 +2590,8 @@ def scan_answers(
     """
     ML-based answer reader for NEET / KCET.
 
-    Runtime flow:
-      1. convert corrected image to grayscale
-      2. auto-calibrate the four response columns
-      3. build calibrated bubble coordinates
-      4. run the relative hybrid ML reader
-      5. convert its output to the existing scanner/scorer format
-
-    The template JSON itself is never modified.
+    The return shape remains compatible with the existing
+    scorer/debug code.
     """
 
     if corrected_image.ndim == 3:
@@ -2613,66 +2602,31 @@ def scan_answers(
     else:
         gray = corrected_image.copy()
 
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
+    coordinates = generate_bubble_coordinates(
+        template
     )
 
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    if not os.environ.get(
-        "VERCEL"
-    ):
-        calibration_debug_base = (
-            cv2.cvtColor(
-                gray,
-                cv2.COLOR_GRAY2BGR,
+    raw_answers, ml_debug = scan_answers_ml(
+        gray=gray,
+        coordinates=coordinates,
+        crop_radius=int(
+            template.get(
+                "ml_crop_radius",
+                16,
             )
-        )
-
-        calibration_debug = (
-            draw_calibration_debug(
-                calibration_debug_base,
-                template,
-                column_offsets,
+        ),
+        filled_confidence=float(
+            template.get(
+                "ml_filled_confidence",
+                0.70,
             )
-        )
-
-        cv2.imwrite(
-            "column_calibration_debug.jpg",
-            calibration_debug,
-        )
-
-    raw_answers, ml_debug = (
-        scan_answers_ml(
-            gray=gray,
-            coordinates=coordinates,
-            crop_radius=int(
-                template.get(
-                    "ml_crop_radius",
-                    16,
-                )
-            ),
-            filled_confidence=float(
-                template.get(
-                    "ml_filled_confidence",
-                    0.70,
-                )
-            ),
-            ambiguous_confidence=float(
-                template.get(
-                    "ml_ambiguous_confidence",
-                    0.60,
-                )
-            ),
-        )
+        ),
+        ambiguous_confidence=float(
+            template.get(
+                "ml_ambiguous_confidence",
+                0.60,
+            )
+        ),
     )
 
     answers = {}
@@ -2685,7 +2639,7 @@ def scan_answers(
 
         details = ml_debug.get(
             question,
-            {},
+            {}
         )
 
         status = details.get(
@@ -2696,9 +2650,7 @@ def scan_answers(
         if detected == "MULTIPLE":
             final_answer = "MULTIPLE"
 
-        elif detected in template[
-            "options"
-        ]:
+        elif detected in template["options"]:
             final_answer = detected
 
         elif status == "ambiguous":
@@ -2707,266 +2659,13 @@ def scan_answers(
         else:
             final_answer = "BLANK"
 
-        answers[
-            question
-        ] = {
-            "answer":
-                final_answer,
-
-            "ml_status":
-                status,
-
-            "ml":
-                details,
+        answers[question] = {
+            "answer": final_answer,
+            "ml_status": status,
+            "ml": details,
         }
 
     return answers
-
-
-def draw_answer_analysis(
-    corrected_image,
-    template,
-    answers,
-):
-    """
-    Draw the final OMR decisions on the corrected image.
-
-    IMPORTANT:
-    This recalculates the same per-column calibration used by scan_answers(),
-    so the circles shown here correspond to the actual runtime sampling
-    positions rather than the raw JSON coordinates.
-
-    Green  = selected single answer
-    Red    = multiple
-    Yellow = uncertain
-    Gray   = blank/unselected
-    """
-
-    debug_image = (
-        corrected_image.copy()
-    )
-
-    if corrected_image.ndim == 3:
-        gray = cv2.cvtColor(
-            corrected_image,
-            cv2.COLOR_BGR2GRAY,
-        )
-    else:
-        gray = corrected_image.copy()
-
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
-    )
-
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    option_colors = {
-        "selected":
-            (0, 200, 0),
-
-        "multiple":
-            (0, 0, 255),
-
-        "uncertain":
-            (0, 215, 255),
-
-        "blank":
-            (160, 160, 160),
-    }
-
-    radius = (
-        int(
-            template.get(
-                "bubble_radius",
-                11,
-            )
-        )
-        + 5
-    )
-
-    for question, option_map in (
-        coordinates.items()
-    ):
-
-        result = answers.get(
-            question,
-            {},
-        )
-
-        final_answer = result.get(
-            "answer",
-            "BLANK",
-        )
-
-        ml_details = result.get(
-            "ml",
-            {},
-        )
-
-        multiple_options = (
-            ml_details.get(
-                "multiple_options",
-                [],
-            )
-        )
-
-        best_option = (
-            ml_details.get(
-                "best_option"
-            )
-        )
-
-        for option, (
-            x,
-            y,
-        ) in option_map.items():
-
-            color = option_colors[
-                "blank"
-            ]
-
-            thickness = 1
-
-            if (
-                final_answer
-                in template["options"]
-                and option == final_answer
-            ):
-                color = option_colors[
-                    "selected"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "MULTIPLE"
-                and option
-                in multiple_options
-            ):
-                color = option_colors[
-                    "multiple"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "UNCERTAIN"
-                and option
-                == best_option
-            ):
-                color = option_colors[
-                    "uncertain"
-                ]
-
-                thickness = 3
-
-            cv2.circle(
-                debug_image,
-                (
-                    int(x),
-                    int(y),
-                ),
-                radius,
-                color,
-                thickness,
-            )
-
-        first_option = (
-            template["options"][0]
-        )
-
-        label_x = int(
-            option_map[
-                first_option
-            ][0]
-            - 80
-        )
-
-        label_y = int(
-            option_map[
-                first_option
-            ][1]
-            + 5
-        )
-
-        if (
-            final_answer
-            == "MULTIPLE"
-        ):
-            text_color = (
-                0,
-                0,
-                255,
-            )
-
-            label = (
-                f"{question}:MULTI"
-            )
-
-        elif (
-            final_answer
-            == "UNCERTAIN"
-        ):
-            text_color = (
-                0,
-                165,
-                255,
-            )
-
-            label = (
-                f"{question}:?"
-            )
-
-        elif (
-            final_answer
-            == "BLANK"
-        ):
-            text_color = (
-                100,
-                100,
-                100,
-            )
-
-            label = (
-                f"{question}:-"
-            )
-
-        else:
-            text_color = (
-                0,
-                180,
-                0,
-            )
-
-            label = (
-                f"{question}:{final_answer}"
-            )
-
-        cv2.putText(
-            debug_image,
-            label,
-            (
-                label_x,
-                label_y,
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            text_color,
-            1,
-            cv2.LINE_AA,
-        )
-
-    return debug_image
 
 
 # ============================================================
@@ -3916,25 +3615,9 @@ def create_debug_image(
         "KCET",
     ]:
 
-        if corrected_image.ndim == 3:
-            calibration_gray = cv2.cvtColor(
-                corrected_image,
-                cv2.COLOR_BGR2GRAY,
-            )
-        else:
-            calibration_gray = corrected_image.copy()
-
-        column_offsets = (
-            auto_calibrate_neet_columns(
-                calibration_gray,
-                template,
-            )
-        )
-
         coordinates = (
-            generate_calibrated_bubble_coordinates(
-                template,
-                column_offsets,
+            generate_bubble_coordinates(
+                template
             )
         )
 
@@ -4129,7 +3812,6 @@ def process_omr(
                 ),
                 use_orb=True,
                 use_ecc=True,
-                ecc_minimum_score=0.75,
                 debug_dir=local_debug_dir,
             )
         )
@@ -4310,22 +3992,6 @@ def process_omr(
                 template,
             )
         )
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            answer_debug = (
-                draw_answer_analysis(
-                    corrected,
-                    template,
-                    answers,
-                )
-            )
-
-            cv2.imwrite(
-                "bubble_analysis_debug.jpg",
-                answer_debug,
-            )
 
     # ========================================================
     # KCET

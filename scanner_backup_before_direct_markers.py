@@ -1,6 +1,5 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
-from omr_preprocess import canonicalize_omr
 import json
 import os
 
@@ -12,32 +11,6 @@ from config import (
     MIN_BRIGHTNESS,
     MAX_BRIGHTNESS,
     MIN_CONTRAST,
-)
-from ml_omr.column_calibration import (
-    auto_calibrate_neet_columns,
-    generate_calibrated_bubble_coordinates,
-    draw_calibration_debug,
-)
-
-
-# ============================================================
-# CANONICAL NEET/KCET REGISTRATION MARKERS
-# ============================================================
-#
-# Measured from the user's blank Manchester NEET reference sheet
-# and scaled to the 1600 x 2200 coordinate system used by neet.json.
-#
-# Order:
-#   TL, TR, BR, BL
-#
-CANONICAL_REGISTRATION_MARKERS = np.array(
-    [
-        [81.2, 78.3],
-        [1522.0, 78.3],
-        [1523.3, 2124.2],
-        [79.9, 2120.4],
-    ],
-    dtype="float32",
 )
 
 
@@ -161,134 +134,6 @@ def load_image(image_path):
     return image
 
 
-
-# ============================================================
-# CANONICAL PREPROCESSING
-# ============================================================
-
-def preprocess_to_canonical(
-    image,
-    template,
-):
-    """
-    Convert a mobile photo into the same geometry as the clean
-    canonical NEET/KCET reference before any paper-code or answer
-    reading occurs.
-
-    Pipeline:
-      1. generous registration-marker crop
-      2. detect registration marks inside crop
-      3. marker-to-marker homography
-      4. force exact template size
-      5. mild grayscale normalization for downstream reading
-
-    The template JSON coordinates are never modified.
-    """
-
-    cropped_image, crop_debug = (
-        crop_omr_by_corner_boxes(
-            image
-        )
-    )
-
-    registration_markers = (
-        detect_registration_markers_in_crop(
-            cropped_image
-        )
-    )
-
-    corrected = (
-        perspective_transform_from_registration_markers(
-            cropped_image,
-            registration_markers,
-            template,
-        )
-    )
-
-    expected_width = int(
-        template["sheet_width"]
-    )
-
-    expected_height = int(
-        template["sheet_height"]
-    )
-
-    actual_height, actual_width = (
-        corrected.shape[:2]
-    )
-
-    if (
-        actual_width != expected_width
-        or actual_height != expected_height
-    ):
-        corrected = cv2.resize(
-            corrected,
-            (
-                expected_width,
-                expected_height,
-            ),
-            interpolation=cv2.INTER_LINEAR,
-        )
-
-    gray = cv2.cvtColor(
-        corrected,
-        cv2.COLOR_BGR2GRAY,
-    )
-
-    clahe = cv2.createCLAHE(
-        clipLimit=2.0,
-        tileGridSize=(
-            8,
-            8,
-        ),
-    )
-
-    normalized_gray = clahe.apply(
-        gray
-    )
-
-    normalized_gray = cv2.GaussianBlur(
-        normalized_gray,
-        (3, 3),
-        0,
-    )
-
-    debug = {
-        "crop":
-            crop_debug,
-
-        "registration_markers": [
-            [
-                round(
-                    float(point[0]),
-                    2,
-                ),
-                round(
-                    float(point[1]),
-                    2,
-                ),
-            ]
-            for point
-            in registration_markers
-        ],
-
-        "output_size": {
-            "width":
-                int(expected_width),
-
-            "height":
-                int(expected_height),
-        },
-    }
-
-    return (
-        corrected,
-        normalized_gray,
-        cropped_image,
-        debug,
-    )
-
-
 # ============================================================
 # IMAGE QUALITY
 # ============================================================
@@ -389,11 +234,8 @@ def validate_image_quality(image):
 
 def find_omr_corner_boxes(image):
     """
-    Detect large black registration marks near the OMR corners.
-
-    BL is allowed to be missing because on real sheets it may merge
-    with the printed border. The initial crop can still be estimated
-    from TL/TR/BR.
+    Find the four large black registration marks on the OMR:
+    top-left, top-right, bottom-right, bottom-left.
     """
 
     gray = cv2.cvtColor(
@@ -416,7 +258,7 @@ def find_omr_corner_boxes(image):
 
     contours, _ = cv2.findContours(
         binary,
-        cv2.RETR_LIST,
+        cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE,
     )
 
@@ -426,39 +268,28 @@ def find_omr_corner_boxes(image):
     candidates = []
 
     for contour in contours:
-        area = float(
-            cv2.contourArea(
-                contour
-            )
-        )
+        area = float(cv2.contourArea(contour))
 
-        if area < image_area * 0.00015:
+        if area < image_area * 0.00025:
             continue
 
-        if area > image_area * 0.03:
+        if area > image_area * 0.02:
             continue
 
-        x, y, w, h = cv2.boundingRect(
-            contour
-        )
+        x, y, w, h = cv2.boundingRect(contour)
 
-        if w < 8 or h < 8:
+        if w <= 0 or h <= 0:
             continue
 
         aspect = w / float(h)
 
-        if not 0.35 <= aspect <= 2.5:
+        if not 0.55 <= aspect <= 1.55:
             continue
 
         rect_area = float(w * h)
+        fill = area / rect_area if rect_area else 0.0
 
-        fill_ratio = (
-            area / rect_area
-            if rect_area > 0
-            else 0.0
-        )
-
-        if fill_ratio < 0.35:
+        if fill < 0.45:
             continue
 
         cx = x + w / 2.0
@@ -467,20 +298,14 @@ def find_omr_corner_boxes(image):
         candidates.append(
             {
                 "area": area,
-                "center": (
-                    float(cx),
-                    float(cy),
-                ),
-                "box": (
-                    int(x),
-                    int(y),
-                    int(w),
-                    int(h),
-                ),
-                "fill_ratio": float(
-                    fill_ratio
-                ),
+                "box": (x, y, w, h),
+                "center": (cx, cy),
             }
+        )
+
+    if not candidates:
+        raise ValueError(
+            "Could not find OMR corner boxes."
         )
 
     quadrants = {
@@ -493,58 +318,17 @@ def find_omr_corner_boxes(image):
     for candidate in candidates:
         cx, cy = candidate["center"]
 
-        if (
-            cx < width * 0.45
-            and cy < height * 0.35
-        ):
-            quadrants["tl"].append(
-                candidate
-            )
+        if cx < width * 0.45 and cy < height * 0.45:
+            quadrants["tl"].append(candidate)
 
-        if (
-            cx > width * 0.55
-            and cy < height * 0.35
-        ):
-            quadrants["tr"].append(
-                candidate
-            )
+        if cx > width * 0.55 and cy < height * 0.45:
+            quadrants["tr"].append(candidate)
 
-        if (
-            cx > width * 0.55
-            and cy > height * 0.65
-        ):
-            quadrants["br"].append(
-                candidate
-            )
+        if cx > width * 0.55 and cy > height * 0.55:
+            quadrants["br"].append(candidate)
 
-        if (
-            cx < width * 0.45
-            and cy > height * 0.65
-        ):
-            quadrants["bl"].append(
-                candidate
-            )
-
-    # Score by closeness to the corresponding outer image corner,
-    # with a small preference for large/dark marks.
-    targets = {
-        "tl": np.array(
-            [0.0, 0.0],
-            dtype=np.float32,
-        ),
-        "tr": np.array(
-            [float(width), 0.0],
-            dtype=np.float32,
-        ),
-        "br": np.array(
-            [float(width), float(height)],
-            dtype=np.float32,
-        ),
-        "bl": np.array(
-            [0.0, float(height)],
-            dtype=np.float32,
-        ),
-    }
+        if cx < width * 0.45 and cy > height * 0.55:
+            quadrants["bl"].append(candidate)
 
     selected = {}
 
@@ -553,287 +337,180 @@ def find_omr_corner_boxes(image):
         if not items:
             continue
 
-        ranked = []
-
-        for item in items:
-            point = np.array(
-                item["center"],
-                dtype=np.float32,
-            )
-
-            distance = float(
-                np.linalg.norm(
-                    point
-                    - targets[name]
-                )
-            )
-
-            score = (
-                distance
-                - item["area"] * 0.004
-                - item["fill_ratio"] * 8.0
-            )
-
-            ranked.append(
-                (
-                    score,
-                    item,
-                )
-            )
-
-        ranked.sort(
-            key=lambda pair:
-            pair[0]
+        selected[name] = max(
+            items,
+            key=lambda item: item["area"],
         )
 
-        selected[name] = (
-            ranked[0][1]
-        )
-
-    if (
-        "tl" not in selected
-        or "tr" not in selected
-        or "br" not in selected
-    ):
+    if len(selected) < 3:
         raise ValueError(
-            "Could not detect enough OMR registration marks. "
-            "Keep the full page inside the A4 guide."
+            "Not enough OMR registration marks detected."
         )
 
     return selected
 
-
 def crop_omr_by_corner_boxes(
     image,
-    padding_ratio=0.10,
+    padding_ratio=0.06,
 ):
     """
-    Crop the camera image around the OMR before perspective correction.
+    Tolerant first crop.
 
-    IMPORTANT:
-    This crop is deliberately generous. It is only used to remove
-    unrelated background. It must NOT crop away the paper edges.
+    Uses whatever registration marks are detected, but does not
+    fail if one corner mark (commonly BL) is missed.
+
+    Falls back to a bright paper contour crop.
     """
-
-    boxes = find_omr_corner_boxes(
-        image
-    )
 
     height, width = image.shape[:2]
 
-    tl = np.array(
-        boxes["tl"]["center"],
-        dtype=np.float32,
-    )
-
-    tr = np.array(
-        boxes["tr"]["center"],
-        dtype=np.float32,
-    )
-
-    br = np.array(
-        boxes["br"]["center"],
-        dtype=np.float32,
-    )
-
-    if "bl" in boxes:
-        bl = np.array(
-            boxes["bl"]["center"],
-            dtype=np.float32,
+    try:
+        boxes = find_omr_corner_boxes(
+            image
         )
-    else:
-        # Parallelogram estimate is good enough for the INITIAL CROP.
-        # The final perspective transform does NOT use this estimate.
-        bl = (
-            tl
-            + (
-                br - tr
+
+        detected_boxes = list(
+            boxes.values()
+        )
+
+        xs = []
+        ys = []
+        xe = []
+        ye = []
+
+        for item in detected_boxes:
+            x, y, w, h = item["box"]
+
+            xs.append(x)
+            ys.append(y)
+
+            xe.append(
+                x + w
             )
+
+            ye.append(
+                y + h
+            )
+
+        left = min(xs)
+        top = min(ys)
+        right = max(xe)
+        bottom = max(ye)
+
+        span_w = max(
+            1,
+            right - left
         )
 
-    points = np.array(
-        [
-            tl,
-            tr,
-            br,
-            bl,
-        ],
-        dtype=np.float32,
-    )
-
-    min_x = float(
-        np.min(
-            points[:, 0]
-        )
-    )
-
-    max_x = float(
-        np.max(
-            points[:, 0]
-        )
-    )
-
-    min_y = float(
-        np.min(
-            points[:, 1]
-        )
-    )
-
-    max_y = float(
-        np.max(
-            points[:, 1]
-        )
-    )
-
-    span_w = max(
-        1.0,
-        max_x - min_x,
-    )
-
-    span_h = max(
-        1.0,
-        max_y - min_y,
-    )
-
-    # Registration marks sit inside the paper boundary.
-    # Use generous margins so the true paper corners remain visible.
-    pad_x = int(
-        span_w * padding_ratio
-    )
-
-    pad_y = int(
-        span_h * padding_ratio
-    )
-
-    x1 = max(
-        0,
-        int(min_x) - pad_x,
-    )
-
-    y1 = max(
-        0,
-        int(min_y) - pad_y,
-    )
-
-    x2 = min(
-        width,
-        int(max_x) + pad_x,
-    )
-
-    y2 = min(
-        height,
-        int(max_y) + pad_y,
-    )
-
-    if (
-        x2 - x1 < width * 0.35
-        or y2 - y1 < height * 0.35
-    ):
-        raise ValueError(
-            "Initial OMR crop is too small."
+        span_h = max(
+            1,
+            bottom - top
         )
 
-    cropped = image[
-        y1:y2,
-        x1:x2
-    ].copy()
+        pad_x = int(
+            span_w * padding_ratio
+        )
 
-    return cropped, {
-        "method":
-            "registration_marker_crop",
+        pad_y = int(
+            span_h * padding_ratio
+        )
 
-        "x1":
-            int(x1),
+        x1 = max(
+            0,
+            left - pad_x
+        )
 
-        "y1":
-            int(y1),
+        y1 = max(
+            0,
+            top - pad_y
+        )
 
-        "x2":
-            int(x2),
+        x2 = min(
+            width,
+            right + pad_x
+        )
 
-        "y2":
-            int(y2),
-    }
+        y2 = min(
+            height,
+            bottom + pad_y
+        )
+
+        # Only accept if crop is reasonably large.
+        if (
+            x2 - x1 >= width * 0.35
+            and
+            y2 - y1 >= height * 0.35
+        ):
+            cropped = image[
+                y1:y2,
+                x1:x2
+            ].copy()
+
+            return cropped, {
+                "method": "corner_boxes",
+                "x1": int(x1),
+                "y1": int(y1),
+                "x2": int(x2),
+                "y2": int(y2),
+            }
+
+    except Exception:
+        pass
 
 
-def detect_page_corners_from_crop(
-    cropped_image,
-    template,
-):
-    """
-    Detect the OUTER paper corners after the background has already
-    been removed.
-
-    The four black registration marks are NOT used as final warp
-    corners. This avoids the 'halved/clipped' result that happens
-    when marker centres are incorrectly mapped to the canvas edges.
-    """
+    # ========================================================
+    # FALLBACK: detect the white sheet itself
+    # ========================================================
 
     gray = cv2.cvtColor(
-        cropped_image,
-        cv2.COLOR_BGR2GRAY,
-    )
-
-    height, width = gray.shape[:2]
-
-    image_area = float(
-        width * height
-    )
-
-    expected_ratio = (
-        float(
-            template["sheet_width"]
-        )
-        /
-        float(
-            template["sheet_height"]
-        )
+        image,
+        cv2.COLOR_BGR2GRAY
     )
 
     blurred = cv2.GaussianBlur(
         gray,
         (5, 5),
-        0,
+        0
     )
 
-    # A white-paper mask is now reliable because most unrelated
-    # background was removed by the first crop.
-    _, white = cv2.threshold(
+    _, white_mask = cv2.threshold(
         blurred,
-        0,
+        150,
         255,
         cv2.THRESH_BINARY
-        + cv2.THRESH_OTSU,
     )
 
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
-        (15, 15),
+        (11, 11)
     )
 
-    white = cv2.morphologyEx(
-        white,
+    white_mask = cv2.morphologyEx(
+        white_mask,
         cv2.MORPH_CLOSE,
         kernel,
-        iterations=2,
+        iterations=2
     )
 
     contours, _ = cv2.findContours(
-        white,
+        white_mask,
         cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
+        cv2.CHAIN_APPROX_SIMPLE
     )
 
-    contours = sorted(
-        contours,
-        key=cv2.contourArea,
-        reverse=True,
+    if not contours:
+        raise ValueError(
+            "Could not locate OMR paper."
+        )
+
+    image_area = float(
+        height * width
     )
 
-    best_points = None
-    best_score = -1.0
+    best = None
+    best_area = 0
 
-    for contour in contours[:30]:
+    for contour in contours:
 
         area = float(
             cv2.contourArea(
@@ -841,164 +518,84 @@ def detect_page_corners_from_crop(
             )
         )
 
-        if area < image_area * 0.35:
+        if area < image_area * 0.10:
             continue
 
-        # First try an actual 4-point approximation.
-        perimeter = cv2.arcLength(
-            contour,
-            True,
-        )
-
-        candidate_sets = []
-
-        for epsilon in (
-            0.01,
-            0.015,
-            0.02,
-            0.025,
-            0.03,
-        ):
-            approx = cv2.approxPolyDP(
-                contour,
-                epsilon * perimeter,
-                True,
-            )
-
-            if len(approx) == 4:
-                candidate_sets.append(
-                    approx
-                    .reshape(4, 2)
-                    .astype(
-                        "float32"
-                    )
-                )
-
-        # Also use minAreaRect as a robust fallback when one page edge
-        # is curved/occluded or merged with another sheet underneath.
-        rect = cv2.minAreaRect(
+        x, y, w, h = cv2.boundingRect(
             contour
         )
 
-        box = cv2.boxPoints(
-            rect
-        ).astype(
-            "float32"
+        ratio = (
+            w / float(h)
+            if h > 0
+            else 0
         )
 
-        candidate_sets.append(
-            box
+        # A4-ish portrait region
+        if not (
+            0.50
+            <= ratio
+            <= 0.95
+        ):
+            continue
+
+        if area > best_area:
+            best_area = area
+            best = (
+                x,
+                y,
+                w,
+                h
+            )
+
+    if best is None:
+        raise ValueError(
+            "Could not locate the OMR paper. "
+            "Keep the whole white sheet visible."
         )
 
-        for points in candidate_sets:
+    x, y, w, h = best
 
-            ordered = order_points(
-                points
-            )
+    pad_x = int(
+        w * 0.03
+    )
 
-            tl, tr, br, bl = ordered
+    pad_y = int(
+        h * 0.03
+    )
 
-            top_w = float(
-                np.linalg.norm(
-                    tr - tl
-                )
-            )
+    x1 = max(
+        0,
+        x - pad_x
+    )
 
-            bottom_w = float(
-                np.linalg.norm(
-                    br - bl
-                )
-            )
+    y1 = max(
+        0,
+        y - pad_y
+    )
 
-            left_h = float(
-                np.linalg.norm(
-                    bl - tl
-                )
-            )
+    x2 = min(
+        width,
+        x + w + pad_x
+    )
 
-            right_h = float(
-                np.linalg.norm(
-                    br - tr
-                )
-            )
+    y2 = min(
+        height,
+        y + h + pad_y
+    )
 
-            avg_w = (
-                top_w
-                + bottom_w
-            ) / 2.0
+    cropped = image[
+        y1:y2,
+        x1:x2
+    ].copy()
 
-            avg_h = (
-                left_h
-                + right_h
-            ) / 2.0
-
-            if (
-                avg_w <= 0
-                or avg_h <= 0
-            ):
-                continue
-
-            ratio = (
-                avg_w
-                / avg_h
-            )
-
-            ratio_error = abs(
-                ratio
-                - expected_ratio
-            ) / expected_ratio
-
-            # Perspective can alter the apparent ratio, but an OMR
-            # should still be broadly portrait-shaped.
-            if ratio_error > 0.45:
-                continue
-
-            quad_area = abs(
-                float(
-                    cv2.contourArea(
-                        ordered.reshape(
-                            (-1, 1, 2)
-                        )
-                    )
-                )
-            )
-
-            coverage = (
-                quad_area
-                / image_area
-            )
-
-            if coverage < 0.45:
-                continue
-
-            score = (
-                coverage * 3.0
-                + max(
-                    0.0,
-                    1.0 - ratio_error
-                ) * 2.0
-            )
-
-            if score > best_score:
-                best_score = score
-                best_points = ordered
-
-    if best_points is None:
-        # Final safe fallback: use the full generous crop.
-        # Because the crop already follows the OMR region closely,
-        # this is safer than mapping marker centres to canvas edges.
-        return np.array(
-            [
-                [0, 0],
-                [width - 1, 0],
-                [width - 1, height - 1],
-                [0, height - 1],
-            ],
-            dtype="float32",
-        )
-
-    return best_points
-
+    return cropped, {
+        "method": "white_sheet_fallback",
+        "x1": int(x1),
+        "y1": int(y1),
+        "x2": int(x2),
+        "y2": int(y2),
+    }
 
 # ============================================================
 # REGISTRATION MARKERS
@@ -1467,578 +1064,6 @@ def detect_corner_markers(
         )
 
     return best_candidate
-
-
-
-# ============================================================
-# REGISTRATION-MARKER ALIGNMENT TO CANONICAL TEMPLATE
-# ============================================================
-
-def _marker_candidate_score(
-    gray,
-    contour,
-    roi_origin,
-    target_point,
-    full_width,
-    full_height,
-):
-    """
-    Score one dark contour as a possible large registration mark.
-    Lower score is better.
-    """
-
-    x0, y0 = roi_origin
-
-    area = float(
-        cv2.contourArea(
-            contour
-        )
-    )
-
-    if area <= 0:
-        return None
-
-    x, y, w, h = cv2.boundingRect(
-        contour
-    )
-
-    if (
-        w < 8
-        or h < 8
-    ):
-        return None
-
-    aspect = (
-        w / float(h)
-    )
-
-    # Square marks and the round BR mark are both compact.
-    # BL can merge slightly with printed borders, so stay tolerant.
-    if not (
-        0.35
-        <= aspect
-        <= 2.8
-    ):
-        return None
-
-    rect_area = float(
-        w * h
-    )
-
-    fill_ratio = (
-        area / rect_area
-        if rect_area > 0
-        else 0.0
-    )
-
-    if fill_ratio < 0.28:
-        return None
-
-    gx = int(
-        x0 + x
-    )
-
-    gy = int(
-        y0 + y
-    )
-
-    roi = gray[
-        gy:
-        min(
-            gray.shape[0],
-            gy + h,
-        ),
-        gx:
-        min(
-            gray.shape[1],
-            gx + w,
-        )
-    ]
-
-    if roi.size == 0:
-        return None
-
-    mean_darkness = (
-        255.0
-        - float(
-            np.mean(
-                roi
-            )
-        )
-    ) / 255.0
-
-    cx = (
-        gx + w / 2.0
-    )
-
-    cy = (
-        gy + h / 2.0
-    )
-
-    target_x, target_y = (
-        target_point
-    )
-
-    diagonal = max(
-        1.0,
-        float(
-            np.hypot(
-                full_width,
-                full_height,
-            )
-        ),
-    )
-
-    distance = float(
-        np.hypot(
-            cx - target_x,
-            cy - target_y,
-        )
-    ) / diagonal
-
-    normalized_size = min(
-        area
-        / max(
-            1.0,
-            (
-                full_width
-                * full_height
-                * 0.003
-            ),
-        ),
-        1.0,
-    )
-
-    # Distance dominates.
-    # Large, dark, compact regions receive a small bonus.
-    score = (
-        distance
-        - 0.10 * normalized_size
-        - 0.06 * fill_ratio
-        - 0.05 * mean_darkness
-    )
-
-    return {
-        "score":
-            float(score),
-
-        "center":
-            (
-                float(cx),
-                float(cy),
-            ),
-
-        "box":
-            (
-                int(gx),
-                int(gy),
-                int(w),
-                int(h),
-            ),
-
-        "area":
-            area,
-
-        "fill_ratio":
-            float(fill_ratio),
-
-        "mean_darkness":
-            float(mean_darkness),
-    }
-
-
-def detect_registration_markers_in_crop(
-    image,
-):
-    """
-    Detect the four large Manchester registration marks inside the
-    already-cropped OMR image.
-
-    The initial crop is intentionally generous. At this stage the
-    four marks should be near the outer corners of the crop.
-
-    If BL cannot be isolated because it touches the border, it is
-    estimated from TL/TR/BR rather than rejecting the scan.
-    """
-
-    gray = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2GRAY,
-    )
-
-    height, width = gray.shape[:2]
-
-    blurred = cv2.GaussianBlur(
-        gray,
-        (5, 5),
-        0,
-    )
-
-    _, binary = cv2.threshold(
-        blurred,
-        0,
-        255,
-        cv2.THRESH_BINARY_INV
-        + cv2.THRESH_OTSU,
-    )
-
-    # Remove/thin printed rules while retaining the large solid marks.
-    opening_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (3, 3),
-    )
-
-    cleaned = cv2.morphologyEx(
-        binary,
-        cv2.MORPH_OPEN,
-        opening_kernel,
-        iterations=1,
-    )
-
-    # Broad ROIs. They are deliberately larger than the physical
-    # marker locations to tolerate camera perspective.
-    regions = {
-        "tl": (
-            0,
-            0,
-            int(
-                width * 0.40
-            ),
-            int(
-                height * 0.28
-            ),
-        ),
-
-        "tr": (
-            int(
-                width * 0.60
-            ),
-            0,
-            width,
-            int(
-                height * 0.28
-            ),
-        ),
-
-        "br": (
-            int(
-                width * 0.60
-            ),
-            int(
-                height * 0.72
-            ),
-            width,
-            height,
-        ),
-
-        "bl": (
-            0,
-            int(
-                height * 0.72
-            ),
-            int(
-                width * 0.40
-            ),
-            height,
-        ),
-    }
-
-    targets = {
-        "tl": (
-            width * 0.08,
-            height * 0.06,
-        ),
-
-        "tr": (
-            width * 0.92,
-            height * 0.06,
-        ),
-
-        "br": (
-            width * 0.92,
-            height * 0.94,
-        ),
-
-        "bl": (
-            width * 0.08,
-            height * 0.94,
-        ),
-    }
-
-    selected = {}
-
-    for name, (
-        x1,
-        y1,
-        x2,
-        y2,
-    ) in regions.items():
-
-        roi = cleaned[
-            y1:y2,
-            x1:x2
-        ]
-
-        contours, _ = cv2.findContours(
-            roi,
-            cv2.RETR_LIST,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-
-        ranked = []
-
-        for contour in contours:
-
-            result = _marker_candidate_score(
-                gray=gray,
-                contour=contour,
-                roi_origin=(
-                    x1,
-                    y1,
-                ),
-                target_point=targets[
-                    name
-                ],
-                full_width=width,
-                full_height=height,
-            )
-
-            if result is None:
-                continue
-
-            ranked.append(
-                result
-            )
-
-        if ranked:
-
-            ranked.sort(
-                key=lambda item:
-                item["score"]
-            )
-
-            selected[name] = (
-                ranked[0]
-            )
-
-    # TL/TR/BR are required. BL gets a geometric fallback because
-    # the user's real sheet can merge the BL block with the border.
-    for name in (
-        "tl",
-        "tr",
-        "br",
-    ):
-
-        if name not in selected:
-
-            raise ValueError(
-                "Could not identify the OMR "
-                f"{name.upper()} registration mark."
-            )
-
-    tl = np.array(
-        selected[
-            "tl"
-        ][
-            "center"
-        ],
-        dtype=np.float32,
-    )
-
-    tr = np.array(
-        selected[
-            "tr"
-        ][
-            "center"
-        ],
-        dtype=np.float32,
-    )
-
-    br = np.array(
-        selected[
-            "br"
-        ][
-            "center"
-        ],
-        dtype=np.float32,
-    )
-
-    predicted_bl = (
-        tl
-        + (
-            br - tr
-        )
-    )
-
-    if "bl" in selected:
-
-        detected_bl = np.array(
-            selected[
-                "bl"
-            ][
-                "center"
-            ],
-            dtype=np.float32,
-        )
-
-        page_diagonal = max(
-            1.0,
-            float(
-                np.hypot(
-                    width,
-                    height,
-                )
-            ),
-        )
-
-        difference = float(
-            np.linalg.norm(
-                detected_bl
-                - predicted_bl
-            )
-        )
-
-        # Trust the detected BL only when it agrees reasonably well
-        # with the other three markers.
-        if (
-            difference
-            <= page_diagonal * 0.10
-        ):
-            bl = detected_bl
-        else:
-            bl = predicted_bl
-
-    else:
-        bl = predicted_bl
-
-    bl[0] = np.clip(
-        bl[0],
-        0,
-        width - 1,
-    )
-
-    bl[1] = np.clip(
-        bl[1],
-        0,
-        height - 1,
-    )
-
-    source = np.array(
-        [
-            tl,
-            tr,
-            br,
-            bl,
-        ],
-        dtype="float32",
-    )
-
-    quad_area = abs(
-        float(
-            cv2.contourArea(
-                source.reshape(
-                    (-1, 1, 2)
-                )
-            )
-        )
-    )
-
-    image_area = float(
-        width * height
-    )
-
-    if (
-        quad_area
-        < image_area * 0.35
-    ):
-        raise ValueError(
-            "Detected registration marks do not form "
-            "a valid OMR page."
-        )
-
-    return source
-
-
-def perspective_transform_from_registration_markers(
-    image,
-    source_markers,
-    template,
-):
-    """
-    Warp detected registration-marker centres to the exact marker
-    centres measured from the blank reference sheet.
-
-    This is different from mapping marker centres to the OUTER image
-    corners. Mapping them to the canvas edges caused the previously
-    observed clipped / 'halved' corrected image.
-    """
-
-    width = int(
-        template[
-            "sheet_width"
-        ]
-    )
-
-    height = int(
-        template[
-            "sheet_height"
-        ]
-    )
-
-    source = order_points(
-        source_markers
-    )
-
-    # Scale the canonical NEET reference positions if another
-    # Manchester template uses a different canonical canvas size.
-    scale_x = (
-        width
-        / 1600.0
-    )
-
-    scale_y = (
-        height
-        / 2200.0
-    )
-
-    destination = (
-        CANONICAL_REGISTRATION_MARKERS.copy()
-    )
-
-    destination[:, 0] *= (
-        scale_x
-    )
-
-    destination[:, 1] *= (
-        scale_y
-    )
-
-    matrix = cv2.getPerspectiveTransform(
-        source.astype(
-            "float32"
-        ),
-        destination.astype(
-            "float32"
-        ),
-    )
-
-    corrected = cv2.warpPerspective(
-        image,
-        matrix,
-        (
-            width,
-            height,
-        ),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(
-            255,
-            255,
-            255,
-        ),
-    )
-
-    return corrected
 
 
 # ============================================================
@@ -2595,14 +1620,8 @@ def scan_answers(
     """
     ML-based answer reader for NEET / KCET.
 
-    Runtime flow:
-      1. convert corrected image to grayscale
-      2. auto-calibrate the four response columns
-      3. build calibrated bubble coordinates
-      4. run the relative hybrid ML reader
-      5. convert its output to the existing scanner/scorer format
-
-    The template JSON itself is never modified.
+    The return shape remains compatible with the existing
+    scorer/debug code.
     """
 
     if corrected_image.ndim == 3:
@@ -2613,66 +1632,31 @@ def scan_answers(
     else:
         gray = corrected_image.copy()
 
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
+    coordinates = generate_bubble_coordinates(
+        template
     )
 
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    if not os.environ.get(
-        "VERCEL"
-    ):
-        calibration_debug_base = (
-            cv2.cvtColor(
-                gray,
-                cv2.COLOR_GRAY2BGR,
+    raw_answers, ml_debug = scan_answers_ml(
+        gray=gray,
+        coordinates=coordinates,
+        crop_radius=int(
+            template.get(
+                "ml_crop_radius",
+                16,
             )
-        )
-
-        calibration_debug = (
-            draw_calibration_debug(
-                calibration_debug_base,
-                template,
-                column_offsets,
+        ),
+        filled_confidence=float(
+            template.get(
+                "ml_filled_confidence",
+                0.70,
             )
-        )
-
-        cv2.imwrite(
-            "column_calibration_debug.jpg",
-            calibration_debug,
-        )
-
-    raw_answers, ml_debug = (
-        scan_answers_ml(
-            gray=gray,
-            coordinates=coordinates,
-            crop_radius=int(
-                template.get(
-                    "ml_crop_radius",
-                    16,
-                )
-            ),
-            filled_confidence=float(
-                template.get(
-                    "ml_filled_confidence",
-                    0.70,
-                )
-            ),
-            ambiguous_confidence=float(
-                template.get(
-                    "ml_ambiguous_confidence",
-                    0.60,
-                )
-            ),
-        )
+        ),
+        ambiguous_confidence=float(
+            template.get(
+                "ml_ambiguous_confidence",
+                0.60,
+            )
+        ),
     )
 
     answers = {}
@@ -2685,7 +1669,7 @@ def scan_answers(
 
         details = ml_debug.get(
             question,
-            {},
+            {}
         )
 
         status = details.get(
@@ -2696,9 +1680,7 @@ def scan_answers(
         if detected == "MULTIPLE":
             final_answer = "MULTIPLE"
 
-        elif detected in template[
-            "options"
-        ]:
+        elif detected in template["options"]:
             final_answer = detected
 
         elif status == "ambiguous":
@@ -2707,266 +1689,13 @@ def scan_answers(
         else:
             final_answer = "BLANK"
 
-        answers[
-            question
-        ] = {
-            "answer":
-                final_answer,
-
-            "ml_status":
-                status,
-
-            "ml":
-                details,
+        answers[question] = {
+            "answer": final_answer,
+            "ml_status": status,
+            "ml": details,
         }
 
     return answers
-
-
-def draw_answer_analysis(
-    corrected_image,
-    template,
-    answers,
-):
-    """
-    Draw the final OMR decisions on the corrected image.
-
-    IMPORTANT:
-    This recalculates the same per-column calibration used by scan_answers(),
-    so the circles shown here correspond to the actual runtime sampling
-    positions rather than the raw JSON coordinates.
-
-    Green  = selected single answer
-    Red    = multiple
-    Yellow = uncertain
-    Gray   = blank/unselected
-    """
-
-    debug_image = (
-        corrected_image.copy()
-    )
-
-    if corrected_image.ndim == 3:
-        gray = cv2.cvtColor(
-            corrected_image,
-            cv2.COLOR_BGR2GRAY,
-        )
-    else:
-        gray = corrected_image.copy()
-
-    column_offsets = (
-        auto_calibrate_neet_columns(
-            gray,
-            template,
-        )
-    )
-
-    coordinates = (
-        generate_calibrated_bubble_coordinates(
-            template,
-            column_offsets,
-        )
-    )
-
-    option_colors = {
-        "selected":
-            (0, 200, 0),
-
-        "multiple":
-            (0, 0, 255),
-
-        "uncertain":
-            (0, 215, 255),
-
-        "blank":
-            (160, 160, 160),
-    }
-
-    radius = (
-        int(
-            template.get(
-                "bubble_radius",
-                11,
-            )
-        )
-        + 5
-    )
-
-    for question, option_map in (
-        coordinates.items()
-    ):
-
-        result = answers.get(
-            question,
-            {},
-        )
-
-        final_answer = result.get(
-            "answer",
-            "BLANK",
-        )
-
-        ml_details = result.get(
-            "ml",
-            {},
-        )
-
-        multiple_options = (
-            ml_details.get(
-                "multiple_options",
-                [],
-            )
-        )
-
-        best_option = (
-            ml_details.get(
-                "best_option"
-            )
-        )
-
-        for option, (
-            x,
-            y,
-        ) in option_map.items():
-
-            color = option_colors[
-                "blank"
-            ]
-
-            thickness = 1
-
-            if (
-                final_answer
-                in template["options"]
-                and option == final_answer
-            ):
-                color = option_colors[
-                    "selected"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "MULTIPLE"
-                and option
-                in multiple_options
-            ):
-                color = option_colors[
-                    "multiple"
-                ]
-
-                thickness = 4
-
-            elif (
-                final_answer
-                == "UNCERTAIN"
-                and option
-                == best_option
-            ):
-                color = option_colors[
-                    "uncertain"
-                ]
-
-                thickness = 3
-
-            cv2.circle(
-                debug_image,
-                (
-                    int(x),
-                    int(y),
-                ),
-                radius,
-                color,
-                thickness,
-            )
-
-        first_option = (
-            template["options"][0]
-        )
-
-        label_x = int(
-            option_map[
-                first_option
-            ][0]
-            - 80
-        )
-
-        label_y = int(
-            option_map[
-                first_option
-            ][1]
-            + 5
-        )
-
-        if (
-            final_answer
-            == "MULTIPLE"
-        ):
-            text_color = (
-                0,
-                0,
-                255,
-            )
-
-            label = (
-                f"{question}:MULTI"
-            )
-
-        elif (
-            final_answer
-            == "UNCERTAIN"
-        ):
-            text_color = (
-                0,
-                165,
-                255,
-            )
-
-            label = (
-                f"{question}:?"
-            )
-
-        elif (
-            final_answer
-            == "BLANK"
-        ):
-            text_color = (
-                100,
-                100,
-                100,
-            )
-
-            label = (
-                f"{question}:-"
-            )
-
-        else:
-            text_color = (
-                0,
-                180,
-                0,
-            )
-
-            label = (
-                f"{question}:{final_answer}"
-            )
-
-        cv2.putText(
-            debug_image,
-            label,
-            (
-                label_x,
-                label_y,
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.35,
-            text_color,
-            1,
-            cv2.LINE_AA,
-        )
-
-    return debug_image
 
 
 # ============================================================
@@ -3916,25 +2645,9 @@ def create_debug_image(
         "KCET",
     ]:
 
-        if corrected_image.ndim == 3:
-            calibration_gray = cv2.cvtColor(
-                corrected_image,
-                cv2.COLOR_BGR2GRAY,
-            )
-        else:
-            calibration_gray = corrected_image.copy()
-
-        column_offsets = (
-            auto_calibrate_neet_columns(
-                calibration_gray,
-                template,
-            )
-        )
-
         coordinates = (
-            generate_calibrated_bubble_coordinates(
-                template,
-                column_offsets,
+            generate_bubble_coordinates(
+                template
             )
         )
 
@@ -4074,182 +2787,54 @@ def process_omr(
         )
     )
 
-    # --------------------------------
-    # Determine exam before alignment
-    # --------------------------------
+    # ========================================================
+    # STEP 1: CROP USING THE FOUR LARGE OMR CORNER BOXES
+    # ========================================================
 
-    template_exam_name = (
-        str(
-            template.get(
-                "exam_name",
-                ""
-            )
+    cropped_image, crop_debug = (
+        crop_omr_by_corner_boxes(
+            image
         )
-        .strip()
-        .upper()
+    )
+
+    if not os.environ.get(
+        "VERCEL"
+    ):
+        cv2.imwrite(
+            "cropped_omr.jpg",
+            cropped_image,
+        )
+
+    # ========================================================
+    # STEP 2: FIND THE WHITE PAPER BOUNDARY INSIDE THE CROP
+    # ========================================================
+
+    corners = (
+        detect_corner_markers(
+            cropped_image,
+            template,
+        )
     )
 
     # ========================================================
-    # NEET / KCET:
-    # PREPROCESS TO THE SAME CANONICAL GEOMETRY AS THE CLEAN
-    # REFERENCE SHEET BEFORE USING ANY JSON COORDINATES.
+    # STEP 3: WARP TO EXACT TEMPLATE SIZE
     # ========================================================
 
-    if template_exam_name in [
-        "NEET",
-        "KCET",
-    ]:
-
-        project_dir = os.path.dirname(
-            os.path.abspath(__file__)
+    corrected = (
+        perspective_transform(
+            cropped_image,
+            corners,
+            template,
         )
-
-        reference_path = os.path.join(
-            project_dir,
-            "references",
-            "neet_reference.png",
-        )
-
-        local_debug_dir = (
-            os.path.join(
-                project_dir,
-                "alignment_debug",
-            )
-            if not os.environ.get("VERCEL")
-            else None
-        )
-
-        corrected, alignment_debug = (
-            canonicalize_omr(
-                image=image,
-                reference_path=reference_path,
-                output_size=(
-                    int(template["sheet_width"]),
-                    int(template["sheet_height"]),
-                ),
-                use_orb=True,
-                use_ecc=True,
-                ecc_minimum_score=0.75,
-                debug_dir=local_debug_dir,
-            )
-        )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "canonical_reference_alignment",
-
-            "document_quad":
-                alignment_debug.get(
-                    "document_quad"
-                ),
-
-            "orb_applied":
-                alignment_debug.get(
-                    "orb_applied",
-                    False,
-                ),
-
-            "orb_inliers":
-                alignment_debug.get(
-                    "orb_inliers",
-                    0,
-                ),
-
-            "ecc_applied":
-                alignment_debug.get(
-                    "ecc_applied",
-                    False,
-                ),
-
-            "ecc_score":
-                alignment_debug.get(
-                    "ecc_score"
-                ),
-        }
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            cv2.imwrite(
-                "corrected_omr.jpg",
-                corrected,
-            )
-
-    # ========================================================
-    # JEE:
-    # RETAIN EXISTING OUTER-PAGE CORRECTION
-    # ========================================================
-
-    else:
-
-        corners = (
-            detect_corner_markers(
-                image,
-                template,
-            )
-        )
-
-        corrected = (
-            perspective_transform(
-                image,
-                corners,
-                template,
-            )
-        )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "white_page_contour",
-
-            "corners": [
-                [
-                    round(
-                        float(point[0]),
-                        2,
-                    ),
-                    round(
-                        float(point[1]),
-                        2,
-                    ),
-                ]
-                for point
-                in corners
-            ],
-        }
-
-        alignment_debug = {
-            "crop":
-                crop_debug,
-
-            "output_size": {
-                "width":
-                    int(
-                        template[
-                            "sheet_width"
-                        ]
-                    ),
-
-                "height":
-                    int(
-                        template[
-                            "sheet_height"
-                        ]
-                    ),
-            },
-        }
-
+    )
 
     # --------------------------------
-    # Grayscale is already prepared by canonical preprocessing.
+    # Prepare grayscale
     # --------------------------------
+
+    gray = normalize_grayscale(
+        corrected
+    )
 
     # --------------------------------
     # Paper-code coordinate debug
@@ -4310,22 +2895,6 @@ def process_omr(
                 template,
             )
         )
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            answer_debug = (
-                draw_answer_analysis(
-                    corrected,
-                    template,
-                    answers,
-                )
-            )
-
-            cv2.imwrite(
-                "bubble_analysis_debug.jpg",
-                answer_debug,
-            )
 
     # ========================================================
     # KCET
@@ -4417,9 +2986,6 @@ def process_omr(
 
         "crop_debug":
             crop_debug,
-
-        "alignment_debug":
-            alignment_debug,
 
         "paper_code":
             paper_code,
