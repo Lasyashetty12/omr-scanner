@@ -7,26 +7,24 @@ from ml_omr.inference import classify_batch
 
 
 # ============================================================
-# CONFIG
+# SETTINGS
 # ============================================================
 
 DEFAULT_CROP_RADIUS = 16
 
-# Per-question relative-decision thresholds.
-# These are intentionally conservative because the corrected sheet
-# is already geometrically aligned to the canonical template.
-SINGLE_MIN_SCORE = 0.50
-SINGLE_MIN_GAP = 0.12
+# Absolute safeguards. The final threshold is adapted per sheet.
+MIN_FILLED_DARKNESS = 48.0
+MIN_QUESTION_DELTA = 24.0
+MIN_CORE_DARK_RATIO = 0.20
 
-MULTI_MIN_SCORE = 0.50
-MULTI_MAX_GAP_BETWEEN_TOP_TWO = 0.11
-MULTI_MIN_GAP_OVER_THIRD = 0.12
-
-BLANK_MAX_SCORE = 0.34
+# A second marked bubble must also independently pass these checks
+# before we call a question MULTIPLE.
+MULTIPLE_MIN_DELTA = 20.0
+MULTIPLE_MIN_CORE_DARK_RATIO = 0.18
 
 
 # ============================================================
-# BUBBLE CROPPING
+# CROP / MASK HELPERS
 # ============================================================
 
 def crop_bubble(
@@ -37,83 +35,47 @@ def crop_bubble(
 ):
     h, w = gray.shape[:2]
 
-    x1 = max(
-        0,
-        int(round(x - radius)),
-    )
+    x1 = max(0, int(round(x - radius)))
+    y1 = max(0, int(round(y - radius)))
+    x2 = min(w, int(round(x + radius + 1)))
+    y2 = min(h, int(round(y + radius + 1)))
 
-    y1 = max(
-        0,
-        int(round(y - radius)),
-    )
-
-    x2 = min(
-        w,
-        int(round(x + radius + 1)),
-    )
-
-    y2 = min(
-        h,
-        int(round(y + radius + 1)),
-    )
-
-    return gray[
-        y1:y2,
-        x1:x2,
-    ]
+    return gray[y1:y2, x1:x2]
 
 
-# ============================================================
-# CLASSICAL BUBBLE FEATURES
-# ============================================================
+def _circle_mask(size, radius):
+    center = (size - 1) / 2.0
 
-def _circle_mask(
-    size,
-    radius,
-):
-    center = (
-        size - 1
-    ) / 2.0
-
-    yy, xx = np.ogrid[
-        :size,
-        :size,
-    ]
+    yy, xx = np.ogrid[:size, :size]
 
     return (
-        (
-            xx - center
-        ) ** 2
+        (xx - center) ** 2
         +
-        (
-            yy - center
-        ) ** 2
+        (yy - center) ** 2
         <= radius ** 2
     )
 
 
-def _bubble_metrics(
-    crop,
-):
-    """
-    Measure fill characteristics while suppressing the printed outline.
+# ============================================================
+# BUBBLE METRICS
+# ============================================================
 
-    Core idea:
-      - a true fill darkens the bubble CENTER
-      - an empty printed outline mostly darkens the outer ring
+def _bubble_metrics(crop):
+    """
+    Extract features that separate a real filled bubble from a printed
+    empty outline.
+
+    The CENTER of the bubble matters most. Empty printed outlines are
+    dark mostly around the outer ring while their center remains bright.
     """
 
-    if (
-        crop is None
-        or crop.size == 0
-    ):
+    if crop is None or crop.size == 0:
         return {
-            "core_dark_ratio": 0.0,
-            "disk_dark_ratio": 0.0,
             "core_mean": 255.0,
             "paper_mean": 255.0,
-            "center_contrast": 0.0,
-            "classical_score": 0.0,
+            "center_darkness": 0.0,
+            "core_dark_ratio": 0.0,
+            "disk_dark_ratio": 0.0,
         }
 
     if crop.ndim == 3:
@@ -122,60 +84,49 @@ def _bubble_metrics(
             cv2.COLOR_BGR2GRAY,
         )
 
-    crop = crop.astype(
-        np.uint8
-    )
+    crop = crop.astype(np.uint8)
 
     # Mild normalization only.
     clahe = cv2.createCLAHE(
-        clipLimit=1.8,
-        tileGridSize=(
-            4,
-            4,
-        ),
+        clipLimit=1.6,
+        tileGridSize=(4, 4),
     )
 
-    normalized = clahe.apply(
-        crop
-    )
+    normalized = clahe.apply(crop)
 
     h, w = normalized.shape[:2]
+    size = min(h, w)
 
-    size = min(
-        h,
-        w,
-    )
+    if size < 9:
+        return {
+            "core_mean": float(np.mean(normalized)),
+            "paper_mean": float(np.mean(normalized)),
+            "center_darkness": 0.0,
+            "core_dark_ratio": 0.0,
+            "disk_dark_ratio": 0.0,
+        }
 
-    y0 = (
-        h - size
-    ) // 2
-
-    x0 = (
-        w - size
-    ) // 2
+    y0 = (h - size) // 2
+    x0 = (w - size) // 2
 
     square = normalized[
         y0:y0 + size,
         x0:x0 + size,
     ]
 
+    # Inner region deliberately avoids most of the printed ring.
     core_radius = max(
         3.0,
-        size * 0.18,
+        size * 0.17,
     )
 
     disk_radius = max(
         5.0,
-        size * 0.31,
+        size * 0.30,
     )
 
-    paper_inner_radius = (
-        size * 0.39
-    )
-
-    paper_outer_radius = (
-        size * 0.49
-    )
+    background_inner = size * 0.38
+    background_outer = size * 0.49
 
     core_mask = _circle_mask(
         size,
@@ -189,51 +140,40 @@ def _bubble_metrics(
 
     outer_mask = _circle_mask(
         size,
-        paper_outer_radius,
+        background_outer,
     )
 
-    inner_outer_mask = _circle_mask(
+    inner_bg_mask = _circle_mask(
         size,
-        paper_inner_radius,
+        background_inner,
     )
 
-    paper_mask = np.logical_and(
+    background_mask = np.logical_and(
         outer_mask,
         np.logical_not(
-            inner_outer_mask
+            inner_bg_mask
         ),
     )
 
-    core_pixels = square[
-        core_mask
-    ]
-
-    disk_pixels = square[
-        disk_mask
-    ]
-
-    paper_pixels = square[
-        paper_mask
+    core_pixels = square[core_mask]
+    disk_pixels = square[disk_mask]
+    background_pixels = square[
+        background_mask
     ]
 
     if core_pixels.size == 0:
-        core_pixels = square.reshape(
-            -1
-        )
+        core_pixels = square.reshape(-1)
 
     if disk_pixels.size == 0:
-        disk_pixels = square.reshape(
-            -1
-        )
+        disk_pixels = square.reshape(-1)
 
-    if paper_pixels.size == 0:
-        paper_pixels = square.reshape(
-            -1
-        )
+    if background_pixels.size == 0:
+        background_pixels = square.reshape(-1)
 
     paper_mean = float(
-        np.mean(
-            paper_pixels
+        np.percentile(
+            background_pixels,
+            70,
         )
     )
 
@@ -243,92 +183,36 @@ def _bubble_metrics(
         )
     )
 
-    center_contrast = float(
-        max(
-            0.0,
-            paper_mean - core_mean,
-        )
+    # Main feature: how much darker the center is than its local paper.
+    center_darkness = max(
+        0.0,
+        paper_mean - core_mean,
     )
 
-    # Dynamic local dark threshold.
+    # Local threshold adapts to shadows / exposure.
     dark_threshold = int(
         np.clip(
-            paper_mean - 38.0,
-            85,
-            160,
+            paper_mean - 42.0,
+            80,
+            165,
         )
     )
 
     core_dark_ratio = float(
         np.mean(
             core_pixels
-            <
-            dark_threshold
+            < dark_threshold
         )
     )
 
     disk_dark_ratio = float(
         np.mean(
             disk_pixels
-            <
-            dark_threshold
+            < dark_threshold
         )
-    )
-
-    # Combine classical features.
-    contrast_score = float(
-        np.clip(
-            center_contrast
-            /
-            95.0,
-            0.0,
-            1.0,
-        )
-    )
-
-    darkness_score = float(
-        np.clip(
-            (
-                190.0 - core_mean
-            )
-            /
-            110.0,
-            0.0,
-            1.0,
-        )
-    )
-
-    classical_score = (
-        0.50
-        *
-        core_dark_ratio
-        +
-        0.22
-        *
-        disk_dark_ratio
-        +
-        0.18
-        *
-        contrast_score
-        +
-        0.10
-        *
-        darkness_score
     )
 
     return {
-        "core_dark_ratio":
-            round(
-                core_dark_ratio,
-                4,
-            ),
-
-        "disk_dark_ratio":
-            round(
-                disk_dark_ratio,
-                4,
-            ),
-
         "core_mean":
             round(
                 core_mean,
@@ -341,17 +225,21 @@ def _bubble_metrics(
                 2,
             ),
 
-        "center_contrast":
+        "center_darkness":
             round(
-                center_contrast,
+                center_darkness,
                 2,
             ),
 
-        "classical_score":
+        "core_dark_ratio":
             round(
-                float(
-                    classical_score
-                ),
+                core_dark_ratio,
+                4,
+            ),
+
+        "disk_dark_ratio":
+            round(
+                disk_dark_ratio,
                 4,
             ),
     }
@@ -361,8 +249,9 @@ def _bubble_metrics(
 # ML HELPERS
 # ============================================================
 
-def _ml_filled_probability(
+def _ml_probability(
     prediction,
+    label,
 ):
     probabilities = prediction.get(
         "probabilities",
@@ -374,16 +263,15 @@ def _ml_filled_probability(
             probabilities,
             dict,
         )
-        and "filled"
-        in probabilities
+        and label in probabilities
     ):
         return float(
             probabilities[
-                "filled"
+                label
             ]
         )
 
-    label = str(
+    predicted_label = str(
         prediction.get(
             "label",
             ""
@@ -397,437 +285,345 @@ def _ml_filled_probability(
         )
     )
 
-    if label == "filled":
-        return confidence
-
-    return 0.0
-
-
-def _ml_ambiguous_probability(
-    prediction,
-):
-    probabilities = prediction.get(
-        "probabilities",
-        {},
-    )
-
-    if (
-        isinstance(
-            probabilities,
-            dict,
-        )
-        and "ambiguous"
-        in probabilities
-    ):
-        return float(
-            probabilities[
-                "ambiguous"
-            ]
-        )
-
-    label = str(
-        prediction.get(
-            "label",
-            ""
-        )
-    ).lower()
-
-    confidence = float(
-        prediction.get(
-            "confidence",
-            0.0,
-        )
-    )
-
-    if label == "ambiguous":
+    if predicted_label == label:
         return confidence
 
     return 0.0
 
 
 # ============================================================
-# RELATIVE QUESTION SCORING
+# ADAPTIVE SHEET THRESHOLD
 # ============================================================
 
-def _normalize_within_question(
-    values,
-):
-    """
-    Convert four raw values to a 0..1 relative scale.
-
-    The lightest/least-filled bubble becomes near 0 and the strongest
-    becomes near 1. This makes the detector more robust to lighting
-    changes down the page.
-    """
-
+def _median_absolute_deviation(values):
     values = np.asarray(
         values,
         dtype=np.float32,
     )
 
-    minimum = float(
-        np.min(
-            values
+    if values.size == 0:
+        return 0.0
+
+    median = float(
+        np.median(values)
+    )
+
+    return float(
+        np.median(
+            np.abs(
+                values - median
+            )
         )
     )
 
-    maximum = float(
-        np.max(
-            values
-        )
-    )
 
-    spread = (
-        maximum - minimum
-    )
-
-    if spread < 1e-6:
-        return np.zeros_like(
-            values,
-            dtype=np.float32,
-        )
-
-    return (
-        values - minimum
-    ) / spread
-
-
-def _build_question_scores(
-    option_data,
+def _estimate_blank_distribution(
+    all_question_data,
 ):
-    options = list(
-        option_data.keys()
-    )
+    """
+    Estimate what EMPTY bubbles look like on THIS scanned sheet.
 
-    classical = np.array(
-        [
-            float(
-                option_data[
-                    option
-                ][
-                    "metrics"
-                ][
-                    "classical_score"
-                ]
-            )
-            for option
-            in options
-        ],
-        dtype=np.float32,
-    )
+    For every question, the two least-dark bubbles are almost always empty
+    even when the question is answered or multiple-marked. Using them over
+    180 questions gives a very stable blank baseline without needing a
+    hard-coded brightness threshold.
+    """
 
-    core_dark = np.array(
-        [
-            float(
-                option_data[
-                    option
-                ][
-                    "metrics"
-                ][
-                    "core_dark_ratio"
-                ]
-            )
-            for option
-            in options
-        ],
-        dtype=np.float32,
-    )
+    blank_darkness_samples = []
+    blank_core_ratio_samples = []
 
-    contrast = np.array(
-        [
-            float(
-                option_data[
-                    option
-                ][
-                    "metrics"
-                ][
-                    "center_contrast"
-                ]
-            )
-            for option
-            in options
-        ],
-        dtype=np.float32,
-    )
-
-    ml_fill = np.array(
-        [
-            float(
-                option_data[
-                    option
-                ][
-                    "ml_filled_probability"
-                ]
-            )
-            for option
-            in options
-        ],
-        dtype=np.float32,
-    )
-
-    rel_classical = _normalize_within_question(
-        classical
-    )
-
-    rel_core = _normalize_within_question(
-        core_dark
-    )
-
-    rel_contrast = _normalize_within_question(
-        contrast
-    )
-
-    rel_ml = _normalize_within_question(
-        ml_fill
-    )
-
-    result = {}
-
-    for index, option in enumerate(
-        options
+    for option_data in (
+        all_question_data.values()
     ):
-
-        absolute_score = (
-            0.62
-            *
-            classical[
-                index
-            ]
-            +
-            0.38
-            *
-            ml_fill[
-                index
-            ]
+        ranked = sorted(
+            option_data.values(),
+            key=lambda item:
+                float(
+                    item[
+                        "metrics"
+                    ][
+                        "center_darkness"
+                    ]
+                ),
         )
 
-        relative_score = (
-            0.46
-            *
-            rel_classical[
-                index
-            ]
-            +
-            0.28
-            *
-            rel_core[
-                index
-            ]
-            +
-            0.16
-            *
-            rel_contrast[
-                index
-            ]
-            +
-            0.10
-            *
-            rel_ml[
-                index
-            ]
+        # The two weakest options are the safest blank samples.
+        for item in ranked[:2]:
+            blank_darkness_samples.append(
+                float(
+                    item[
+                        "metrics"
+                    ][
+                        "center_darkness"
+                    ]
+                )
+            )
+
+            blank_core_ratio_samples.append(
+                float(
+                    item[
+                        "metrics"
+                    ][
+                        "core_dark_ratio"
+                    ]
+                )
+            )
+
+    blank_median = float(
+        np.median(
+            blank_darkness_samples
         )
+    )
 
-        # Relative comparison gets most of the weight.
-        final_score = (
-            0.66
-            *
-            relative_score
-            +
-            0.34
-            *
-            absolute_score
+    blank_mad = _median_absolute_deviation(
+        blank_darkness_samples
+    )
+
+    blank_ratio_median = float(
+        np.median(
+            blank_core_ratio_samples
         )
+    )
 
-        result[
-            option
-        ] = {
-            **option_data[
-                option
-            ],
+    # Filled threshold is derived from actual empty bubbles on this image.
+    #
+    # The fixed floor protects against a very noisy/shadowy sheet.
+    filled_darkness_threshold = max(
+        MIN_FILLED_DARKNESS,
+        blank_median
+        +
+        max(
+            22.0,
+            6.0 * blank_mad,
+        ),
+    )
 
-            "absolute_score":
-                round(
-                    float(
-                        absolute_score
-                    ),
-                    4,
-                ),
+    filled_core_ratio_threshold = max(
+        MIN_CORE_DARK_RATIO,
+        blank_ratio_median
+        + 0.12,
+    )
 
-            "relative_score":
-                round(
-                    float(
-                        relative_score
-                    ),
-                    4,
-                ),
+    # Keep within sensible ranges.
+    filled_darkness_threshold = float(
+        np.clip(
+            filled_darkness_threshold,
+            48.0,
+            115.0,
+        )
+    )
 
-            "final_score":
-                round(
-                    float(
-                        final_score
-                    ),
-                    4,
-                ),
-        }
+    filled_core_ratio_threshold = float(
+        np.clip(
+            filled_core_ratio_threshold,
+            0.20,
+            0.60,
+        )
+    )
 
-    return result
+    return {
+        "blank_darkness_median":
+            round(
+                blank_median,
+                3,
+            ),
 
+        "blank_darkness_mad":
+            round(
+                blank_mad,
+                3,
+            ),
+
+        "blank_core_ratio_median":
+            round(
+                blank_ratio_median,
+                4,
+            ),
+
+        "filled_darkness_threshold":
+            round(
+                filled_darkness_threshold,
+                3,
+            ),
+
+        "filled_core_ratio_threshold":
+            round(
+                filled_core_ratio_threshold,
+                4,
+            ),
+    }
+
+
+# ============================================================
+# QUESTION DECISION
+# ============================================================
 
 def _decide_question(
-    scored,
+    option_data,
+    sheet_thresholds,
 ):
+    """
+    Decide one A/B/C/D question.
+
+    Decision priority:
+      1. absolute center-fill evidence
+      2. difference from the other options in the SAME question
+      3. ML used only as tie/support evidence
+    """
+
+    darkness_threshold = float(
+        sheet_thresholds[
+            "filled_darkness_threshold"
+        ]
+    )
+
+    core_ratio_threshold = float(
+        sheet_thresholds[
+            "filled_core_ratio_threshold"
+        ]
+    )
+
     ranked = sorted(
-        scored.items(),
+        option_data.items(),
         key=lambda item:
-            item[1][
-                "final_score"
-            ],
+            float(
+                item[1][
+                    "metrics"
+                ][
+                    "center_darkness"
+                ]
+            ),
         reverse=True,
     )
 
-    best_option, best_info = (
-        ranked[0]
+    darkness_values = [
+        float(
+            item[
+                "metrics"
+            ][
+                "center_darkness"
+            ]
+        )
+        for _, item
+        in ranked
+    ]
+
+    # Robust within-question blank baseline:
+    # use the median of the two least-dark bubbles.
+    question_blank_baseline = float(
+        np.median(
+            darkness_values[
+                -2:
+            ]
+        )
     )
 
-    second_option, second_info = (
-        ranked[1]
-    )
+    qualified = []
 
-    third_option, third_info = (
-        ranked[2]
-    )
+    for option, info in ranked:
 
-    fourth_option, fourth_info = (
-        ranked[3]
-    )
-
-    best = float(
-        best_info[
-            "final_score"
+        metrics = info[
+            "metrics"
         ]
-    )
 
-    second = float(
-        second_info[
-            "final_score"
-        ]
-    )
+        darkness = float(
+            metrics[
+                "center_darkness"
+            ]
+        )
 
-    third = float(
-        third_info[
-            "final_score"
-        ]
-    )
+        core_ratio = float(
+            metrics[
+                "core_dark_ratio"
+            ]
+        )
 
-    top_gap = (
-        best - second
-    )
+        delta = (
+            darkness
+            -
+            question_blank_baseline
+        )
 
-    second_third_gap = (
-        second - third
-    )
+        ml_filled = float(
+            info[
+                "ml_filled_probability"
+            ]
+        )
 
-    best_absolute = float(
-        best_info[
-            "absolute_score"
-        ]
-    )
+        # Main deterministic fill test.
+        passes_classical = (
+            darkness
+            >= darkness_threshold
+            and
+            delta
+            >= MIN_QUESTION_DELTA
+            and
+            core_ratio
+            >= core_ratio_threshold
+        )
 
-    second_absolute = float(
-        second_info[
-            "absolute_score"
-        ]
-    )
+        # Rescue a slightly weaker classical bubble only if ML is very sure.
+        passes_ml_rescue = (
+            darkness
+            >= darkness_threshold * 0.82
+            and
+            delta
+            >= MIN_QUESTION_DELTA * 0.82
+            and
+            core_ratio
+            >= core_ratio_threshold * 0.82
+            and
+            ml_filled
+            >= 0.92
+        )
+
+        is_filled = (
+            passes_classical
+            or passes_ml_rescue
+        )
+
+        info[
+            "question_blank_baseline"
+        ] = round(
+            question_blank_baseline,
+            3,
+        )
+
+        info[
+            "question_delta"
+        ] = round(
+            delta,
+            3,
+        )
+
+        info[
+            "passes_classical"
+        ] = bool(
+            passes_classical
+        )
+
+        info[
+            "passes_ml_rescue"
+        ] = bool(
+            passes_ml_rescue
+        )
+
+        info[
+            "is_filled"
+        ] = bool(
+            is_filled
+        )
+
+        if is_filled:
+            qualified.append(
+                option
+            )
 
     # --------------------------------------------------------
     # BLANK
     # --------------------------------------------------------
 
-    # Relative normalization always creates a "winner", even when
-    # all four bubbles are actually empty. Therefore blank detection
-    # must primarily use ABSOLUTE evidence.
-    #
-    # For a true blank row:
-    #   - all four absolute scores stay low
-    #   - the strongest classical center-fill score stays low
-    #   - ML should not have strong filled confidence
-    #
-    # This prevents empty rows from being forced into A/B/C/D.
-
-    absolute_scores = [
-        float(
-            info[
-                "absolute_score"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    classical_scores = [
-        float(
-            info[
-                "metrics"
-            ][
-                "classical_score"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    ml_fill_scores = [
-        float(
-            info[
-                "ml_filled_probability"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
-    max_absolute = max(
-        absolute_scores
-    )
-
-    max_classical = max(
-        classical_scores
-    )
-
-    max_ml_fill = max(
-        ml_fill_scores
-    )
-
-    mean_absolute = float(
-        np.mean(
-            absolute_scores
-        )
-    )
-
-    # Strong blank:
-    # all four bubbles look empty in absolute terms.
-    strong_blank = (
-        max_absolute < 0.43
-        and
-        max_classical < 0.40
-        and
-        max_ml_fill < 0.72
-    )
-
-    # Soft blank:
-    # sometimes one empty printed outline gets a modest ML score,
-    # but the whole row still has weak evidence.
-    soft_blank = (
-        max_absolute < 0.48
-        and
-        mean_absolute < 0.30
-        and
-        max_classical < 0.46
-        and
-        best_absolute < 0.48
-    )
-
-    if strong_blank or soft_blank:
+    if len(qualified) == 0:
         return {
             "answer":
                 None,
@@ -835,46 +631,41 @@ def _decide_question(
             "status":
                 "blank",
 
+            "multiple_options":
+                [],
+
             "best_option":
-                best_option,
+                ranked[0][0],
 
-            "best_score":
-                best,
-
-            "second_option":
-                second_option,
-
-            "second_score":
-                second,
-
-            "top_gap":
-                top_gap,
-
-            "second_third_gap":
-                second_third_gap,
-
-            "max_absolute":
+            "question_blank_baseline":
                 round(
-                    max_absolute,
-                    4,
+                    question_blank_baseline,
+                    3,
                 ),
+        }
 
-            "mean_absolute":
-                round(
-                    mean_absolute,
-                    4,
-                ),
+    # --------------------------------------------------------
+    # SINGLE
+    # --------------------------------------------------------
 
-            "max_classical":
-                round(
-                    max_classical,
-                    4,
-                ),
+    if len(qualified) == 1:
+        return {
+            "answer":
+                qualified[0],
 
-            "max_ml_fill":
+            "status":
+                "answered",
+
+            "multiple_options":
+                [],
+
+            "best_option":
+                qualified[0],
+
+            "question_blank_baseline":
                 round(
-                    max_ml_fill,
-                    4,
+                    question_blank_baseline,
+                    3,
                 ),
         }
 
@@ -882,34 +673,55 @@ def _decide_question(
     # TRUE MULTIPLE
     # --------------------------------------------------------
 
-    # Two options must BOTH be independently strong.
-    # They must also be close to one another AND clearly separated
-    # from option #3. This prevents empty outlines from creating MULTI.
-    if (
-        best
-        >=
-        MULTI_MIN_SCORE
-        and
-        second
-        >=
-        MULTI_MIN_SCORE
-        and
-        best_absolute
-        >=
-        0.42
-        and
-        second_absolute
-        >=
-        0.42
-        and
-        top_gap
-        <=
-        MULTI_MAX_GAP_BETWEEN_TOP_TWO
-        and
-        second_third_gap
-        >=
-        MULTI_MIN_GAP_OVER_THIRD
-    ):
+    # Re-validate every additional marked bubble independently.
+    # This suppresses accidental MULTIPLE caused by an empty outline.
+    strong_multiple = []
+
+    for option in qualified:
+
+        info = option_data[
+            option
+        ]
+
+        metrics = info[
+            "metrics"
+        ]
+
+        darkness = float(
+            metrics[
+                "center_darkness"
+            ]
+        )
+
+        core_ratio = float(
+            metrics[
+                "core_dark_ratio"
+            ]
+        )
+
+        delta = (
+            darkness
+            -
+            question_blank_baseline
+        )
+
+        if (
+            darkness
+            >= darkness_threshold
+            and
+            delta
+            >= MULTIPLE_MIN_DELTA
+            and
+            core_ratio
+            >= MULTIPLE_MIN_CORE_DARK_RATIO
+        ):
+            strong_multiple.append(
+                option
+            )
+
+    if len(
+        strong_multiple
+    ) >= 2:
         return {
             "answer":
                 "MULTIPLE",
@@ -918,73 +730,44 @@ def _decide_question(
                 "multiple",
 
             "multiple_options":
-                [
-                    best_option,
-                    second_option,
-                ],
+                strong_multiple,
 
             "best_option":
-                best_option,
+                ranked[0][0],
 
-            "best_score":
-                best,
-
-            "second_option":
-                second_option,
-
-            "second_score":
-                second,
-
-            "top_gap":
-                top_gap,
-
-            "second_third_gap":
-                second_third_gap,
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
         }
 
-    # --------------------------------------------------------
-    # SINGLE
-    # --------------------------------------------------------
-
-    if (
-        best
-        >=
-        SINGLE_MIN_SCORE
-        and
-        top_gap
-        >=
-        SINGLE_MIN_GAP
-    ):
+    # If only one bubble survives the stricter multiple check,
+    # treat it as a normal single answer.
+    if len(
+        strong_multiple
+    ) == 1:
         return {
             "answer":
-                best_option,
+                strong_multiple[0],
 
             "status":
                 "answered",
 
+            "multiple_options":
+                [],
+
             "best_option":
-                best_option,
+                strong_multiple[0],
 
-            "best_score":
-                best,
-
-            "second_option":
-                second_option,
-
-            "second_score":
-                second,
-
-            "top_gap":
-                top_gap,
-
-            "second_third_gap":
-                second_third_gap,
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
         }
 
-    # --------------------------------------------------------
-    # AMBIGUOUS FALLBACK
-    # --------------------------------------------------------
-
+    # Conservative fallback.
     return {
         "answer":
             None,
@@ -992,28 +775,22 @@ def _decide_question(
         "status":
             "ambiguous",
 
+        "multiple_options":
+            [],
+
         "best_option":
-            best_option,
+            ranked[0][0],
 
-        "best_score":
-            best,
-
-        "second_option":
-            second_option,
-
-        "second_score":
-            second,
-
-        "top_gap":
-            top_gap,
-
-        "second_third_gap":
-            second_third_gap,
+        "question_blank_baseline":
+            round(
+                question_blank_baseline,
+                3,
+            ),
     }
 
 
 # ============================================================
-# PUBLIC READER
+# PUBLIC API
 # ============================================================
 
 def scan_answers_ml(
@@ -1024,17 +801,12 @@ def scan_answers_ml(
     ambiguous_confidence=0.60,
 ):
     """
-    Relative hybrid OMR reader.
+    Adaptive hybrid OMR reader.
 
-    Strategy:
-      1. crop A/B/C/D for every question
-      2. run ML in one batch
-      3. compute classical center-fill metrics
-      4. compare A/B/C/D RELATIVE TO EACH OTHER
-      5. return single / blank / multiple / ambiguous
+    `filled_confidence` and `ambiguous_confidence` are kept in the public
+    signature for compatibility with scanner.py.
 
-    The key improvement is that brightness/shadow variation down the
-    sheet is handled per-question instead of using only global thresholds.
+    The reader adapts its blank/filled threshold to every scanned sheet.
     """
 
     del filled_confidence
@@ -1049,11 +821,17 @@ def scan_answers_ml(
     batch_crops = []
     batch_map = []
 
-    raw_question_data = {}
+    question_data = {}
 
-    for question, option_map in coordinates.items():
+    # --------------------------------------------------------
+    # Extract classical metrics and prepare one ML batch
+    # --------------------------------------------------------
 
-        raw_question_data[
+    for question, option_map in (
+        coordinates.items()
+    ):
+
+        question_data[
             question
         ] = {}
 
@@ -1073,6 +851,24 @@ def scan_answers_ml(
                 crop
             )
 
+            question_data[
+                question
+            ][
+                option
+            ] = {
+                "metrics":
+                    metrics,
+
+                "crop_center": [
+                    int(
+                        round(x)
+                    ),
+                    int(
+                        round(y)
+                    ),
+                ],
+            }
+
             batch_crops.append(
                 crop
             )
@@ -1084,27 +880,9 @@ def scan_answers_ml(
                 )
             )
 
-            raw_question_data[
-                question
-            ][
-                option
-            ] = {
-                "metrics":
-                    metrics,
-
-                "crop_center": [
-                    int(
-                        round(
-                            x
-                        )
-                    ),
-                    int(
-                        round(
-                            y
-                        )
-                    ),
-                ],
-            }
+    # --------------------------------------------------------
+    # ML inference
+    # --------------------------------------------------------
 
     predictions = classify_batch(
         batch_crops
@@ -1118,7 +896,22 @@ def scan_answers_ml(
         predictions,
     ):
 
-        raw_question_data[
+        ml_filled = _ml_probability(
+            prediction,
+            "filled",
+        )
+
+        ml_blank = _ml_probability(
+            prediction,
+            "blank",
+        )
+
+        ml_ambiguous = _ml_probability(
+            prediction,
+            "ambiguous",
+        )
+
+        question_data[
             question
         ][
             option
@@ -1126,43 +919,63 @@ def scan_answers_ml(
             "ml"
         ] = prediction
 
-        raw_question_data[
+        question_data[
             question
         ][
             option
         ][
             "ml_filled_probability"
         ] = round(
-            _ml_filled_probability(
-                prediction
-            ),
+            ml_filled,
             4,
         )
 
-        raw_question_data[
+        question_data[
+            question
+        ][
+            option
+        ][
+            "ml_blank_probability"
+        ] = round(
+            ml_blank,
+            4,
+        )
+
+        question_data[
             question
         ][
             option
         ][
             "ml_ambiguous_probability"
         ] = round(
-            _ml_ambiguous_probability(
-                prediction
-            ),
+            ml_ambiguous,
             4,
         )
+
+    # --------------------------------------------------------
+    # Learn empty-bubble characteristics from this sheet
+    # --------------------------------------------------------
+
+    sheet_thresholds = (
+        _estimate_blank_distribution(
+            question_data
+        )
+    )
 
     answers = {}
     debug = {}
 
-    for question, option_data in raw_question_data.items():
+    # --------------------------------------------------------
+    # Decide every question
+    # --------------------------------------------------------
 
-        scored = _build_question_scores(
-            option_data
-        )
+    for question, option_data in (
+        question_data.items()
+    ):
 
         decision = _decide_question(
-            scored
+            option_data,
+            sheet_thresholds,
         )
 
         answers[
@@ -1176,8 +989,11 @@ def scan_answers_ml(
         ] = {
             **decision,
 
+            "sheet_thresholds":
+                sheet_thresholds,
+
             "options":
-                scored,
+                option_data,
         }
 
     return (
