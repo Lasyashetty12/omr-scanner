@@ -6,30 +6,26 @@ import numpy as np
 from ml_omr.inference import classify_batch
 
 
+# ============================================================
+# SETTINGS
+# ============================================================
+
 DEFAULT_CROP_RADIUS = 16
 
-# ------------------------------------------------------------
-# Tuned decision thresholds
-# ------------------------------------------------------------
+# Absolute safeguards. The final threshold is adapted per sheet.
+MIN_FILLED_DARKNESS = 48.0
+MIN_QUESTION_DELTA = 24.0
+MIN_CORE_DARK_RATIO = 0.20
 
-# Sheet-level adaptive threshold is still learned from blank bubbles.
-MIN_FILLED_DARKNESS = 46.0
-MIN_CORE_DARK_RATIO = 0.18
-
-# Relative rescue: lightly filled bubbles can still be accepted when
-# they are clearly darker than the other three options.
-RELATIVE_RESCUE_MIN_GAP = 18.0
-RELATIVE_RESCUE_ML = 0.72
-
-# A true blank should have BOTH weak absolute evidence AND weak relative
-# separation from the second-darkest bubble.
-BLANK_ABSOLUTE_MARGIN = 0.88
-BLANK_MAX_TOP_GAP = 14.0
-
-# Multiple validation
+# A second marked bubble must also independently pass these checks
+# before we call a question MULTIPLE.
 MULTIPLE_MIN_DELTA = 20.0
 MULTIPLE_MIN_CORE_DARK_RATIO = 0.18
 
+
+# ============================================================
+# CROP / MASK HELPERS
+# ============================================================
 
 def crop_bubble(
     gray,
@@ -49,6 +45,7 @@ def crop_bubble(
 
 def _circle_mask(size, radius):
     center = (size - 1) / 2.0
+
     yy, xx = np.ogrid[:size, :size]
 
     return (
@@ -59,7 +56,19 @@ def _circle_mask(size, radius):
     )
 
 
+# ============================================================
+# BUBBLE METRICS
+# ============================================================
+
 def _bubble_metrics(crop):
+    """
+    Extract features that separate a real filled bubble from a printed
+    empty outline.
+
+    The CENTER of the bubble matters most. Empty printed outlines are
+    dark mostly around the outer ring while their center remains bright.
+    """
+
     if crop is None or crop.size == 0:
         return {
             "core_mean": 255.0,
@@ -77,6 +86,7 @@ def _bubble_metrics(crop):
 
     crop = crop.astype(np.uint8)
 
+    # Mild normalization only.
     clahe = cv2.createCLAHE(
         clipLimit=1.6,
         tileGridSize=(4, 4),
@@ -88,10 +98,9 @@ def _bubble_metrics(crop):
     size = min(h, w)
 
     if size < 9:
-        mean_value = float(np.mean(normalized))
         return {
-            "core_mean": mean_value,
-            "paper_mean": mean_value,
+            "core_mean": float(np.mean(normalized)),
+            "paper_mean": float(np.mean(normalized)),
             "center_darkness": 0.0,
             "core_dark_ratio": 0.0,
             "disk_dark_ratio": 0.0,
@@ -105,6 +114,7 @@ def _bubble_metrics(crop):
         x0:x0 + size,
     ]
 
+    # Inner region deliberately avoids most of the printed ring.
     core_radius = max(
         3.0,
         size * 0.17,
@@ -140,7 +150,9 @@ def _bubble_metrics(crop):
 
     background_mask = np.logical_and(
         outer_mask,
-        np.logical_not(inner_bg_mask),
+        np.logical_not(
+            inner_bg_mask
+        ),
     )
 
     core_pixels = square[core_mask]
@@ -171,11 +183,13 @@ def _bubble_metrics(crop):
         )
     )
 
+    # Main feature: how much darker the center is than its local paper.
     center_darkness = max(
         0.0,
         paper_mean - core_mean,
     )
 
+    # Local threshold adapts to shadows / exposure.
     dark_threshold = int(
         np.clip(
             paper_mean - 42.0,
@@ -186,13 +200,15 @@ def _bubble_metrics(crop):
 
     core_dark_ratio = float(
         np.mean(
-            core_pixels < dark_threshold
+            core_pixels
+            < dark_threshold
         )
     )
 
     disk_dark_ratio = float(
         np.mean(
-            disk_pixels < dark_threshold
+            disk_pixels
+            < dark_threshold
         )
     )
 
@@ -229,6 +245,10 @@ def _bubble_metrics(crop):
     }
 
 
+# ============================================================
+# ML HELPERS
+# ============================================================
+
 def _ml_probability(
     prediction,
     label,
@@ -239,11 +259,16 @@ def _ml_probability(
     )
 
     if (
-        isinstance(probabilities, dict)
+        isinstance(
+            probabilities,
+            dict,
+        )
         and label in probabilities
     ):
         return float(
-            probabilities[label]
+            probabilities[
+                label
+            ]
         )
 
     predicted_label = str(
@@ -265,6 +290,10 @@ def _ml_probability(
 
     return 0.0
 
+
+# ============================================================
+# ADAPTIVE SHEET THRESHOLD
+# ============================================================
 
 def _median_absolute_deviation(values):
     values = np.asarray(
@@ -291,6 +320,15 @@ def _median_absolute_deviation(values):
 def _estimate_blank_distribution(
     all_question_data,
 ):
+    """
+    Estimate what EMPTY bubbles look like on THIS scanned sheet.
+
+    For every question, the two least-dark bubbles are almost always empty
+    even when the question is answered or multiple-marked. Using them over
+    180 questions gives a very stable blank baseline without needing a
+    hard-coded brightness threshold.
+    """
+
     blank_darkness_samples = []
     blank_core_ratio_samples = []
 
@@ -309,6 +347,7 @@ def _estimate_blank_distribution(
                 ),
         )
 
+        # The two weakest options are the safest blank samples.
         for item in ranked[:2]:
             blank_darkness_samples.append(
                 float(
@@ -336,10 +375,8 @@ def _estimate_blank_distribution(
         )
     )
 
-    blank_mad = (
-        _median_absolute_deviation(
-            blank_darkness_samples
-        )
+    blank_mad = _median_absolute_deviation(
+        blank_darkness_samples
     )
 
     blank_ratio_median = float(
@@ -348,36 +385,39 @@ def _estimate_blank_distribution(
         )
     )
 
+    # Filled threshold is derived from actual empty bubbles on this image.
+    #
+    # The fixed floor protects against a very noisy/shadowy sheet.
     filled_darkness_threshold = max(
         MIN_FILLED_DARKNESS,
         blank_median
         +
         max(
-            20.0,
-            5.0 * blank_mad,
+            22.0,
+            6.0 * blank_mad,
         ),
     )
 
     filled_core_ratio_threshold = max(
         MIN_CORE_DARK_RATIO,
         blank_ratio_median
-        +
-        0.10,
+        + 0.12,
     )
 
+    # Keep within sensible ranges.
     filled_darkness_threshold = float(
         np.clip(
             filled_darkness_threshold,
-            46.0,
-            110.0,
+            48.0,
+            115.0,
         )
     )
 
     filled_core_ratio_threshold = float(
         np.clip(
             filled_core_ratio_threshold,
-            0.18,
-            0.56,
+            0.20,
+            0.60,
         )
     )
 
@@ -414,10 +454,23 @@ def _estimate_blank_distribution(
     }
 
 
+# ============================================================
+# QUESTION DECISION
+# ============================================================
+
 def _decide_question(
     option_data,
     sheet_thresholds,
 ):
+    """
+    Decide one A/B/C/D question.
+
+    Decision priority:
+      1. absolute center-fill evidence
+      2. difference from the other options in the SAME question
+      3. ML used only as tie/support evidence
+    """
+
     darkness_threshold = float(
         sheet_thresholds[
             "filled_darkness_threshold"
@@ -443,153 +496,29 @@ def _decide_question(
         reverse=True,
     )
 
-    best_option, best_info = ranked[0]
-    second_option, second_info = ranked[1]
-
-    best_darkness = float(
-        best_info[
-            "metrics"
-        ][
-            "center_darkness"
-        ]
-    )
-
-    second_darkness = float(
-        second_info[
-            "metrics"
-        ][
-            "center_darkness"
-        ]
-    )
-
-    top_gap = (
-        best_darkness
-        -
-        second_darkness
-    )
-
-    best_core_ratio = float(
-        best_info[
-            "metrics"
-        ][
-            "core_dark_ratio"
-        ]
-    )
-
-    best_ml = float(
-        best_info[
-            "ml_filled_probability"
-        ]
-    )
-
-    # Robust within-question blank baseline:
-    # median of the two least-dark options.
     darkness_values = [
         float(
-            info[
+            item[
                 "metrics"
             ][
                 "center_darkness"
             ]
         )
-        for _, info
+        for _, item
         in ranked
     ]
 
+    # Robust within-question blank baseline:
+    # use the median of the two least-dark bubbles.
     question_blank_baseline = float(
         np.median(
-            darkness_values[-2:]
+            darkness_values[
+                -2:
+            ]
         )
     )
 
-    best_delta = (
-        best_darkness
-        -
-        question_blank_baseline
-    )
-
-    # --------------------------------------------------------
-    # TRUE BLANK
-    # --------------------------------------------------------
-    #
-    # IMPORTANT CHANGE:
-    # We now require BOTH weak absolute evidence AND a small top gap.
-    #
-    # This avoids throwing away lightly shaded real answers that are
-    # clearly darker than the other three bubbles.
-
-    weak_absolute = (
-        best_darkness
-        <
-        darkness_threshold
-        *
-        BLANK_ABSOLUTE_MARGIN
-    )
-
-    weak_relative = (
-        top_gap
-        <
-        BLANK_MAX_TOP_GAP
-    )
-
-    weak_core = (
-        best_core_ratio
-        <
-        core_ratio_threshold
-        *
-        0.90
-    )
-
-    if (
-        weak_absolute
-        and
-        weak_relative
-        and
-        weak_core
-    ):
-        return {
-            "answer":
-                None,
-
-            "status":
-                "blank",
-
-            "multiple_options":
-                [],
-
-            "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
-
-            "question_blank_baseline":
-                round(
-                    question_blank_baseline,
-                    3,
-                ),
-        }
-
-    # --------------------------------------------------------
-    # MARKED OPTIONS
-    # --------------------------------------------------------
-
-    filled_options = []
+    qualified = []
 
     for option, info in ranked:
 
@@ -609,91 +538,48 @@ def _decide_question(
             ]
         )
 
-        ml_filled = float(
-            info[
-                "ml_filled_probability"
-            ]
-        )
-
         delta = (
             darkness
             -
             question_blank_baseline
         )
 
-        absolute_pass = (
-            darkness
-            >=
-            darkness_threshold
-            and
-            core_ratio
-            >=
-            core_ratio_threshold
+        ml_filled = float(
+            info[
+                "ml_filled_probability"
+            ]
         )
 
-        # Relative rescue:
-        # slightly faint bubble, but clearly darkest in the row and ML agrees.
-        relative_rescue = (
-            option == best_option
-            and
-            top_gap
-            >=
-            RELATIVE_RESCUE_MIN_GAP
+        # Main deterministic fill test.
+        passes_classical = (
+            darkness
+            >= darkness_threshold
             and
             delta
-            >=
-            RELATIVE_RESCUE_MIN_GAP
-            and
-            darkness
-            >=
-            darkness_threshold
-            *
-            0.72
+            >= MIN_QUESTION_DELTA
             and
             core_ratio
-            >=
-            core_ratio_threshold
-            *
-            0.70
+            >= core_ratio_threshold
+        )
+
+        # Rescue a slightly weaker classical bubble only if ML is very sure.
+        passes_ml_rescue = (
+            darkness
+            >= darkness_threshold * 0.82
+            and
+            delta
+            >= MIN_QUESTION_DELTA * 0.82
+            and
+            core_ratio
+            >= core_ratio_threshold * 0.82
             and
             ml_filled
-            >=
-            RELATIVE_RESCUE_ML
-        )
-
-        # Very clear classical rescue even when ML is uncertain.
-        strong_relative_rescue = (
-            option == best_option
-            and
-            top_gap
-            >=
-            RELATIVE_RESCUE_MIN_GAP
-            *
-            1.35
-            and
-            delta
-            >=
-            RELATIVE_RESCUE_MIN_GAP
-            *
-            1.35
-            and
-            darkness
-            >=
-            darkness_threshold
-            *
-            0.80
-            and
-            core_ratio
-            >=
-            core_ratio_threshold
-            *
-            0.78
+            >= 0.92
         )
 
         is_filled = (
-            absolute_pass
-            or relative_rescue
-            or strong_relative_rescue
+            passes_classical
+            or passes_ml_rescue
         )
 
         info[
@@ -711,21 +597,15 @@ def _decide_question(
         )
 
         info[
-            "absolute_pass"
+            "passes_classical"
         ] = bool(
-            absolute_pass
+            passes_classical
         )
 
         info[
-            "relative_rescue"
+            "passes_ml_rescue"
         ] = bool(
-            relative_rescue
-        )
-
-        info[
-            "strong_relative_rescue"
-        ] = bool(
-            strong_relative_rescue
+            passes_ml_rescue
         )
 
         info[
@@ -735,67 +615,15 @@ def _decide_question(
         )
 
         if is_filled:
-            filled_options.append(
+            qualified.append(
                 option
             )
 
     # --------------------------------------------------------
-    # NO FILLED OPTION AFTER RESCUE
+    # BLANK
     # --------------------------------------------------------
 
-    if len(
-        filled_options
-    ) == 0:
-
-        # If the top bubble is clearly separated, prefer UNCERTAIN rather
-        # than falsely calling a real faint mark blank.
-        if (
-            top_gap
-            >=
-            RELATIVE_RESCUE_MIN_GAP
-            and
-            best_delta
-            >=
-            RELATIVE_RESCUE_MIN_GAP
-        ):
-            return {
-                "answer":
-                    None,
-
-                "status":
-                    "ambiguous",
-
-                "multiple_options":
-                    [],
-
-                "best_option":
-                    best_option,
-
-                "best_darkness":
-                    round(
-                        best_darkness,
-                        3,
-                    ),
-
-                "second_darkness":
-                    round(
-                        second_darkness,
-                        3,
-                    ),
-
-                "top_gap":
-                    round(
-                        top_gap,
-                        3,
-                    ),
-
-                "question_blank_baseline":
-                    round(
-                        question_blank_baseline,
-                        3,
-                    ),
-            }
-
+    if len(qualified) == 0:
         return {
             "answer":
                 None,
@@ -807,25 +635,7 @@ def _decide_question(
                 [],
 
             "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
+                ranked[0][0],
 
             "question_blank_baseline":
                 round(
@@ -838,12 +648,10 @@ def _decide_question(
     # SINGLE
     # --------------------------------------------------------
 
-    if len(
-        filled_options
-    ) == 1:
+    if len(qualified) == 1:
         return {
             "answer":
-                filled_options[0],
+                qualified[0],
 
             "status":
                 "answered",
@@ -852,25 +660,7 @@ def _decide_question(
                 [],
 
             "best_option":
-                filled_options[0],
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
+                qualified[0],
 
             "question_blank_baseline":
                 round(
@@ -880,12 +670,14 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # MULTIPLE
+    # TRUE MULTIPLE
     # --------------------------------------------------------
 
+    # Re-validate every additional marked bubble independently.
+    # This suppresses accidental MULTIPLE caused by an empty outline.
     strong_multiple = []
 
-    for option in filled_options:
+    for option in qualified:
 
         info = option_data[
             option
@@ -941,25 +733,7 @@ def _decide_question(
                 strong_multiple,
 
             "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
+                ranked[0][0],
 
             "question_blank_baseline":
                 round(
@@ -968,8 +742,8 @@ def _decide_question(
                 ),
         }
 
-    # If only one option survives the strict multiple validation,
-    # keep it as a normal single.
+    # If only one bubble survives the stricter multiple check,
+    # treat it as a normal single answer.
     if len(
         strong_multiple
     ) == 1:
@@ -986,24 +760,6 @@ def _decide_question(
             "best_option":
                 strong_multiple[0],
 
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
-
             "question_blank_baseline":
                 round(
                     question_blank_baseline,
@@ -1011,6 +767,7 @@ def _decide_question(
                 ),
         }
 
+    # Conservative fallback.
     return {
         "answer":
             None,
@@ -1022,25 +779,7 @@ def _decide_question(
             [],
 
         "best_option":
-            best_option,
-
-        "best_darkness":
-            round(
-                best_darkness,
-                3,
-            ),
-
-        "second_darkness":
-            round(
-                second_darkness,
-                3,
-            ),
-
-        "top_gap":
-            round(
-                top_gap,
-                3,
-            ),
+            ranked[0][0],
 
         "question_blank_baseline":
             round(
@@ -1050,6 +789,10 @@ def _decide_question(
     }
 
 
+# ============================================================
+# PUBLIC API
+# ============================================================
+
 def scan_answers_ml(
     gray,
     coordinates,
@@ -1058,13 +801,12 @@ def scan_answers_ml(
     ambiguous_confidence=0.60,
 ):
     """
-    Final tuned adaptive hybrid reader.
+    Adaptive hybrid OMR reader.
 
-    Main changes:
-      - BLANK needs weak absolute AND weak relative evidence
-      - faint but clearly separated fills can be rescued
-      - MULTIPLE still requires independently strong bubbles
-      - ML remains supporting evidence, not the scoring engine
+    `filled_confidence` and `ambiguous_confidence` are kept in the public
+    signature for compatibility with scanner.py.
+
+    The reader adapts its blank/filled threshold to every scanned sheet.
     """
 
     del filled_confidence
@@ -1080,6 +822,10 @@ def scan_answers_ml(
     batch_map = []
 
     question_data = {}
+
+    # --------------------------------------------------------
+    # Extract classical metrics and prepare one ML batch
+    # --------------------------------------------------------
 
     for question, option_map in (
         coordinates.items()
@@ -1114,8 +860,12 @@ def scan_answers_ml(
                     metrics,
 
                 "crop_center": [
-                    int(round(x)),
-                    int(round(y)),
+                    int(
+                        round(x)
+                    ),
+                    int(
+                        round(y)
+                    ),
                 ],
             }
 
@@ -1130,6 +880,10 @@ def scan_answers_ml(
                 )
             )
 
+    # --------------------------------------------------------
+    # ML inference
+    # --------------------------------------------------------
+
     predictions = classify_batch(
         batch_crops
     )
@@ -1141,6 +895,21 @@ def scan_answers_ml(
         batch_map,
         predictions,
     ):
+
+        ml_filled = _ml_probability(
+            prediction,
+            "filled",
+        )
+
+        ml_blank = _ml_probability(
+            prediction,
+            "blank",
+        )
+
+        ml_ambiguous = _ml_probability(
+            prediction,
+            "ambiguous",
+        )
 
         question_data[
             question
@@ -1157,10 +926,7 @@ def scan_answers_ml(
         ][
             "ml_filled_probability"
         ] = round(
-            _ml_probability(
-                prediction,
-                "filled",
-            ),
+            ml_filled,
             4,
         )
 
@@ -1171,10 +937,7 @@ def scan_answers_ml(
         ][
             "ml_blank_probability"
         ] = round(
-            _ml_probability(
-                prediction,
-                "blank",
-            ),
+            ml_blank,
             4,
         )
 
@@ -1185,12 +948,13 @@ def scan_answers_ml(
         ][
             "ml_ambiguous_probability"
         ] = round(
-            _ml_probability(
-                prediction,
-                "ambiguous",
-            ),
+            ml_ambiguous,
             4,
         )
+
+    # --------------------------------------------------------
+    # Learn empty-bubble characteristics from this sheet
+    # --------------------------------------------------------
 
     sheet_thresholds = (
         _estimate_blank_distribution(
@@ -1200,6 +964,10 @@ def scan_answers_ml(
 
     answers = {}
     debug = {}
+
+    # --------------------------------------------------------
+    # Decide every question
+    # --------------------------------------------------------
 
     for question, option_data in (
         question_data.items()
