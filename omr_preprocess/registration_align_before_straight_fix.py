@@ -1246,265 +1246,100 @@ def _rotate_to_candidate(
     return candidate
 
 
-def _header_structure_score(
+def _orientation_match_score(
     candidate: np.ndarray,
     reference: np.ndarray,
 ) -> float:
     """
-    Compare ONLY the canonical top/header region.
+    Score how closely one orientation matches the clean canonical reference.
 
-    This avoids the response grid dominating orientation because the
-    response section is visually repetitive and can look similar at 180°.
+    ORB is used only to choose orientation. Filled answers may differ from
+    the reference, so the score is based mostly on stable printed structure.
     """
-    if candidate.ndim == 3:
-        cand_gray = cv2.cvtColor(
-            candidate,
-            cv2.COLOR_BGR2GRAY,
-        )
-    else:
-        cand_gray = candidate.copy()
 
-    if reference.ndim == 3:
-        ref_gray = cv2.cvtColor(
-            reference,
-            cv2.COLOR_BGR2GRAY,
-        )
-    else:
-        ref_gray = reference.copy()
-
-    h, w = ref_gray.shape[:2]
-
-    # Use only top 32%: Manchester header + instructions + student fields.
-    top_h = int(
-        round(
-            h * 0.32
-        )
+    candidate_gray = _prepare_feature_image(
+        candidate
     )
 
-    cand_top = cand_gray[
-        :top_h,
-        :
-    ]
-
-    ref_top = ref_gray[
-        :top_h,
-        :
-    ]
-
-    target_w = 900
-
-    target_h = int(
-        round(
-            top_h
-            *
-            (
-                target_w
-                /
-                float(w)
-            )
-        )
+    reference_gray = _prepare_feature_image(
+        reference
     )
 
-    cand_top = cv2.resize(
-        cand_top,
-        (
-            target_w,
-            target_h,
-        ),
-        interpolation=cv2.INTER_AREA,
+    h, w = reference_gray.shape[:2]
+
+    mask = _alignment_feature_mask(
+        w,
+        h,
     )
 
-    ref_top = cv2.resize(
-        ref_top,
-        (
-            target_w,
-            target_h,
-        ),
-        interpolation=cv2.INTER_AREA,
-    )
-
-    # Mild normalization so lighting does not dominate.
-    cand_top = cv2.equalizeHist(
-        cand_top
-    )
-
-    ref_top = cv2.equalizeHist(
-        ref_top
-    )
-
-    cand_edges = cv2.Canny(
-        cand_top,
-        45,
-        140,
-    )
-
-    ref_edges = cv2.Canny(
-        ref_top,
-        45,
-        140,
-    )
-
-    # Direct normalized correlation of header structure.
-    cand_f = cand_edges.astype(
-        np.float32
-    )
-
-    ref_f = ref_edges.astype(
-        np.float32
-    )
-
-    cand_f -= float(
-        cand_f.mean()
-    )
-
-    ref_f -= float(
-        ref_f.mean()
-    )
-
-    denominator = float(
-        np.linalg.norm(
-            cand_f
-        )
-        *
-        np.linalg.norm(
-            ref_f
-        )
-    )
-
-    correlation = (
-        float(
-            np.sum(
-                cand_f
-                *
-                ref_f
-            )
-        )
-        /
-        denominator
-        if denominator > 1e-6
-        else 0.0
-    )
-
-    # ORB header matches provide a second independent orientation signal.
     orb = cv2.ORB_create(
-        nfeatures=3000,
+        nfeatures=3500,
         scaleFactor=1.2,
         nlevels=8,
-        edgeThreshold=15,
+        edgeThreshold=20,
         patchSize=31,
         fastThreshold=10,
     )
 
     kp_c, des_c = orb.detectAndCompute(
-        cand_top,
-        None,
+        candidate_gray,
+        mask,
     )
 
     kp_r, des_r = orb.detectAndCompute(
-        ref_top,
-        None,
+        reference_gray,
+        mask,
     )
 
-    good_count = 0
-    inlier_count = 0
+    if des_c is None or des_r is None:
+        return 0.0
 
-    if (
-        des_c is not None
-        and des_r is not None
-        and len(kp_c) >= 8
-        and len(kp_r) >= 8
-    ):
-        matcher = cv2.BFMatcher(
-            cv2.NORM_HAMMING
+    matcher = cv2.BFMatcher(
+        cv2.NORM_HAMMING,
+    )
+
+    pairs = matcher.knnMatch(
+        des_c,
+        des_r,
+        k=2,
+    )
+
+    good = []
+
+    for pair in pairs:
+        if len(pair) != 2:
+            continue
+
+        first, second = pair
+
+        if (
+            first.distance
+            < 0.72 * second.distance
+        ):
+            good.append(first)
+
+    if not good:
+        return 0.0
+
+    # Reward both quantity and quality.
+    mean_distance = float(
+        np.mean(
+            [
+                match.distance
+                for match
+                in good
+            ]
         )
-
-        pairs = matcher.knnMatch(
-            des_c,
-            des_r,
-            k=2,
-        )
-
-        good = []
-
-        for pair in pairs:
-            if len(pair) != 2:
-                continue
-
-            first, second = pair
-
-            if (
-                first.distance
-                <
-                0.72
-                *
-                second.distance
-            ):
-                good.append(
-                    first
-                )
-
-        good_count = len(
-            good
-        )
-
-        if good_count >= 8:
-            src_pts = np.float32(
-                [
-                    kp_c[
-                        m.queryIdx
-                    ].pt
-                    for m
-                    in good
-                ]
-            ).reshape(
-                -1,
-                1,
-                2,
-            )
-
-            dst_pts = np.float32(
-                [
-                    kp_r[
-                        m.trainIdx
-                    ].pt
-                    for m
-                    in good
-                ]
-            ).reshape(
-                -1,
-                1,
-                2,
-            )
-
-            _, inlier_mask = cv2.findHomography(
-                src_pts,
-                dst_pts,
-                cv2.RANSAC,
-                4.0,
-            )
-
-            if inlier_mask is not None:
-                inlier_count = int(
-                    inlier_mask.sum()
-                )
-
-    # Header correlation dominates; ORB/inliers refine the choice.
-    score = (
-        correlation
-        *
-        1000.0
-        +
-        good_count
-        *
-        1.5
-        +
-        inlier_count
-        *
-        4.0
     )
 
     return float(
-        score
+        len(good)
+        +
+        max(
+            0.0,
+            100.0 - mean_distance,
+        )
+        * 0.20
     )
 
 
@@ -1515,55 +1350,53 @@ def ensure_canonical_orientation(
     height: int,
 ) -> tuple[np.ndarray, dict]:
     """
-    Force the Manchester header to the TOP.
+    Force the OMR into the SAME visual orientation as the clean reference.
 
-    Only 0° and 180° are considered because the mobile capture workflow
-    is portrait. The orientation decision is based on the header region,
-    not on the repetitive response grid.
+    Tests 0°, 90°, 180°, 270° and keeps the orientation with the highest
+    printed-structure match to the canonical reference.
     """
 
-    candidates = {
-        0:
-            _rotate_to_candidate(
-                image,
-                0,
-                width,
-                height,
-            ),
+    scores = {}
+    candidates = {}
 
-        180:
-            _rotate_to_candidate(
-                image,
-                180,
-                width,
-                height,
-            ),
-    }
+    for rotation in (
+        0,
+        90,
+        180,
+        270,
+    ):
+        candidate = _rotate_to_candidate(
+            image,
+            rotation,
+            width,
+            height,
+        )
 
-    scores = {
-        rotation:
-            _header_structure_score(
-                candidate,
-                reference,
-            )
-        for rotation, candidate
-        in candidates.items()
-    }
+        score = _orientation_match_score(
+            candidate,
+            reference,
+        )
+
+        scores[
+            rotation
+        ] = float(score)
+
+        candidates[
+            rotation
+        ] = candidate
 
     best_rotation = max(
         scores,
         key=scores.get,
     )
 
-    oriented = candidates[
+    best = candidates[
         best_rotation
     ]
 
-    return oriented, {
+    return best, {
         "selected_rotation":
-            int(
-                best_rotation
-            ),
+            int(best_rotation),
 
         "orientation_scores": {
             str(rotation):
@@ -1574,9 +1407,6 @@ def ensure_canonical_orientation(
             for rotation, score
             in scores.items()
         },
-
-        "orientation_method":
-            "header_only_0_or_180",
     }
 
 

@@ -292,6 +292,10 @@ def generate_calibrated_bubble_coordinates(
             )
         )
 
+        # Final fine adjustment:
+        # move runtime bubble sampling slightly DOWN.
+        dy += 3.0
+
         for row_index, y in enumerate(
             y_positions
         ):
@@ -454,3 +458,102 @@ def draw_calibration_debug(
         y += 35
 
     return debug
+
+def validate_column_alignment(
+    column_offsets,
+    max_absolute_offset=5.0,
+    max_column_difference=3.0,
+):
+    """
+    Reject scans that need excessive geometric correction.
+
+    This usually means:
+    - phone is tilted
+    - paper is not straight
+    - camera is not parallel to sheet
+    - sheet is outside the A4 guide
+    """
+
+    dx_values = [
+        float(
+            value.get(
+                "dx",
+                0.0,
+            )
+        )
+        for value
+        in column_offsets.values()
+    ]
+
+    dy_values = [
+        float(
+            value.get(
+                "dy",
+                0.0,
+            )
+        )
+        for value
+        in column_offsets.values()
+    ]
+
+    max_dx = max(
+        abs(value)
+        for value
+        in dx_values
+    )
+
+    max_dy = max(
+        abs(value)
+        for value
+        in dy_values
+    )
+
+    dx_spread = (
+        max(dx_values)
+        -
+        min(dx_values)
+    )
+
+    dy_spread = (
+        max(dy_values)
+        -
+        min(dy_values)
+    )
+
+    if (
+        max_dx > max_absolute_offset
+        or max_dy > max_absolute_offset
+        or dx_spread > max_column_difference
+        or dy_spread > max_column_difference
+    ):
+        raise ValueError(
+            "OMR sheet is too tilted or not aligned correctly. "
+            "Keep the paper straight inside the yellow guide, "
+            "hold the phone parallel to the sheet, and scan again."
+        )
+
+    return {
+        "max_dx":
+            round(
+                max_dx,
+                2,
+            ),
+
+        "max_dy":
+            round(
+                max_dy,
+                2,
+            ),
+
+        "dx_spread":
+            round(
+                dx_spread,
+                2,
+            ),
+
+        "dy_spread":
+            round(
+                dy_spread,
+                2,
+            ),
+    }

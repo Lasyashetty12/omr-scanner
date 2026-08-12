@@ -17,7 +17,6 @@ from ml_omr.column_calibration import (
     auto_calibrate_neet_columns,
     generate_calibrated_bubble_coordinates,
     draw_calibration_debug,
-    validate_column_alignment,
 )
 
 
@@ -2620,13 +2619,7 @@ def scan_answers(
             template,
         )
     )
-    alignment_quality = (
-    validate_column_alignment(
-        column_offsets,
-        max_absolute_offset=5.0,
-        max_column_difference=3.0,
-    )
-)
+
     coordinates = (
         generate_calibrated_bubble_coordinates(
             template,
@@ -4141,41 +4134,6 @@ def process_omr(
             )
         )
 
-        expected_width = int(
-            template["sheet_width"]
-        )
-
-        expected_height = int(
-            template["sheet_height"]
-        )
-
-        actual_height, actual_width = (
-            corrected.shape[:2]
-        )
-
-        if (
-            actual_width != expected_width
-            or actual_height != expected_height
-        ):
-            corrected = cv2.resize(
-                corrected,
-                (
-                    expected_width,
-                    expected_height,
-                ),
-                interpolation=cv2.INTER_LINEAR,
-            )
-
-        if corrected.shape[:2] != (
-            expected_height,
-            expected_width,
-        ):
-            raise ValueError(
-                "Canonical OMR normalization failed. "
-                f"Expected {expected_width}x{expected_height}, "
-                f"got {corrected.shape[1]}x{corrected.shape[0]}."
-            )
-
         gray = normalize_grayscale(
             corrected
         )
@@ -4442,44 +4400,6 @@ def process_omr(
             template,
         )
     )
-
-    # --------------------------------------------------------
-    # FINAL OMR ANALYSIS DEBUG
-    # --------------------------------------------------------
-    # Local development only.
-    #
-    # debug_omr.jpg shows:
-    # - the final corrected/canonical OMR
-    # - calibrated runtime bubble locations
-    # - detected answer beside each question
-    #
-    # The clean reference image is NOT blended into this image and is
-    # NOT used for answer decisions. It is only used earlier for geometry.
-    if not os.environ.get(
-        "VERCEL"
-    ):
-        cv2.imwrite(
-            "debug_omr.jpg",
-            debug,
-        )
-
-        # Keep the more detailed colored analysis image as well.
-        if exam_name in [
-            "NEET",
-            "KCET",
-        ]:
-            detailed_debug = (
-                draw_answer_analysis(
-                    corrected,
-                    template,
-                    answers,
-                )
-            )
-
-            cv2.imwrite(
-                "bubble_analysis_debug.jpg",
-                detailed_debug,
-            )
 
     # --------------------------------
     # Final output
