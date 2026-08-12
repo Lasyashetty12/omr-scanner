@@ -4,3 +4,27 @@ dataset/
 models/bubble_saved_model/
 __pycache__/
 *.pyc
+
+# Generated scanner diagnostics
+alignment_debug/
+bubble_analysis_debug.jpg
+canonical_output.jpg
+column_calibration_debug.jpg
+corrected_omr.jpg
+cropped_omr.jpg
+debug_omr.jpg
+grid_detection_debug.jpg
+local_warp_debug.jpg
+paper_code_debug.jpg
+
+# Runtime uploads (retain the directory marker)
+uploads/*
+!uploads/.gitkeep
+
+# Temporary pip work directories
+pip-metadata-*/
+pip-unpack-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-target-*/
