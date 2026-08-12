@@ -2622,9 +2622,7 @@ def scan_answers(
     )
     alignment_quality = (
     validate_column_alignment(
-        column_offsets,
-        max_absolute_offset=5.0,
-        max_column_difference=3.0,
+        column_offsets
     )
 )
     coordinates = (

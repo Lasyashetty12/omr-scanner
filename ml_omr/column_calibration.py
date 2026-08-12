@@ -461,17 +461,16 @@ def draw_calibration_debug(
 
 def validate_column_alignment(
     column_offsets,
-    max_absolute_offset=5.0,
-    max_column_difference=3.0,
+    max_auto_offset=12.0,
+    max_column_spread=5.0,
+    hard_limit=18.0,
 ):
     """
-    Reject scans that need excessive geometric correction.
+    Allow normal camera tilt / small perspective error to be corrected
+    automatically.
 
-    This usually means:
-    - phone is tilted
-    - paper is not straight
-    - camera is not parallel to sheet
-    - sheet is outside the A4 guide
+    Reject only when different response columns require very different
+    corrections, which indicates a genuinely distorted capture.
     """
 
     dx_values = [
@@ -481,8 +480,7 @@ def validate_column_alignment(
                 0.0,
             )
         )
-        for value
-        in column_offsets.values()
+        for value in column_offsets.values()
     ]
 
     dy_values = [
@@ -492,20 +490,17 @@ def validate_column_alignment(
                 0.0,
             )
         )
-        for value
-        in column_offsets.values()
+        for value in column_offsets.values()
     ]
 
     max_dx = max(
         abs(value)
-        for value
-        in dx_values
+        for value in dx_values
     )
 
     max_dy = max(
         abs(value)
-        for value
-        in dy_values
+        for value in dy_values
     )
 
     dx_spread = (
@@ -520,19 +515,41 @@ def validate_column_alignment(
         min(dy_values)
     )
 
+    # ----------------------------------------
+    # Truly extreme correction -> reject
+    # ----------------------------------------
+
     if (
-        max_dx > max_absolute_offset
-        or max_dy > max_absolute_offset
-        or dx_spread > max_column_difference
-        or dy_spread > max_column_difference
+        max_dx > hard_limit
+        or max_dy > hard_limit
     ):
         raise ValueError(
-            "OMR sheet is too tilted or not aligned correctly. "
-            "Keep the paper straight inside the yellow guide, "
-            "hold the phone parallel to the sheet, and scan again."
+            "OMR sheet is too tilted for reliable scanning. "
+            "Keep the full paper inside the guide and hold "
+            "the phone roughly parallel to the sheet."
         )
 
+    # ----------------------------------------
+    # Different columns disagree too much
+    # ----------------------------------------
+
+    if (
+        dx_spread > max_column_spread
+        or dy_spread > max_column_spread
+    ):
+        raise ValueError(
+            "OMR perspective is too uneven. "
+            "Please keep the paper flatter and scan again."
+        )
+
+    # ----------------------------------------
+    # Otherwise allow automatic correction
+    # ----------------------------------------
+
     return {
+        "status":
+            "auto_corrected",
+
         "max_dx":
             round(
                 max_dx,
