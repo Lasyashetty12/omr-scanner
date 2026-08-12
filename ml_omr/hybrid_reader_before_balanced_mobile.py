@@ -13,22 +13,22 @@ DEFAULT_CROP_RADIUS = 16
 # ------------------------------------------------------------
 
 # Sheet-level adaptive threshold is still learned from blank bubbles.
-MIN_FILLED_DARKNESS = 42.0
-MIN_CORE_DARK_RATIO = 0.15
+MIN_FILLED_DARKNESS = 40.0
+MIN_CORE_DARK_RATIO = 0.14
 
 # Relative rescue: lightly filled bubbles can still be accepted when
 # they are clearly darker than the other three options.
-RELATIVE_RESCUE_MIN_GAP = 12.0
-RELATIVE_RESCUE_ML = 0.65
+RELATIVE_RESCUE_MIN_GAP = 10.0
+RELATIVE_RESCUE_ML = 0.60
 
 # A true blank should have BOTH weak absolute evidence AND weak relative
 # separation from the second-darkest bubble.
-BLANK_ABSOLUTE_MARGIN = 0.84
-BLANK_MAX_TOP_GAP = 9.0
+BLANK_ABSOLUTE_MARGIN = 0.82
+BLANK_MAX_TOP_GAP = 8.0
 
 # Multiple validation
-MULTIPLE_MIN_DELTA = 18.0
-MULTIPLE_MIN_CORE_DARK_RATIO = 0.19
+MULTIPLE_MIN_DELTA = 16.0
+MULTIPLE_MIN_CORE_DARK_RATIO = 0.16
 
 
 def crop_bubble(
@@ -549,15 +549,14 @@ def _decide_question(
     sheet_thresholds,
 ):
     """
-    Balanced mobile-photo decision engine.
+    Mobile-photo row-relative decision engine.
 
-    Key rule:
-      - row-relative evidence may rescue ONE answer
-      - MULTIPLE is never decided from relative evidence alone
-      - every multiple bubble must independently be strongly filled
-
-    This avoids the false red MULTIPLE explosion caused by the previous
-    row-relative version.
+    Priority:
+      1. Compare A/B/C/D within the SAME question.
+      2. Use absolute sheet threshold only as a safety check.
+      3. Keep MULTIPLE strict.
+      4. Avoid turning a visibly darkest bubble into BLANK merely because
+         local lighting lowers its absolute darkness.
     """
 
     darkness_threshold = float(
@@ -576,7 +575,9 @@ def _decide_question(
         option_data.items(),
         key=lambda item:
             float(
-                item[1][
+                item[
+                    1
+                ][
                     "metrics"
                 ][
                     "center_darkness"
@@ -612,23 +613,8 @@ def _decide_question(
         ]
     )
 
-    second_core_ratio = float(
-        second_info[
-            "metrics"
-        ][
-            "core_dark_ratio"
-        ]
-    )
-
     best_ml = float(
         best_info.get(
-            "ml_filled_probability",
-            0.0,
-        )
-    )
-
-    second_ml = float(
-        second_info.get(
             "ml_filled_probability",
             0.0,
         )
@@ -658,26 +644,25 @@ def _decide_question(
         in ranked
     ]
 
+    # Robust same-row blank baseline = median of the two lightest bubbles.
     question_blank_baseline = float(
         np.median(
-            darkness_values[-2:]
+            darkness_values[
+                -2:
+            ]
         )
     )
 
     question_core_baseline = float(
         np.median(
-            core_values[-2:]
+            core_values[
+                -2:
+            ]
         )
     )
 
     best_delta = (
         best_darkness
-        -
-        question_blank_baseline
-    )
-
-    second_delta = (
-        second_darkness
         -
         question_blank_baseline
     )
@@ -688,19 +673,17 @@ def _decide_question(
         second_darkness
     )
 
-    best_core_delta = (
+    core_delta = (
         best_core_ratio
         -
         question_core_baseline
     )
 
     # --------------------------------------------------------
-    # 1) STRICT MULTIPLE
+    # 1) Detect strong MULTIPLE marks first.
     # --------------------------------------------------------
-    # Both bubbles must independently look strongly filled.
-    # Relative separation is NOT enough to create MULTIPLE.
 
-    strong_multiple_options = []
+    strong_options = []
 
     for option, info in ranked:
         metrics = info[
@@ -719,6 +702,12 @@ def _decide_question(
             ]
         )
 
+        row_delta = (
+            darkness
+            -
+            question_blank_baseline
+        )
+
         ml_filled = float(
             info.get(
                 "ml_filled_probability",
@@ -726,69 +715,56 @@ def _decide_question(
             )
         )
 
-        delta = (
-            darkness
-            -
-            question_blank_baseline
-        )
-
         strong_absolute = (
             darkness
             >=
             max(
-                48.0,
+                MIN_FILLED_DARKNESS,
                 darkness_threshold
                 *
-                0.86,
+                0.72,
             )
             and
             core_ratio
             >=
             max(
-                MULTIPLE_MIN_CORE_DARK_RATIO,
+                MIN_CORE_DARK_RATIO,
                 core_ratio_threshold
                 *
-                0.82,
+                0.65,
             )
-            and
-            delta
-            >=
-            MULTIPLE_MIN_DELTA
         )
 
-        strong_ml_supported = (
-            darkness
+        strong_relative = (
+            row_delta
             >=
-            max(
-                44.0,
-                darkness_threshold
-                *
-                0.78,
-            )
+            MULTIPLE_MIN_DELTA
             and
             core_ratio
             >=
-            0.17
-            and
-            delta
-            >=
-            16.0
-            and
+            MULTIPLE_MIN_CORE_DARK_RATIO
+        )
+
+        ml_support = (
             ml_filled
             >=
-            0.82
+            0.72
         )
 
         if (
-            strong_absolute
-            or strong_ml_supported
+            strong_relative
+            and
+            (
+                strong_absolute
+                or ml_support
+            )
         ):
-            strong_multiple_options.append(
+            strong_options.append(
                 option
             )
 
     if len(
-        strong_multiple_options
+        strong_options
     ) >= 2:
         return {
             "answer":
@@ -798,7 +774,7 @@ def _decide_question(
                 "multiple",
 
             "multiple_options":
-                strong_multiple_options,
+                strong_options,
 
             "best_option":
                 best_option,
@@ -835,62 +811,53 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # 2) CLEAR SINGLE — row-relative rescue
+    # 2) Strong row-relative SINGLE answer.
     # --------------------------------------------------------
-    # This is where row-relative logic helps mobile photos:
-    # it may rescue the best option, but never create a second mark.
 
     clear_row_winner = (
         top_gap
         >=
-        11.0
+        10.0
         and
         best_delta
         >=
         14.0
     )
 
-    enough_core = (
+    strong_core_winner = (
         best_core_ratio
         >=
-        max(
-            0.15,
-            core_ratio_threshold
-            *
-            0.65,
-        )
+        0.18
         and
-        best_core_delta
+        core_delta
         >=
-        0.035
+        0.06
     )
 
-    enough_darkness = (
+    dark_enough = (
         best_darkness
         >=
         max(
-            40.0,
+            38.0,
             darkness_threshold
             *
-            0.65,
+            0.62,
         )
     )
 
     ml_support = (
         best_ml
         >=
-        0.62
+        0.55
     )
 
     if (
         clear_row_winner
         and
         (
-            enough_core
-            or
-            enough_darkness
-            or
-            ml_support
+            strong_core_winner
+            or dark_enough
+            or ml_support
         )
     ):
         return {
@@ -941,34 +908,24 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # 3) STRONG ABSOLUTE SINGLE
+    # 3) Absolute SINGLE answer fallback.
     # --------------------------------------------------------
 
-    strong_absolute_single = (
+    absolute_single = (
         best_darkness
         >=
-        max(
-            46.0,
-            darkness_threshold
-            *
-            0.82,
-        )
+        darkness_threshold
         and
         best_core_ratio
         >=
-        max(
-            0.16,
-            core_ratio_threshold
-            *
-            0.76,
-        )
+        core_ratio_threshold
         and
         top_gap
         >=
-        7.0
+        6.0
     )
 
-    if strong_absolute_single:
+    if absolute_single:
         return {
             "answer":
                 best_option,
@@ -1014,38 +971,48 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # 4) TRUE BLANK
+    # 4) BLANK only when the whole row genuinely looks unmarked.
     # --------------------------------------------------------
 
-    blank_like = (
+    weak_row = (
         best_delta
         <
         9.0
         and
         top_gap
         <
-        8.0
-        and
+        7.0
+    )
+
+    weak_core = (
         best_core_ratio
         <
         max(
-            0.15,
+            0.16,
             core_ratio_threshold
             *
-            0.72,
+            0.78,
         )
-        and
+    )
+
+    weak_absolute = (
         best_darkness
         <
         max(
             40.0,
             darkness_threshold
             *
-            0.74,
+            0.76,
         )
     )
 
-    if blank_like:
+    if (
+        weak_row
+        and
+        weak_core
+        and
+        weak_absolute
+    ):
         return {
             "answer":
                 None,
@@ -1091,13 +1058,13 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # 5) ML-assisted borderline SINGLE
+    # 5) Borderline rows: ML-assisted rescue.
     # --------------------------------------------------------
 
-    if (
+    ml_relative_rescue = (
         best_ml
         >=
-        0.70
+        RELATIVE_RESCUE_ML
         and
         best_delta
         >=
@@ -1105,12 +1072,14 @@ def _decide_question(
         and
         top_gap
         >=
-        8.0
+        7.0
         and
         best_core_ratio
         >=
         0.14
-    ):
+    )
+
+    if ml_relative_rescue:
         return {
             "answer":
                 best_option,
@@ -1159,7 +1128,7 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # 6) Borderline: ambiguous rather than false multiple/blank.
+    # 6) Do not silently call a suspicious row blank.
     # --------------------------------------------------------
 
     return {

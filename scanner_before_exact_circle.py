@@ -2759,463 +2759,263 @@ def scan_answers(
     return answers
 
 
-
-def _analysis_center(
-    analysis_debug,
-    question_no,
-    option_label,
-    fallback_coordinates=None,
-):
-    """
-    Return the exact center used by the reader.
-
-    Priority:
-      1. draw_center
-      2. crop_center
-      3. fitted runtime coordinates passed as fallback
-
-    This guarantees debug circles use the same center as classification.
-    """
-
-    q_debug = {}
-
-    if isinstance(
-        analysis_debug,
-        dict,
-    ):
-        q_debug = analysis_debug.get(
-            question_no,
-            analysis_debug.get(
-                str(
-                    question_no
-                ),
-                {},
-            ),
-        )
-
-    option_debug = (
-        q_debug.get(
-            "options",
-            {},
-        ).get(
-            option_label,
-            {},
-        )
-        if isinstance(
-            q_debug,
-            dict,
-        )
-        else {}
-    )
-
-    center = (
-        option_debug.get(
-            "draw_center"
-        )
-        or option_debug.get(
-            "crop_center"
-        )
-    )
-
-    if (
-        isinstance(
-            center,
-            (list, tuple),
-        )
-        and
-        len(
-            center
-        )
-        == 2
-    ):
-        return (
-            int(
-                round(
-                    float(
-                        center[
-                            0
-                        ]
-                    )
-                )
-            ),
-            int(
-                round(
-                    float(
-                        center[
-                            1
-                        ]
-                    )
-                )
-            ),
-        )
-
-    if (
-        fallback_coordinates
-        and
-        question_no
-        in fallback_coordinates
-        and
-        option_label
-        in fallback_coordinates[
-            question_no
-        ]
-    ):
-        x, y = fallback_coordinates[
-            question_no
-        ][
-            option_label
-        ]
-
-        return (
-            int(
-                round(
-                    float(
-                        x
-                    )
-                )
-            ),
-            int(
-                round(
-                    float(
-                        y
-                    )
-                )
-            ),
-        )
-
-    return (
-        0,
-        0,
-    )
-
-
 def draw_answer_analysis(
     corrected_image,
     template,
     answers,
 ):
     """
-    Clean debug overlay using the exact centers used by the reader.
+    Draw the final OMR decisions on the corrected image.
 
-    Fixes:
-    - no extra row below the response grid
-    - smaller circles so adjacent rows/options do not overlap
-    - only valid NEET/KCET questions are drawn
-    - centers outside the configured response area are ignored
+    IMPORTANT:
+    This recalculates the same per-column calibration used by scan_answers(),
+    so the circles shown here correspond to the actual runtime sampling
+    positions rather than the raw JSON coordinates.
+
+    Green  = selected single answer
+    Red    = multiple
+    Yellow = uncertain
+    Gray   = blank/unselected
     """
 
-    debug_image = corrected_image.copy()
-
-    # Keep the debug ring slightly INSIDE the printed bubble.
-    # This avoids overlap with neighbouring bubbles.
-    bubble_radius = 8
-
-    option_order = list(
-        template.get(
-            "options",
-            ["A", "B", "C", "D"],
-        )
+    debug_image = (
+        corrected_image.copy()
     )
 
-    total_questions = int(
-        template.get(
-            "total_questions",
-            len(
-                answers
-            ),
+    if corrected_image.ndim == 3:
+        gray = cv2.cvtColor(
+            corrected_image,
+            cv2.COLOR_BGR2GRAY,
         )
-    )
-
-    # Hard response-grid vertical limits from the exact JSON.
-    y_positions = [
-        float(
-            value
-        )
-        for value
-        in template.get(
-            "question_y_positions",
-            [],
-        )
-    ]
-
-    if y_positions:
-        response_y_min = min(
-            y_positions
-        ) - 10.0
-
-        response_y_max = max(
-            y_positions
-        ) + 10.0
     else:
-        response_y_min = 0.0
-        response_y_max = float(
-            corrected_image.shape[
-                0
-            ]
-        )
+        gray = corrected_image.copy()
 
-    def center_for(
-        answer_record,
-        option_label,
+    column_offsets = (
+        auto_calibrate_neet_columns(
+            gray,
+            template,
+        )
+    )
+
+    coordinates = (
+        generate_calibrated_bubble_coordinates(
+            template,
+            column_offsets,
+        )
+    )
+    coordinates, _grid_debug_info = (
+        fit_response_grid(
+            gray,
+            coordinates,
+            template,
+        )
+    )
+
+    option_colors = {
+        "selected":
+            (0, 200, 0),
+
+        "multiple":
+            (0, 0, 255),
+
+        "uncertain":
+            (0, 215, 255),
+
+        "blank":
+            (160, 160, 160),
+    }
+
+    radius = (
+        int(
+            template.get(
+                "bubble_radius",
+                11,
+            )
+        )
+        + 5
+    )
+
+    for question, option_map in (
+        coordinates.items()
     ):
-        ml_details = (
-            answer_record.get(
-                "ml",
-                {},
-            )
-            if isinstance(
-                answer_record,
-                dict,
-            )
-            else {}
+
+        result = answers.get(
+            question,
+            {},
         )
 
-        option_details = (
-            ml_details.get(
-                "options",
-                {},
-            ).get(
-                option_label,
-                {},
-            )
-        )
-
-        center = (
-            option_details.get(
-                "draw_center"
-            )
-            or
-            option_details.get(
-                "crop_center"
-            )
-        )
-
-        if (
-            not isinstance(
-                center,
-                (list, tuple),
-            )
-            or
-            len(
-                center
-            ) != 2
-        ):
-            return None
-
-        cx = int(
-            round(
-                float(
-                    center[
-                        0
-                    ]
-                )
-            )
-        )
-
-        cy = int(
-            round(
-                float(
-                    center[
-                        1
-                    ]
-                )
-            )
-        )
-
-        # Do not draw any accidental candidate below/above response grid.
-        if (
-            cy < response_y_min
-            or cy > response_y_max
-        ):
-            return None
-
-        return (
-            cx,
-            cy,
-        )
-
-    for question_no, answer_record in answers.items():
-
-        try:
-            qno = int(
-                question_no
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            continue
-
-        # Prevent any accidental Q181 / extra debug row.
-        if (
-            qno < 1
-            or qno > total_questions
-        ):
-            continue
-
-        if not isinstance(
-            answer_record,
-            dict,
-        ):
-            continue
-
-        detected_answer = answer_record.get(
+        final_answer = result.get(
             "answer",
             "BLANK",
         )
 
-        ml_details = answer_record.get(
+        ml_details = result.get(
             "ml",
             {},
         )
 
-        status = str(
-            answer_record.get(
-                "ml_status",
-                ml_details.get(
-                    "status",
-                    "",
-                ),
-            )
-        ).lower()
-
-        # Draw a small neutral ring and exact pin dot for all A/B/C/D.
-        for option_label in option_order:
-            center = center_for(
-                answer_record,
-                option_label,
-            )
-
-            if center is None:
-                continue
-
-            cx, cy = center
-
-            # Exact detected center.
-            cv2.circle(
-                debug_image,
-                (
-                    cx,
-                    cy,
-                ),
-                2,
-                (
-                    0,
-                    165,
-                    255,
-                ),
-                -1,
-                lineType=cv2.LINE_AA,
-            )
-
-            # Smaller neutral circle; no overlap.
-            cv2.circle(
-                debug_image,
-                (
-                    cx,
-                    cy,
-                ),
-                bubble_radius,
-                (
-                    180,
-                    180,
-                    180,
-                ),
-                1,
-                lineType=cv2.LINE_AA,
-            )
-
-        # MULTIPLE
-        if (
-            detected_answer == "MULTIPLE"
-            or status == "multiple"
-        ):
-            multiple_options = ml_details.get(
+        multiple_options = (
+            ml_details.get(
                 "multiple_options",
                 [],
             )
+        )
 
-            for option_label in multiple_options:
-                center = center_for(
-                    answer_record,
-                    option_label,
-                )
+        best_option = (
+            ml_details.get(
+                "best_option"
+            )
+        )
 
-                if center is None:
-                    continue
+        for option, (
+            x,
+            y,
+        ) in option_map.items():
 
-                cv2.circle(
-                    debug_image,
-                    center,
-                    bubble_radius,
-                    (
-                        0,
-                        0,
-                        255,
-                    ),
-                    2,
-                    lineType=cv2.LINE_AA,
-                )
+            color = option_colors[
+                "blank"
+            ]
 
-            continue
+            thickness = 1
 
-        # SINGLE ANSWER
-        if detected_answer in option_order:
-            center = center_for(
-                answer_record,
-                detected_answer,
+            if (
+                final_answer
+                in template["options"]
+                and option == final_answer
+            ):
+                color = option_colors[
+                    "selected"
+                ]
+
+                thickness = 4
+
+            elif (
+                final_answer
+                == "MULTIPLE"
+                and option
+                in multiple_options
+            ):
+                color = option_colors[
+                    "multiple"
+                ]
+
+                thickness = 4
+
+            elif (
+                final_answer
+                == "UNCERTAIN"
+                and option
+                == best_option
+            ):
+                color = option_colors[
+                    "uncertain"
+                ]
+
+                thickness = 3
+
+            cv2.circle(
+                debug_image,
+                (
+                    int(x),
+                    int(y),
+                ),
+                radius,
+                color,
+                thickness,
             )
 
-            if center is not None:
-                cv2.circle(
-                    debug_image,
-                    center,
-                    bubble_radius,
-                    (
-                        0,
-                        255,
-                        0,
-                    ),
-                    2,
-                    lineType=cv2.LINE_AA,
-                )
+        first_option = (
+            template["options"][0]
+        )
 
-            continue
+        label_x = int(
+            option_map[
+                first_option
+            ][0]
+            - 80
+        )
 
-        # AMBIGUOUS
+        label_y = int(
+            option_map[
+                first_option
+            ][1]
+            + 5
+        )
+
         if (
-            detected_answer == "UNCERTAIN"
-            or status == "ambiguous"
+            final_answer
+            == "MULTIPLE"
         ):
-            best_option = ml_details.get(
-                "best_option",
-                option_order[
-                    0
-                ],
+            text_color = (
+                0,
+                0,
+                255,
             )
 
-            center = center_for(
-                answer_record,
-                best_option,
+            label = (
+                f"{question}:MULTI"
             )
 
-            if center is not None:
-                cv2.circle(
-                    debug_image,
-                    center,
-                    bubble_radius,
-                    (
-                        0,
-                        255,
-                        255,
-                    ),
-                    2,
-                    lineType=cv2.LINE_AA,
-                )
+        elif (
+            final_answer
+            == "UNCERTAIN"
+        ):
+            text_color = (
+                0,
+                165,
+                255,
+            )
+
+            label = (
+                f"{question}:?"
+            )
+
+        elif (
+            final_answer
+            == "BLANK"
+        ):
+            text_color = (
+                100,
+                100,
+                100,
+            )
+
+            label = (
+                f"{question}:-"
+            )
+
+        else:
+            text_color = (
+                0,
+                180,
+                0,
+            )
+
+            label = (
+                f"{question}:{final_answer}"
+            )
+
+        cv2.putText(
+            debug_image,
+            label,
+            (
+                label_x,
+                label_y,
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            text_color,
+            1,
+            cv2.LINE_AA,
+        )
 
     return debug_image
 
 
+# ============================================================
+# QUESTION PAPER CODE
+# NEET / KCET
+# ============================================================
 
 def detect_paper_code(
     gray_image,

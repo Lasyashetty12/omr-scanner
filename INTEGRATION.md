@@ -310,3 +310,10 @@ Measure:
 - exact full-sheet match
 
 The full-sheet result is what matters.
+git status
+ git add .
+ git commit -m "neet code corrected"
+ git push
+
+
+ uvicorn app:app --reload  

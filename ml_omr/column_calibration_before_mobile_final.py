@@ -9,9 +9,10 @@ import numpy as np
 # ============================================================
 
 DEFAULT_SEARCH_RADIUS = 6
-DEFAULT_PATCH_RADIUS = 11
+DEFAULT_PATCH_RADIUS = 10
 
-# Dense anchor spacing. For 45 rows this gives about 10 anchors/column.
+# Calibrate approximately every 9 rows instead of every 5.
+# Intermediate rows are still corrected by interpolation.
 ANCHOR_STEP = 9
 
 # Hard safety limits. Ordinary handheld perspective should remain well
@@ -209,10 +210,10 @@ def _local_search_best_center(
 
     # 1 px search gives best accuracy; area is small so this is still practical.
     for dy in range(
-        -search_radius,
-        search_radius + 1,
-        2,
-    ):
+    -search_radius,
+    search_radius + 1,
+    2,
+):
         for dx in range(
             -search_radius,
             search_radius + 1,

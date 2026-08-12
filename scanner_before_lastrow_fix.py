@@ -2908,7 +2908,19 @@ def draw_answer_analysis(
 
     # Keep the debug ring slightly INSIDE the printed bubble.
     # This avoids overlap with neighbouring bubbles.
-    bubble_radius = 8
+    bubble_radius = max(
+        7,
+        int(
+            round(
+                template.get(
+                    "bubble_radius",
+                    11,
+                )
+                -
+                2
+            )
+        ),
+    )
 
     option_order = list(
         template.get(
@@ -3098,7 +3110,7 @@ def draw_answer_analysis(
                     cx,
                     cy,
                 ),
-                2,
+                8,
                 (
                     0,
                     165,

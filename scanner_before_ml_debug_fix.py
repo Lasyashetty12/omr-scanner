@@ -2893,205 +2893,101 @@ def draw_answer_analysis(
     corrected_image,
     template,
     answers,
+    analysis_debug=None,
+    runtime_coordinates=None,
 ):
     """
-    Clean debug overlay using the exact centers used by the reader.
+    Draw result circles using EXACTLY the same centers used for reading.
 
-    Fixes:
-    - no extra row below the response grid
-    - smaller circles so adjacent rows/options do not overlap
-    - only valid NEET/KCET questions are drawn
-    - centers outside the configured response area are ignored
+    No template-coordinate redraw.
+    No extra refinement.
+    No secondary offset.
+
+    Green  = answered
+    Red    = multiple
+    Yellow = ambiguous
+    Gray   = all option reference circles
+    Orange dot = exact read/draw center
     """
 
     debug_image = corrected_image.copy()
 
-    # Keep the debug ring slightly INSIDE the printed bubble.
-    # This avoids overlap with neighbouring bubbles.
-    bubble_radius = 8
+    bubble_radius = int(
+        round(
+            template.get(
+                "bubble_radius",
+                11,
+            )
+            +
+            2
+        )
+    )
 
     option_order = list(
         template.get(
             "options",
-            ["A", "B", "C", "D"],
+            [
+                "A",
+                "B",
+                "C",
+                "D",
+            ],
         )
     )
 
-    total_questions = int(
-        template.get(
-            "total_questions",
-            len(
-                answers
-            ),
-        )
-    )
-
-    # Hard response-grid vertical limits from the exact JSON.
-    y_positions = [
-        float(
-            value
-        )
-        for value
-        in template.get(
-            "question_y_positions",
-            [],
-        )
-    ]
-
-    if y_positions:
-        response_y_min = min(
-            y_positions
-        ) - 10.0
-
-        response_y_max = max(
-            y_positions
-        ) + 10.0
-    else:
-        response_y_min = 0.0
-        response_y_max = float(
-            corrected_image.shape[
-                0
-            ]
+    for question_no, detected_answer in answers.items():
+        qno = int(
+            question_no
         )
 
-    def center_for(
-        answer_record,
-        option_label,
-    ):
-        ml_details = (
-            answer_record.get(
-                "ml",
-                {},
-            )
-            if isinstance(
-                answer_record,
-                dict,
-            )
-            else {}
-        )
+        q_debug = {}
 
-        option_details = (
-            ml_details.get(
-                "options",
-                {},
-            ).get(
-                option_label,
-                {},
-            )
-        )
-
-        center = (
-            option_details.get(
-                "draw_center"
-            )
-            or
-            option_details.get(
-                "crop_center"
-            )
-        )
-
-        if (
-            not isinstance(
-                center,
-                (list, tuple),
-            )
-            or
-            len(
-                center
-            ) != 2
-        ):
-            return None
-
-        cx = int(
-            round(
-                float(
-                    center[
-                        0
-                    ]
-                )
-            )
-        )
-
-        cy = int(
-            round(
-                float(
-                    center[
-                        1
-                    ]
-                )
-            )
-        )
-
-        # Do not draw any accidental candidate below/above response grid.
-        if (
-            cy < response_y_min
-            or cy > response_y_max
-        ):
-            return None
-
-        return (
-            cx,
-            cy,
-        )
-
-    for question_no, answer_record in answers.items():
-
-        try:
-            qno = int(
-                question_no
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            continue
-
-        # Prevent any accidental Q181 / extra debug row.
-        if (
-            qno < 1
-            or qno > total_questions
-        ):
-            continue
-
-        if not isinstance(
-            answer_record,
+        if isinstance(
+            analysis_debug,
             dict,
         ):
-            continue
+            q_debug = analysis_debug.get(
+                question_no,
+                analysis_debug.get(
+                    qno,
+                    analysis_debug.get(
+                        str(
+                            qno
+                        ),
+                        {},
+                    ),
+                ),
+            )
 
-        detected_answer = answer_record.get(
-            "answer",
-            "BLANK",
-        )
-
-        ml_details = answer_record.get(
-            "ml",
-            {},
-        )
+        if not isinstance(
+            q_debug,
+            dict,
+        ):
+            q_debug = {}
 
         status = str(
-            answer_record.get(
-                "ml_status",
-                ml_details.get(
-                    "status",
-                    "",
-                ),
+            q_debug.get(
+                "status",
+                "",
             )
         ).lower()
 
-        # Draw a small neutral ring and exact pin dot for all A/B/C/D.
+        # Draw all actual centers first.
         for option_label in option_order:
-            center = center_for(
-                answer_record,
+            cx, cy = _analysis_center(
+                analysis_debug,
+                qno,
                 option_label,
+                runtime_coordinates,
             )
 
-            if center is None:
+            if (
+                cx <= 0
+                or cy <= 0
+            ):
                 continue
 
-            cx, cy = center
-
-            # Exact detected center.
+            # Exact center dot.
             cv2.circle(
                 debug_image,
                 (
@@ -3108,7 +3004,7 @@ def draw_answer_analysis(
                 lineType=cv2.LINE_AA,
             )
 
-            # Smaller neutral circle; no overlap.
+            # Faint option circle using same center.
             cv2.circle(
                 debug_image,
                 (
@@ -3117,59 +3013,75 @@ def draw_answer_analysis(
                 ),
                 bubble_radius,
                 (
-                    180,
-                    180,
-                    180,
+                    205,
+                    205,
+                    205,
                 ),
                 1,
                 lineType=cv2.LINE_AA,
             )
 
-        # MULTIPLE
+        # Multiple
         if (
             detected_answer == "MULTIPLE"
             or status == "multiple"
         ):
-            multiple_options = ml_details.get(
+            multiple_options = q_debug.get(
                 "multiple_options",
                 [],
             )
 
             for option_label in multiple_options:
-                center = center_for(
-                    answer_record,
+                cx, cy = _analysis_center(
+                    analysis_debug,
+                    qno,
                     option_label,
+                    runtime_coordinates,
                 )
 
-                if center is None:
-                    continue
-
-                cv2.circle(
-                    debug_image,
-                    center,
-                    bubble_radius,
-                    (
-                        0,
-                        0,
-                        255,
-                    ),
-                    2,
-                    lineType=cv2.LINE_AA,
-                )
+                if cx > 0 and cy > 0:
+                    cv2.circle(
+                        debug_image,
+                        (
+                            cx,
+                            cy,
+                        ),
+                        bubble_radius,
+                        (
+                            0,
+                            0,
+                            255,
+                        ),
+                        2,
+                        lineType=cv2.LINE_AA,
+                    )
 
             continue
 
-        # SINGLE ANSWER
-        if detected_answer in option_order:
-            center = center_for(
-                answer_record,
+        # Answered
+        if (
+            isinstance(
                 detected_answer,
+                str,
+            )
+            and
+            detected_answer
+            in option_order
+        ):
+            cx, cy = _analysis_center(
+                analysis_debug,
+                qno,
+                detected_answer,
+                runtime_coordinates,
             )
 
-            if center is not None:
+            if cx > 0 and cy > 0:
                 cv2.circle(
                     debug_image,
-                    center,
+                    (
+                        cx,
+                        cy,
+                    ),
                     bubble_radius,
                     (
                         0,
@@ -3182,27 +3094,29 @@ def draw_answer_analysis(
 
             continue
 
-        # AMBIGUOUS
-        if (
-            detected_answer == "UNCERTAIN"
-            or status == "ambiguous"
-        ):
-            best_option = ml_details.get(
+        # Ambiguous
+        if status == "ambiguous":
+            best_option = q_debug.get(
                 "best_option",
                 option_order[
                     0
                 ],
             )
 
-            center = center_for(
-                answer_record,
+            cx, cy = _analysis_center(
+                analysis_debug,
+                qno,
                 best_option,
+                runtime_coordinates,
             )
 
-            if center is not None:
+            if cx > 0 and cy > 0:
                 cv2.circle(
                     debug_image,
-                    center,
+                    (
+                        cx,
+                        cy,
+                    ),
                     bubble_radius,
                     (
                         0,
@@ -4597,6 +4511,8 @@ def process_omr(
                     corrected,
                     template,
                     answers,
+                    analysis_debug=ml_debug,
+                    runtime_coordinates=fitted_coordinates,
                 )
             )
 
@@ -4709,6 +4625,8 @@ def process_omr(
                     corrected,
                     template,
                     answers,
+                    analysis_debug=ml_debug,
+                    runtime_coordinates=fitted_coordinates,
                 )
             )
 

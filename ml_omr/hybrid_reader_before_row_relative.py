@@ -15,20 +15,17 @@ DEFAULT_CROP_RADIUS = 16
 # Sheet-level adaptive threshold is still learned from blank bubbles.
 MIN_FILLED_DARKNESS = 42.0
 MIN_CORE_DARK_RATIO = 0.15
-
-# Relative rescue: lightly filled bubbles can still be accepted when
-# they are clearly darker than the other three options.
-RELATIVE_RESCUE_MIN_GAP = 12.0
-RELATIVE_RESCUE_ML = 0.65
+RELATIVE_RESCUE_MIN_GAP = 14.0
+RELATIVE_RESCUE_ML = 0.72
 
 # A true blank should have BOTH weak absolute evidence AND weak relative
 # separation from the second-darkest bubble.
-BLANK_ABSOLUTE_MARGIN = 0.84
-BLANK_MAX_TOP_GAP = 9.0
+BLANK_ABSOLUTE_MARGIN = 0.88
+BLANK_MAX_TOP_GAP = 14.0
 
 # Multiple validation
-MULTIPLE_MIN_DELTA = 18.0
-MULTIPLE_MIN_CORE_DARK_RATIO = 0.19
+MULTIPLE_MIN_DELTA = 20.0
+MULTIPLE_MIN_CORE_DARK_RATIO = 0.18
 
 
 def crop_bubble(
@@ -548,18 +545,6 @@ def _decide_question(
     option_data,
     sheet_thresholds,
 ):
-    """
-    Balanced mobile-photo decision engine.
-
-    Key rule:
-      - row-relative evidence may rescue ONE answer
-      - MULTIPLE is never decided from relative evidence alone
-      - every multiple bubble must independently be strongly filled
-
-    This avoids the false red MULTIPLE explosion caused by the previous
-    row-relative version.
-    """
-
     darkness_threshold = float(
         sheet_thresholds[
             "filled_darkness_threshold"
@@ -604,6 +589,12 @@ def _decide_question(
         ]
     )
 
+    top_gap = (
+        best_darkness
+        -
+        second_darkness
+    )
+
     best_core_ratio = float(
         best_info[
             "metrics"
@@ -612,28 +603,14 @@ def _decide_question(
         ]
     )
 
-    second_core_ratio = float(
-        second_info[
-            "metrics"
-        ][
-            "core_dark_ratio"
+    best_ml = float(
+        best_info[
+            "ml_filled_probability"
         ]
     )
 
-    best_ml = float(
-        best_info.get(
-            "ml_filled_probability",
-            0.0,
-        )
-    )
-
-    second_ml = float(
-        second_info.get(
-            "ml_filled_probability",
-            0.0,
-        )
-    )
-
+    # Robust within-question blank baseline:
+    # median of the two least-dark options.
     darkness_values = [
         float(
             info[
@@ -646,27 +623,9 @@ def _decide_question(
         in ranked
     ]
 
-    core_values = [
-        float(
-            info[
-                "metrics"
-            ][
-                "core_dark_ratio"
-            ]
-        )
-        for _, info
-        in ranked
-    ]
-
     question_blank_baseline = float(
         np.median(
             darkness_values[-2:]
-        )
-    )
-
-    question_core_baseline = float(
-        np.median(
-            core_values[-2:]
         )
     )
 
@@ -676,376 +635,45 @@ def _decide_question(
         question_blank_baseline
     )
 
-    second_delta = (
-        second_darkness
-        -
-        question_blank_baseline
-    )
+    # --------------------------------------------------------
+    # TRUE BLANK
+    # --------------------------------------------------------
+    #
+    # IMPORTANT CHANGE:
+    # We now require BOTH weak absolute evidence AND a small top gap.
+    #
+    # This avoids throwing away lightly shaded real answers that are
+    # clearly darker than the other three bubbles.
 
-    top_gap = (
+    weak_absolute = (
         best_darkness
-        -
-        second_darkness
+        <
+        darkness_threshold
+        *
+        BLANK_ABSOLUTE_MARGIN
     )
 
-    best_core_delta = (
-        best_core_ratio
-        -
-        question_core_baseline
-    )
-
-    # --------------------------------------------------------
-    # 1) STRICT MULTIPLE
-    # --------------------------------------------------------
-    # Both bubbles must independently look strongly filled.
-    # Relative separation is NOT enough to create MULTIPLE.
-
-    strong_multiple_options = []
-
-    for option, info in ranked:
-        metrics = info[
-            "metrics"
-        ]
-
-        darkness = float(
-            metrics[
-                "center_darkness"
-            ]
-        )
-
-        core_ratio = float(
-            metrics[
-                "core_dark_ratio"
-            ]
-        )
-
-        ml_filled = float(
-            info.get(
-                "ml_filled_probability",
-                0.0,
-            )
-        )
-
-        delta = (
-            darkness
-            -
-            question_blank_baseline
-        )
-
-        strong_absolute = (
-            darkness
-            >=
-            max(
-                48.0,
-                darkness_threshold
-                *
-                0.86,
-            )
-            and
-            core_ratio
-            >=
-            max(
-                MULTIPLE_MIN_CORE_DARK_RATIO,
-                core_ratio_threshold
-                *
-                0.82,
-            )
-            and
-            delta
-            >=
-            MULTIPLE_MIN_DELTA
-        )
-
-        strong_ml_supported = (
-            darkness
-            >=
-            max(
-                44.0,
-                darkness_threshold
-                *
-                0.78,
-            )
-            and
-            core_ratio
-            >=
-            0.17
-            and
-            delta
-            >=
-            16.0
-            and
-            ml_filled
-            >=
-            0.82
-        )
-
-        if (
-            strong_absolute
-            or strong_ml_supported
-        ):
-            strong_multiple_options.append(
-                option
-            )
-
-    if len(
-        strong_multiple_options
-    ) >= 2:
-        return {
-            "answer":
-                "MULTIPLE",
-
-            "status":
-                "multiple",
-
-            "multiple_options":
-                strong_multiple_options,
-
-            "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
-
-            "question_blank_baseline":
-                round(
-                    question_blank_baseline,
-                    3,
-                ),
-
-            "best_delta":
-                round(
-                    best_delta,
-                    3,
-                ),
-        }
-
-    # --------------------------------------------------------
-    # 2) CLEAR SINGLE — row-relative rescue
-    # --------------------------------------------------------
-    # This is where row-relative logic helps mobile photos:
-    # it may rescue the best option, but never create a second mark.
-
-    clear_row_winner = (
+    weak_relative = (
         top_gap
-        >=
-        11.0
-        and
-        best_delta
-        >=
-        14.0
+        <
+        BLANK_MAX_TOP_GAP
     )
 
-    enough_core = (
+    weak_core = (
         best_core_ratio
-        >=
-        max(
-            0.15,
-            core_ratio_threshold
-            *
-            0.65,
-        )
-        and
-        best_core_delta
-        >=
-        0.035
-    )
-
-    enough_darkness = (
-        best_darkness
-        >=
-        max(
-            40.0,
-            darkness_threshold
-            *
-            0.65,
-        )
-    )
-
-    ml_support = (
-        best_ml
-        >=
-        0.62
+        <
+        core_ratio_threshold
+        *
+        0.90
     )
 
     if (
-        clear_row_winner
+        weak_absolute
         and
-        (
-            enough_core
-            or
-            enough_darkness
-            or
-            ml_support
-        )
+        weak_relative
+        and
+        weak_core
     ):
-        return {
-            "answer":
-                best_option,
-
-            "status":
-                "answered",
-
-            "multiple_options":
-                [],
-
-            "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
-
-            "question_blank_baseline":
-                round(
-                    question_blank_baseline,
-                    3,
-                ),
-
-            "best_delta":
-                round(
-                    best_delta,
-                    3,
-                ),
-
-            "row_relative_rescue":
-                True,
-        }
-
-    # --------------------------------------------------------
-    # 3) STRONG ABSOLUTE SINGLE
-    # --------------------------------------------------------
-
-    strong_absolute_single = (
-        best_darkness
-        >=
-        max(
-            46.0,
-            darkness_threshold
-            *
-            0.82,
-        )
-        and
-        best_core_ratio
-        >=
-        max(
-            0.16,
-            core_ratio_threshold
-            *
-            0.76,
-        )
-        and
-        top_gap
-        >=
-        7.0
-    )
-
-    if strong_absolute_single:
-        return {
-            "answer":
-                best_option,
-
-            "status":
-                "answered",
-
-            "multiple_options":
-                [],
-
-            "best_option":
-                best_option,
-
-            "best_darkness":
-                round(
-                    best_darkness,
-                    3,
-                ),
-
-            "second_darkness":
-                round(
-                    second_darkness,
-                    3,
-                ),
-
-            "top_gap":
-                round(
-                    top_gap,
-                    3,
-                ),
-
-            "question_blank_baseline":
-                round(
-                    question_blank_baseline,
-                    3,
-                ),
-
-            "best_delta":
-                round(
-                    best_delta,
-                    3,
-                ),
-        }
-
-    # --------------------------------------------------------
-    # 4) TRUE BLANK
-    # --------------------------------------------------------
-
-    blank_like = (
-        best_delta
-        <
-        9.0
-        and
-        top_gap
-        <
-        8.0
-        and
-        best_core_ratio
-        <
-        max(
-            0.15,
-            core_ratio_threshold
-            *
-            0.72,
-        )
-        and
-        best_darkness
-        <
-        max(
-            40.0,
-            darkness_threshold
-            *
-            0.74,
-        )
-    )
-
-    if blank_like:
         return {
             "answer":
                 None,
@@ -1082,41 +710,302 @@ def _decide_question(
                     question_blank_baseline,
                     3,
                 ),
-
-            "best_delta":
-                round(
-                    best_delta,
-                    3,
-                ),
         }
 
     # --------------------------------------------------------
-    # 5) ML-assisted borderline SINGLE
+    # MARKED OPTIONS
     # --------------------------------------------------------
 
-    if (
-        best_ml
-        >=
-        0.70
-        and
-        best_delta
-        >=
-        10.0
-        and
-        top_gap
-        >=
-        8.0
-        and
-        best_core_ratio
-        >=
-        0.14
-    ):
+    filled_options = []
+
+    for option, info in ranked:
+
+        metrics = info[
+            "metrics"
+        ]
+
+        darkness = float(
+            metrics[
+                "center_darkness"
+            ]
+        )
+
+        core_ratio = float(
+            metrics[
+                "core_dark_ratio"
+            ]
+        )
+
+        ml_filled = float(
+            info[
+                "ml_filled_probability"
+            ]
+        )
+
+        delta = (
+            darkness
+            -
+            question_blank_baseline
+        )
+
+        absolute_pass = (
+            darkness
+            >=
+            darkness_threshold
+            and
+            core_ratio
+            >=
+            core_ratio_threshold
+        )
+
+        # Relative rescue:
+        # slightly faint bubble, but clearly darkest in the row and ML agrees.
+        relative_rescue = (
+            option == best_option
+            and
+            top_gap
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+            and
+            delta
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+            and
+            darkness
+            >=
+            darkness_threshold
+            *
+            0.72
+            and
+            core_ratio
+            >=
+            core_ratio_threshold
+            *
+            0.70
+            and
+            ml_filled
+            >=
+            RELATIVE_RESCUE_ML
+        )
+
+        # Very clear classical rescue even when ML is uncertain.
+        strong_relative_rescue = (
+            option == best_option
+            and
+            top_gap
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+            *
+            1.35
+            and
+            delta
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+            *
+            1.35
+            and
+            darkness
+            >=
+            darkness_threshold
+            *
+            0.80
+            and
+            core_ratio
+            >=
+            core_ratio_threshold
+            *
+            0.78
+        )
+
+        is_filled = (
+            absolute_pass
+            or relative_rescue
+            or strong_relative_rescue
+        )
+
+        info[
+            "question_blank_baseline"
+        ] = round(
+            question_blank_baseline,
+            3,
+        )
+
+        info[
+            "question_delta"
+        ] = round(
+            delta,
+            3,
+        )
+
+        info[
+            "absolute_pass"
+        ] = bool(
+            absolute_pass
+        )
+
+        info[
+            "relative_rescue"
+        ] = bool(
+            relative_rescue
+        )
+
+        info[
+            "strong_relative_rescue"
+        ] = bool(
+            strong_relative_rescue
+        )
+
+        info[
+            "is_filled"
+        ] = bool(
+            is_filled
+        )
+
+        if is_filled:
+            filled_options.append(
+                option
+            )
+
+    # --------------------------------------------------------
+    # NO FILLED OPTION AFTER RESCUE
+    # --------------------------------------------------------
+
+    if len(
+        filled_options
+    ) == 0:
+
+        # ----------------------------------------------------
+        # STRONG DARK-MARK RESCUE
+        # ----------------------------------------------------
+        # Mobile photos can shift local brightness enough that a visibly
+        # black filled bubble narrowly misses the adaptive sheet threshold.
+        # If the best option is still strongly dark, has a dark core, and
+        # is clearly separated from the other options, accept it directly.
+        strong_dark_mark = (
+            best_darkness
+            >=
+            max(
+                54.0,
+                darkness_threshold
+                *
+                0.82,
+            )
+            and
+            best_core_ratio
+            >=
+            max(
+                0.18,
+                core_ratio_threshold
+                *
+                0.78,
+            )
+            and
+            top_gap
+            >=
+            11.0
+            and
+            best_delta
+            >=
+            14.0
+        )
+
+        if strong_dark_mark:
+            return {
+                "answer":
+                    best_option,
+
+                "status":
+                    "answered",
+
+                "multiple_options":
+                    [],
+
+                "best_option":
+                    best_option,
+
+                "best_darkness":
+                    round(
+                        best_darkness,
+                        3,
+                    ),
+
+                "second_darkness":
+                    round(
+                        second_darkness,
+                        3,
+                    ),
+
+                "top_gap":
+                    round(
+                        top_gap,
+                        3,
+                    ),
+
+                "question_blank_baseline":
+                    round(
+                        question_blank_baseline,
+                        3,
+                    ),
+
+                "strong_dark_rescue":
+                    True,
+            }
+
+        # If the top bubble is clearly separated, prefer UNCERTAIN rather
+        # than falsely calling a real faint mark blank.
+        if (
+            top_gap
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+            and
+            best_delta
+            >=
+            RELATIVE_RESCUE_MIN_GAP
+        ):
+            return {
+                "answer":
+                    None,
+
+                "status":
+                    "ambiguous",
+
+                "multiple_options":
+                    [],
+
+                "best_option":
+                    best_option,
+
+                "best_darkness":
+                    round(
+                        best_darkness,
+                        3,
+                    ),
+
+                "second_darkness":
+                    round(
+                        second_darkness,
+                        3,
+                    ),
+
+                "top_gap":
+                    round(
+                        top_gap,
+                        3,
+                    ),
+
+                "question_blank_baseline":
+                    round(
+                        question_blank_baseline,
+                        3,
+                    ),
+            }
+
         return {
             "answer":
-                best_option,
+                None,
 
             "status":
-                "answered",
+                "blank",
 
             "multiple_options":
                 [],
@@ -1147,20 +1036,184 @@ def _decide_question(
                     question_blank_baseline,
                     3,
                 ),
-
-            "best_delta":
-                round(
-                    best_delta,
-                    3,
-                ),
-
-            "ml_relative_rescue":
-                True,
         }
 
     # --------------------------------------------------------
-    # 6) Borderline: ambiguous rather than false multiple/blank.
+    # SINGLE
     # --------------------------------------------------------
+
+    if len(
+        filled_options
+    ) == 1:
+        return {
+            "answer":
+                filled_options[0],
+
+            "status":
+                "answered",
+
+            "multiple_options":
+                [],
+
+            "best_option":
+                filled_options[0],
+
+            "best_darkness":
+                round(
+                    best_darkness,
+                    3,
+                ),
+
+            "second_darkness":
+                round(
+                    second_darkness,
+                    3,
+                ),
+
+            "top_gap":
+                round(
+                    top_gap,
+                    3,
+                ),
+
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
+        }
+
+    # --------------------------------------------------------
+    # MULTIPLE
+    # --------------------------------------------------------
+
+    strong_multiple = []
+
+    for option in filled_options:
+
+        info = option_data[
+            option
+        ]
+
+        metrics = info[
+            "metrics"
+        ]
+
+        darkness = float(
+            metrics[
+                "center_darkness"
+            ]
+        )
+
+        core_ratio = float(
+            metrics[
+                "core_dark_ratio"
+            ]
+        )
+
+        delta = (
+            darkness
+            -
+            question_blank_baseline
+        )
+
+        if (
+            darkness
+            >= darkness_threshold
+            and
+            delta
+            >= MULTIPLE_MIN_DELTA
+            and
+            core_ratio
+            >= MULTIPLE_MIN_CORE_DARK_RATIO
+        ):
+            strong_multiple.append(
+                option
+            )
+
+    if len(
+        strong_multiple
+    ) >= 2:
+        return {
+            "answer":
+                "MULTIPLE",
+
+            "status":
+                "multiple",
+
+            "multiple_options":
+                strong_multiple,
+
+            "best_option":
+                best_option,
+
+            "best_darkness":
+                round(
+                    best_darkness,
+                    3,
+                ),
+
+            "second_darkness":
+                round(
+                    second_darkness,
+                    3,
+                ),
+
+            "top_gap":
+                round(
+                    top_gap,
+                    3,
+                ),
+
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
+        }
+
+    # If only one option survives the strict multiple validation,
+    # keep it as a normal single.
+    if len(
+        strong_multiple
+    ) == 1:
+        return {
+            "answer":
+                strong_multiple[0],
+
+            "status":
+                "answered",
+
+            "multiple_options":
+                [],
+
+            "best_option":
+                strong_multiple[0],
+
+            "best_darkness":
+                round(
+                    best_darkness,
+                    3,
+                ),
+
+            "second_darkness":
+                round(
+                    second_darkness,
+                    3,
+                ),
+
+            "top_gap":
+                round(
+                    top_gap,
+                    3,
+                ),
+
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
+        }
 
     return {
         "answer":
@@ -1198,14 +1251,7 @@ def _decide_question(
                 question_blank_baseline,
                 3,
             ),
-
-        "best_delta":
-            round(
-                best_delta,
-                3,
-            ),
     }
-
 
 
 def scan_answers_ml(
