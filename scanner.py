@@ -4138,11 +4138,6 @@ def create_debug_image(
     answers,
     template,
 ):
-
-    debug = (
-        corrected_image.copy()
-    )
-
     exam_name = (
         str(
             template.get(
@@ -4159,104 +4154,21 @@ def create_debug_image(
         "KCET",
     ]:
 
-        if corrected_image.ndim == 3:
-            calibration_gray = cv2.cvtColor(
-                corrected_image,
-                cv2.COLOR_BGR2GRAY,
-            )
-        else:
-            calibration_gray = corrected_image.copy()
-
-        column_offsets = (
-            auto_calibrate_neet_columns(
-                calibration_gray,
-                template,
-            )
+        # scan_answers() first calibrates the template and then locally fits
+        # every printed bubble.  The exact fitted center used to crop each
+        # bubble is retained in answers[question]["ml"]["options"].
+        #
+        # Do not run calibration again here: that produces pre-fit centers
+        # and makes the web debug overlay disagree with the actual reader.
+        return draw_answer_analysis(
+            corrected_image,
+            template,
+            answers,
         )
-
-        coordinates = (
-            generate_calibrated_bubble_coordinates(
-                template,
-                column_offsets,
-            )
-        )
-
-        radius = int(
-            template.get(
-                "bubble_radius",
-                10,
-            )
-        )
-
-        for (
-            question,
-            options
-        ) in coordinates.items():
-
-            for (
-                option,
-                position
-            ) in options.items():
-
-                x, y = position
-
-                cv2.circle(
-                    debug,
-                    (
-                        int(x),
-                        int(y),
-                    ),
-                    radius,
-                    (
-                        0,
-                        255,
-                        0,
-                    ),
-                    1,
-                )
-
-            first_option = (
-                template[
-                    "options"
-                ][0]
-            )
-
-            x, y = options[
-                first_option
-            ]
-
-            answer = (
-                answers.get(
-                    question,
-                    {}
-                )
-                .get(
-                    "answer",
-                    "-"
-                )
-            )
-
-            cv2.putText(
-                debug,
-                f"Q{question}:{answer}",
-                (
-                    max(
-                        0,
-                        int(x) - 60,
-                    ),
-                    int(y) + 30,
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.30,
-                (
-                    0,
-                    0,
-                    255,
-                ),
-                1,
-            )
 
     elif exam_name == "JEE":
+
+        debug = corrected_image.copy()
 
         # JEE debug drawing can be expanded
         # once exact MCQ and numerical coordinates
@@ -4279,7 +4191,9 @@ def create_debug_image(
             2,
         )
 
-    return debug
+        return debug
+
+    return corrected_image.copy()
 
 
 # ============================================================
