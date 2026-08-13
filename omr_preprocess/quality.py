@@ -93,42 +93,59 @@ def assess_document_quality(
     )
 
     warnings: list[str] = []
-    resolution_ok = min(original_bgr.shape[:2]) >= 900
+    # These metrics describe image quality, not whether the OMR engine can
+    # recover a sheet.  In particular, do not turn a less-than-ideal camera
+    # image into a hard failure just because it differs from the reference.
+    # Existing document alignment and bubble recognition remain the final
+    # authority for borderline images.
+    minimum_dimension = min(original_bgr.shape[:2])
+    resolution_ok = minimum_dimension >= 600
     severe_lighting = (
         illumination_uniformity < 40.0
         or shadow_percent > 35.0
         or glare_percent > 35.0
     )
 
-    # Broad safety bands for camera-scale Laplacian variance. They deliberately
-    # separate clearly blurred captures from normal phone photographs; they are
-    # not derived from any single example image.
-    if sharpness < 250.0:
+    # Only stop scans which are clearly unusable.  A single generic metric is
+    # deliberately never sufficient: camera-scale Laplacian variance, mean
+    # brightness, and page coverage vary substantially among scans which the
+    # established OMR pipeline can still read.
+    nearly_uniform = contrast < 6.0
+    extreme_exposure = brightness < 20.0 or brightness > 252.0
+    no_usable_detail = nearly_uniform and (extreme_exposure or sharpness < 12.0)
+    tiny_image = minimum_dimension < 320
+
+    if tiny_image or no_usable_detail:
         classification = "REJECT"
-        warnings.append("Critical sharpness is too low for reliable OMR scanning.")
+        warnings.append("Image quality is too low to scan reliably. Please scan again.")
     elif (
-        sharpness < 600.0
-        or brightness < 125.0
+        sharpness < 150.0
+        or brightness < 70.0
         or brightness > 248.0
+        or contrast < 15.0
         or not resolution_ok
         or not document_detected
         or coverage < 0.45
         or perspective_quality < 55.0
         or severe_lighting
     ):
-        classification = "REJECT"
-    elif sharpness < 1200.0 or brightness < 140.0 or brightness > 242.0:
-        classification = "WARNING"
+        classification = "POOR"
+        warnings.append(
+            "Image quality is below optimal. For more reliable scanning, use "
+            "Document Mode and scan again."
+        )
+    elif sharpness < 600.0 or brightness < 105.0 or brightness > 245.0 or contrast < 20.0:
+        classification = "ACCEPTABLE"
     elif overall_score >= 80.0:
         classification = "GOOD"
     else:
         classification = "ACCEPTABLE"
 
-    if sharpness < 1200.0:
+    if sharpness < 600.0:
         warnings.append(
             f"Sharpness is low ({sharpness:.2f}); OMR recognition may be unreliable."
         )
-    if brightness < 125.0:
+    if brightness < 70.0:
         warnings.append(f"Document is underexposed ({brightness:.2f}).")
     elif brightness > 248.0:
         warnings.append(f"Document is overexposed ({brightness:.2f}).")
@@ -140,15 +157,17 @@ def assess_document_quality(
         warnings.append("Document perspective is strongly distorted.")
 
     if not resolution_ok:
-        warnings.append("Camera resolution is too low for reliable bubble visibility.")
+        warnings.append("Camera resolution is below the recommended level for bubble visibility.")
 
-    can_scan = classification not in {"POOR", "REJECT"}
+    # POOR is a non-blocking advisory.  This preserves the practical operating
+    # range of the pre-existing recognition pipeline.
+    can_scan = classification != "REJECT"
 
     return {
         "classification": classification,
         "overall_score": overall_score,
         "can_scan": can_scan,
-        "recognition_recommendation": "retake_using_document_mode" if not can_scan else "scan_with_caution" if classification == "WARNING" else "ready",
+        "recognition_recommendation": "retake_using_document_mode" if not can_scan else "scan_with_caution" if classification == "POOR" else "ready",
         "warnings": warnings,
         "original_resolution": {
             "width": int(original_bgr.shape[1]),
