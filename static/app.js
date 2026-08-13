@@ -125,6 +125,12 @@ const multiple =
     );
 
 
+const uncertain =
+    document.getElementById(
+        "uncertain"
+    );
+
+
 const quality =
     document.getElementById(
         "quality"
@@ -1323,6 +1329,16 @@ function displayResult(
 
         multiple.textContent =
             result.multiple
+            ?? 0;
+    }
+
+
+    if (
+        uncertain
+    ) {
+
+        uncertain.textContent =
+            result.uncertain
             ?? 0;
     }
 

@@ -611,6 +611,11 @@ async def scan_omr(
                         "multiple"
                     ],
 
+                "uncertain":
+                    score_data[
+                        "uncertain"
+                    ],
+
                 "answers":
                     detected_answers,
 
@@ -782,6 +787,11 @@ async def scan_omr(
                 "multiple":
                     score_data[
                         "multiple"
+                    ],
+
+                "uncertain":
+                    score_data[
+                        "uncertain"
                     ],
 
                 "answers":

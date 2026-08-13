@@ -2908,7 +2908,19 @@ def draw_answer_analysis(
 
     # Keep the debug ring slightly INSIDE the printed bubble.
     # This avoids overlap with neighbouring bubbles.
-    bubble_radius = 8
+    bubble_radius = max(
+        7,
+        int(
+            round(
+                template.get(
+                    "bubble_radius",
+                    11,
+                )
+                -
+                2
+            )
+        ),
+    )
 
     option_order = list(
         template.get(
@@ -2957,6 +2969,7 @@ def draw_answer_analysis(
     def center_for(
         answer_record,
         option_label,
+        question_number=None,
     ):
         ml_details = (
             answer_record.get(
@@ -3000,7 +3013,77 @@ def draw_answer_analysis(
                 center
             ) != 2
         ):
-            return None
+            # Renderer-only fallback: if recognition produced a final
+            # answer but its debug center is absent, use the exact template
+            # bubble coordinate so the final answer is still visible.
+            if (
+                question_number is None
+                or
+                option_label not in option_order
+                or
+                not y_positions
+            ):
+                return None
+
+            try:
+                qno_local = int(
+                    question_number
+                )
+
+                questions_per_column = int(
+                    template.get(
+                        "questions_per_column",
+                        45,
+                    )
+                )
+
+                row_index_local = (
+                    qno_local - 1
+                ) % questions_per_column
+
+                column_index_local = (
+                    qno_local - 1
+                ) // questions_per_column
+
+                columns_local = template.get(
+                    "columns",
+                    [],
+                )
+
+                if (
+                    column_index_local < 0
+                    or
+                    column_index_local >= len(
+                        columns_local
+                    )
+                    or
+                    row_index_local < 0
+                    or
+                    row_index_local >= len(
+                        y_positions
+                    )
+                ):
+                    return None
+
+                center = (
+                    int(
+                        columns_local[
+                            column_index_local
+                        ][
+                            option_label
+                        ]
+                    ),
+                    int(
+                        round(
+                            y_positions[
+                                row_index_local
+                            ]
+                        )
+                    ),
+                )
+
+            except Exception:
+                return None
 
         cx = int(
             round(
@@ -3080,10 +3163,40 @@ def draw_answer_analysis(
         ).lower()
 
         # Draw a small neutral ring and exact pin dot for all A/B/C/D.
+        #
+        # IMPORTANT: do not draw neutral candidate centers for the final
+        # row of a 45-question block. On this physical sheet the fitted
+        # fallback centers can sit on the horizontal divider below the
+        # real final bubbles, which visually creates a fake extra row.
+        # The actual final classification ring is still drawn below.
+        questions_per_column = int(
+            template.get(
+                "questions_per_column",
+                45,
+            )
+        )
+
+        row_in_block = (
+            (
+                qno - 1
+            )
+            %
+            questions_per_column
+        ) + 1
+
+        draw_neutral_candidates = (
+            row_in_block
+            !=
+            questions_per_column
+        )
+
         for option_label in option_order:
+            if not draw_neutral_candidates:
+                continue
             center = center_for(
                 answer_record,
                 option_label,
+                qno,
             )
 
             if center is None:
@@ -3139,6 +3252,7 @@ def draw_answer_analysis(
                 center = center_for(
                     answer_record,
                     option_label,
+                    qno,
                 )
 
                 if center is None:
@@ -3164,6 +3278,7 @@ def draw_answer_analysis(
             center = center_for(
                 answer_record,
                 detected_answer,
+                qno,
             )
 
             if center is not None:
@@ -3197,6 +3312,7 @@ def draw_answer_analysis(
             center = center_for(
                 answer_record,
                 best_option,
+                qno,
             )
 
             if center is not None:
@@ -4138,6 +4254,11 @@ def create_debug_image(
     answers,
     template,
 ):
+
+    debug = (
+        corrected_image.copy()
+    )
+
     exam_name = (
         str(
             template.get(
@@ -4154,21 +4275,104 @@ def create_debug_image(
         "KCET",
     ]:
 
-        # scan_answers() first calibrates the template and then locally fits
-        # every printed bubble.  The exact fitted center used to crop each
-        # bubble is retained in answers[question]["ml"]["options"].
-        #
-        # Do not run calibration again here: that produces pre-fit centers
-        # and makes the web debug overlay disagree with the actual reader.
-        return draw_answer_analysis(
-            corrected_image,
-            template,
-            answers,
+        if corrected_image.ndim == 3:
+            calibration_gray = cv2.cvtColor(
+                corrected_image,
+                cv2.COLOR_BGR2GRAY,
+            )
+        else:
+            calibration_gray = corrected_image.copy()
+
+        column_offsets = (
+            auto_calibrate_neet_columns(
+                calibration_gray,
+                template,
+            )
         )
 
-    elif exam_name == "JEE":
+        coordinates = (
+            generate_calibrated_bubble_coordinates(
+                template,
+                column_offsets,
+            )
+        )
 
-        debug = corrected_image.copy()
+        radius = int(
+            template.get(
+                "bubble_radius",
+                10,
+            )
+        )
+
+        for (
+            question,
+            options
+        ) in coordinates.items():
+
+            for (
+                option,
+                position
+            ) in options.items():
+
+                x, y = position
+
+                cv2.circle(
+                    debug,
+                    (
+                        int(x),
+                        int(y),
+                    ),
+                    radius,
+                    (
+                        0,
+                        255,
+                        0,
+                    ),
+                    1,
+                )
+
+            first_option = (
+                template[
+                    "options"
+                ][0]
+            )
+
+            x, y = options[
+                first_option
+            ]
+
+            answer = (
+                answers.get(
+                    question,
+                    {}
+                )
+                .get(
+                    "answer",
+                    "-"
+                )
+            )
+
+            cv2.putText(
+                debug,
+                f"Q{question}:{answer}",
+                (
+                    max(
+                        0,
+                        int(x) - 60,
+                    ),
+                    int(y) + 30,
+                ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.30,
+                (
+                    0,
+                    0,
+                    255,
+                ),
+                1,
+            )
+
+    elif exam_name == "JEE":
 
         # JEE debug drawing can be expanded
         # once exact MCQ and numerical coordinates
@@ -4191,9 +4395,7 @@ def create_debug_image(
             2,
         )
 
-        return debug
-
-    return corrected_image.copy()
+    return debug
 
 
 # ============================================================
