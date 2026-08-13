@@ -3022,8 +3022,11 @@ def _postprocess_known_failure_classes(
 
     likely_outline_blank = (
         max_disk <= 0.61
+        # Empty printed rings can create a local center-darkness peak in the
+        # low 80s while all four bubbles still lack real filled-disk coverage.
+        # This path only runs after normal SINGLE/MULTIPLE decisions failed.
         and
-        max_darkness <= 80.0
+        max_darkness <= 85.0
         and
         disk_gap <= 0.14
     )
@@ -3061,10 +3064,26 @@ def _postprocess_known_failure_classes(
         max_disk <= 0.61
     )
 
+    # A printed ring can be locally dark even when its classifier result is
+    # decisively not filled.  Treat the row as an outline-heavy blank when no
+    # option has substantial disk coverage and the center-darkness winner is
+    # precisely that unsupported artifact.  This is evaluated before any
+    # ambiguous-single rescue, so a misleading model rank cannot turn a blank
+    # response into an answer.
+    unsupported_dark_outline_blank = (
+        max_disk <= 0.52
+        and
+        disk_gap <= 0.14
+        and
+        ml(darkest_option) <= 0.10
+    )
+
     if (
         likely_outline_blank
         or
         dark_artifact_blank
+        or
+        unsupported_dark_outline_blank
     ):
         blanked = dict(
             decision
@@ -3128,7 +3147,6 @@ def _postprocess_known_failure_classes(
         -
         value(darkness_ranked[1], "center_darkness")
     )
-
     if (
         disk_winner == darkness_winner
         and ambiguous_max_disk >= 0.45
