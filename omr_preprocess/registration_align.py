@@ -1673,6 +1673,21 @@ def canonicalize_omr(
         "alignment_method":
             "registration_blocks",
 
+        "document_detection": {
+            "document_detected": True,
+            "bounds": {
+                name: [
+                    round(float(point[0]), 2),
+                    round(float(point[1]), 2),
+                ]
+                for name, point in zip(
+                    ("top_left", "top_right", "bottom_right", "bottom_left"),
+                    markers,
+                )
+            },
+            "perspective_correction_applied": True,
+        },
+
         "output_size": {
             "width":
                 width,
@@ -1690,6 +1705,14 @@ def canonicalize_omr(
         "coarse_homography":
             homography.tolist(),
     }
+
+    debug[
+        "document_detection"
+    ][
+        "rotation_angle"
+    ] = orientation_debug[
+        "selected_rotation"
+    ]
 
     if use_orb:
         result, orb_debug = (

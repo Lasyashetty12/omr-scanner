@@ -2,6 +2,7 @@
 from ml_omr.hybrid_reader import scan_answers_ml
 from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
+from omr_preprocess.quality import assess_document_quality
 import json
 import os
 
@@ -4390,14 +4391,20 @@ def process_omr(
             )
         )
 
-        # Vivo-like document mode is DISPLAY ONLY.
+        # Keep two representations after canonical registration:
+        # - document_preview: enhanced for visual document-scan inspection
+        # - corrected: the conservative canonical image used by the frozen
+        #   recognition pipeline. This avoids changing bubble intensities.
         (
             document_preview,
-            _recognition_copy,
+            recognition_image,
             document_mode_debug,
         ) = prepare_omr_document_mode(
-            corrected
+            corrected,
+            debug_dir=local_debug_dir,
         )
+
+        corrected = recognition_image
 
         alignment_debug[
             "document_mode"
@@ -4446,9 +4453,12 @@ def process_omr(
             "method":
                 "canonical_reference_alignment",
 
-            "document_quad":
+            "document_bounds":
                 alignment_debug.get(
-                    "document_quad"
+                    "document_detection",
+                    {},
+                ).get(
+                    "bounds"
                 ),
 
             "orb_applied":
@@ -4559,6 +4569,38 @@ def process_omr(
     # --------------------------------
     # Grayscale is already prepared by canonical preprocessing.
     # --------------------------------
+
+    # --------------------------------
+    # Informational document-quality assessment. This never changes the
+    # canonical image, recognition thresholds, or recognition result.
+    # --------------------------------
+    quality[
+        "document_quality"
+    ] = assess_document_quality(
+        original_bgr=image,
+        canonical_bgr=corrected,
+        alignment_debug=alignment_debug,
+    )
+
+    document_quality = quality[
+        "document_quality"
+    ]
+
+    if not document_quality[
+        "can_scan"
+    ]:
+        details = " ".join(
+            document_quality[
+                "warnings"
+            ]
+        )
+
+        raise ValueError(
+            "Image quality rejected before OMR recognition. "
+            f"Sharpness: {document_quality['sharpness']:.2f}. "
+            f"Brightness: {document_quality['brightness']:.2f}. "
+            f"{details} Please retake the complete sheet again."
+        )
 
     # --------------------------------
     # Paper-code coordinate debug
