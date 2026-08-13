@@ -1,7 +1,6 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
 from omr_preprocess import canonicalize_omr
-from omr_preprocess.document_mode import prepare_omr_document_mode
 import json
 import os
 
@@ -4390,19 +4389,6 @@ def process_omr(
             )
         )
 
-        # Vivo-like document mode is DISPLAY ONLY.
-        (
-            document_preview,
-            _recognition_copy,
-            document_mode_debug,
-        ) = prepare_omr_document_mode(
-            corrected
-        )
-
-        alignment_debug[
-            "document_mode"
-        ] = document_mode_debug
-
         expected_width = int(
             template["sheet_width"]
         )
@@ -4481,11 +4467,6 @@ def process_omr(
             cv2.imwrite(
                 "corrected_omr.jpg",
                 corrected,
-            )
-
-            cv2.imwrite(
-                "document_mode_preview.jpg",
-                document_preview,
             )
 
     # ========================================================

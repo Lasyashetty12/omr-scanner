@@ -4390,13 +4390,34 @@ def process_omr(
             )
         )
 
-        # Vivo-like document mode is DISPLAY ONLY.
+        # ----------------------------------------------------
+        # OMR DOCUMENT MODE
+        # ----------------------------------------------------
+        # Geometry is already canonical at this point.
+        #
+        # This stage behaves like mobile document mode only
+        # photometrically:
+        #   - shadow / illumination flattening
+        #   - mild local contrast
+        #   - light denoise
+        #   - grayscale preserved
+        #
+        # It NEVER thresholds the recognition image and NEVER
+        # changes bubble coordinates.
         (
             document_preview,
-            _recognition_copy,
+            recognition_corrected,
             document_mode_debug,
         ) = prepare_omr_document_mode(
-            corrected
+            corrected,
+            enable_recognition_normalization=True,
+            nonuniformity_trigger=22.0,
+        )
+
+        # Use the document-normalized image for recognition only
+        # when the document-mode module decides lighting is uneven.
+        corrected_for_recognition = (
+            recognition_corrected
         )
 
         alignment_debug[
@@ -4439,7 +4460,7 @@ def process_omr(
             )
 
         gray = normalize_grayscale(
-            corrected
+            corrected_for_recognition
         )
 
         crop_debug = {
@@ -4486,6 +4507,11 @@ def process_omr(
             cv2.imwrite(
                 "document_mode_preview.jpg",
                 document_preview,
+            )
+
+            cv2.imwrite(
+                "document_mode_recognition.jpg",
+                corrected_for_recognition,
             )
 
     # ========================================================
@@ -4615,7 +4641,7 @@ def process_omr(
         # Then scan 180 answers
         answers = (
             scan_answers(
-                corrected,
+                corrected_for_recognition,
                 template,
             )
         )
@@ -4655,7 +4681,7 @@ def process_omr(
         # Then scan 240 answers
         answers = (
             scan_answers(
-                corrected,
+                corrected_for_recognition,
                 template,
             )
         )

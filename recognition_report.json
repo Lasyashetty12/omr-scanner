@@ -6127,10 +6127,10 @@
     },
     "45": {
       "decision": {
-        "answer": "A",
-        "status": "answered",
+        "answer": null,
+        "status": "blank",
         "multiple_options": [],
-        "best_option": "A",
+        "best_option": "C",
         "best_darkness": 58.33,
         "second_darkness": 52.85,
         "top_gap": 5.48,
@@ -6139,10 +6139,8 @@
         "disk_gap": 0.0131,
         "question_blank_baseline": 28.5,
         "best_delta": 29.83,
-        "final_row_vertical_sweep": true,
-        "final_row_sweep_dy": -20,
-        "final_row_sweep_darkness": 223.275,
-        "final_row_sweep_gap": 90.322
+        "ambiguous_low_disk_blank": true,
+        "ambiguous_max_disk": 0.3639
       },
       "options": {
         "A": {
@@ -18368,7 +18366,7 @@
     "133": {
       "decision": {
         "answer": null,
-        "status": "ambiguous",
+        "status": "blank",
         "multiple_options": [],
         "best_option": "B",
         "best_darkness": 87.36,
@@ -18378,7 +18376,9 @@
         "second_disk_ratio": 0.3738,
         "disk_gap": 0.0065,
         "question_blank_baseline": 52.115,
-        "best_delta": 35.245
+        "best_delta": 35.245,
+        "ambiguous_low_disk_blank": true,
+        "ambiguous_max_disk": 0.3803
       },
       "options": {
         "A": {
@@ -18517,7 +18517,8 @@
         "disk_gap": 0.0623,
         "question_blank_baseline": 55.44,
         "best_delta": 17.61,
-        "outline_blank_rescue": true
+        "ambiguous_low_disk_blank": true,
+        "ambiguous_max_disk": 0.4459
       },
       "options": {
         "A": {
