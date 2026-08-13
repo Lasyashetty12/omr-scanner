@@ -3085,7 +3085,67 @@ def _postprocess_known_failure_classes(
         return blanked
 
     # --------------------------------------------------------------
-    # D) CENTER-MOST AMBIGUOUS SINGLE
+    # D) UNIQUE VISUAL-WINNER SINGLE
+    # --------------------------------------------------------------
+    # This is deliberately a classification-only fallback for rows which
+    # have already passed the normal MULTIPLE and BLANK decisions.  The
+    # earlier disk-first rules can otherwise leave a real, clearly dominant
+    # mark as "ambiguous" solely because it falls just below a fixed
+    # darkness, disk, or ML-confidence cutoff.
+    #
+    # Do not use model confidence here.  A normal answer is preserved only
+    # when the same option is the unique winner in both existing image
+    # measurements (filled-disk coverage and center darkness).  Two close
+    # contenders remain ambiguous, and the established multiple/blank rules
+    # above remain unchanged.
+    disk_ranked = sorted(
+        options,
+        key=lambda option: value(
+            option,
+            "disk_dark_ratio",
+        ),
+        reverse=True,
+    )
+
+    darkness_ranked = sorted(
+        options,
+        key=lambda option: value(
+            option,
+            "center_darkness",
+        ),
+        reverse=True,
+    )
+
+    disk_winner = disk_ranked[0]
+    darkness_winner = darkness_ranked[0]
+    disk_gap = (
+        value(disk_winner, "disk_dark_ratio")
+        -
+        value(disk_ranked[1], "disk_dark_ratio")
+    )
+    darkness_gap = (
+        value(darkness_winner, "center_darkness")
+        -
+        value(darkness_ranked[1], "center_darkness")
+    )
+
+    if (
+        disk_winner == darkness_winner
+        and ambiguous_max_disk >= 0.45
+        and disk_gap >= 0.10
+        and darkness_gap >= 10.0
+    ):
+        answered = dict(decision)
+        answered["answer"] = disk_winner
+        answered["status"] = "answered"
+        answered["best_option"] = disk_winner
+        answered["unique_visual_winner_rescue"] = True
+        answered["unique_visual_disk_gap"] = round(float(disk_gap), 4)
+        answered["unique_visual_darkness_gap"] = round(float(darkness_gap), 3)
+        return answered
+
+    # --------------------------------------------------------------
+    # E) CENTER-MOST AMBIGUOUS SINGLE
     # --------------------------------------------------------------
     # Some true marks occupy the very center of the bubble while a nearby
     # printed ring/edge gives another option a larger broad core score.
