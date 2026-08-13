@@ -1,185 +1,213 @@
-
 from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import cv2
 import numpy as np
 
 
-def _stretch(gray, low_p=2.5, high_p=98.0):
-    low = float(np.percentile(gray, low_p))
-    high = float(np.percentile(gray, high_p))
+def _as_gray(image: np.ndarray) -> np.ndarray:
+    if image is None or image.size == 0:
+        raise ValueError("Document mode received an empty image.")
 
-    if high <= low + 1.0:
-        return gray.copy()
+    if image.ndim == 2:
+        return image.copy()
 
-    out = (
-        (gray.astype(np.float32) - low)
-        * (255.0 / (high - low))
+    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+
+def _image_characteristics(gray: np.ndarray) -> Dict[str, float]:
+    background = cv2.GaussianBlur(gray, (0, 0), sigmaX=35, sigmaY=35)
+    illumination_range = float(
+        np.percentile(background, 95.0)
+        - np.percentile(background, 5.0)
     )
 
-    return np.clip(out, 0, 255).astype(np.uint8)
+    return {
+        "brightness": round(float(np.mean(gray)), 2),
+        "contrast": round(float(np.std(gray)), 2),
+        "illumination_range": round(illumination_range, 2),
+        "blur_score": round(
+            float(cv2.Laplacian(gray, cv2.CV_64F).var()),
+            2,
+        ),
+    }
 
 
-def _scanner_tone_curve(gray):
-    """
-    Scanner-like tone curve:
-      - keeps dark pencil/text dark
-      - brightens paper background
-      - suppresses middle-gray paper texture
-    """
-    x = np.arange(256, dtype=np.float32)
-
-    # Piecewise curve, intentionally smooth.
-    y = np.empty_like(x)
-
-    dark = x <= 90
-    mid = (x > 90) & (x <= 205)
-    light = x > 205
-
-    # Keep blacks strong.
-    y[dark] = x[dark] * 0.92
-
-    # Increase separation in the text/bubble range.
-    y[mid] = 82.8 + (x[mid] - 90.0) * 1.22
-
-    # Push paper rapidly toward white.
-    y[light] = 223.1 + (x[light] - 205.0) * 0.64
-
-    y = np.clip(y, 0, 255).astype(np.uint8)
-
-    return cv2.LUT(gray, y)
-
-
-def create_document_preview(corrected_bgr):
-    """
-    Stronger Vivo-like DOCUMENT PREVIEW.
-
-    DISPLAY ONLY:
-      - recognition image is never changed
-      - no geometry changes
-      - no binary/adaptive thresholding
-    """
-
-    if corrected_bgr is None:
-        raise ValueError("Document preview received an empty image.")
-
-    if corrected_bgr.ndim == 2:
-        gray = corrected_bgr.copy()
-    else:
-        gray = cv2.cvtColor(
-            corrected_bgr,
-            cv2.COLOR_BGR2GRAY,
-        )
-
-    # --------------------------------------------------------
-    # 1. Remove broad lighting / shadow gradient
-    # --------------------------------------------------------
+def _gentle_illumination_correction(
+    gray: np.ndarray,
+    characteristics: Dict[str, float],
+) -> np.ndarray:
+    """Flatten only broad lighting gradients; never create a binary mask."""
+    short_side = min(gray.shape[:2])
+    sigma = float(np.clip(short_side / 28.0, 30.0, 75.0))
     background = cv2.GaussianBlur(
         gray,
         (0, 0),
-        sigmaX=38,
-        sigmaY=38,
+        sigmaX=sigma,
+        sigmaY=sigma,
     )
 
-    background = np.maximum(
-        background,
-        1,
-    )
-
-    flat = cv2.divide(
+    paper_level = max(float(np.percentile(background, 92.0)), 1.0)
+    normalized = cv2.divide(
         gray,
-        background,
-        scale=238,
+        np.maximum(background, 1).astype(np.uint8),
+        scale=paper_level,
     )
 
-    # --------------------------------------------------------
-    # 2. Controlled global contrast
-    # --------------------------------------------------------
-    flat = _stretch(
-        flat,
-        low_p=2.5,
-        high_p=98.0,
+    illumination_strength = float(
+        np.clip(
+            0.28 + characteristics["illumination_range"] / 150.0,
+            0.28,
+            0.62,
+        )
     )
 
-    # --------------------------------------------------------
-    # 3. Suppress phone-camera paper grain
-    # --------------------------------------------------------
-    flat = cv2.fastNlMeansDenoising(
-        flat,
-        None,
-        h=5,
-        templateWindowSize=7,
-        searchWindowSize=21,
-    )
-
-    # --------------------------------------------------------
-    # 4. Scanner-like white-paper tone curve
-    # --------------------------------------------------------
-    flat = _scanner_tone_curve(
-        flat
-    )
-
-    # --------------------------------------------------------
-    # 5. Mild local contrast for tiny letters and bubble rings
-    # --------------------------------------------------------
-    clahe = cv2.createCLAHE(
-        clipLimit=1.08,
-        tileGridSize=(10, 10),
-    )
-
-    flat = clahe.apply(
-        flat
-    )
-
-    # --------------------------------------------------------
-    # 6. Crisp text without hard thresholding
-    # --------------------------------------------------------
-    soft = cv2.GaussianBlur(
-        flat,
-        (0, 0),
-        sigmaX=0.85,
-        sigmaY=0.85,
-    )
-
-    sharp = cv2.addWeighted(
-        flat,
-        1.42,
-        soft,
-        -0.42,
+    # A partial blend avoids the cloud-like artifacts caused by forcing every
+    # local background region to the same value, while still lifting shadows.
+    return cv2.addWeighted(
+        gray,
+        1.0 - illumination_strength,
+        normalized,
+        illumination_strength,
         0,
     )
 
-    # Final tiny white-background cleanup.
-    sharp = np.where(
-        sharp >= 244,
-        255,
-        sharp,
-    ).astype(np.uint8)
 
-    return cv2.cvtColor(
-        sharp,
-        cv2.COLOR_GRAY2BGR,
+def _lift_paper_whites(
+    gray: np.ndarray,
+    characteristics: Dict[str, float],
+) -> np.ndarray:
+    """Whiten paper smoothly while leaving printing and filled bubbles intact."""
+    values = gray.astype(np.float32)
+    light_mask = values > 180.0
+    lift = float(
+        np.clip((210.0 - characteristics["brightness"]) / 120.0, 0.18, 0.42)
+    )
+    values[light_mask] += (255.0 - values[light_mask]) * lift
+    return np.clip(values, 0, 255).astype(np.uint8)
+
+
+def create_document_scan(
+    corrected_bgr: np.ndarray,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+    """
+    Create a scan-like OMR image without changing its geometry.
+
+    This intentionally uses no adaptive/global binarisation or morphological
+    background subtraction. Those operations are prone to erasing thin OMR
+    rings or producing artificial patches under uneven camera lighting.
+    """
+    original = _as_gray(corrected_bgr)
+    characteristics = _image_characteristics(original)
+    lighting = _gentle_illumination_correction(original, characteristics)
+
+    denoise_strength = float(
+        np.clip(14.0 + (34.0 - characteristics["contrast"]) * 0.28, 12.0, 22.0)
     )
 
-
-def prepare_omr_document_mode(corrected_bgr):
-    display_image = create_document_preview(
-        corrected_bgr
+    denoised = cv2.bilateralFilter(
+        lighting,
+        d=5,
+        sigmaColor=denoise_strength,
+        sigmaSpace=denoise_strength,
     )
 
-    # CRITICAL: exact recognition image is preserved.
-    recognition_image = corrected_bgr.copy()
+    clahe = cv2.createCLAHE(
+        clipLimit=float(
+            np.clip(1.05 + (32.0 - characteristics["contrast"]) / 80.0, 1.05, 1.38)
+        ),
+        tileGridSize=(16, 16),
+    )
+    contrasted = clahe.apply(denoised)
 
-    debug = {
-        "preview_only": True,
-        "recognition_image_modified": False,
-        "geometry_changed": False,
-        "adaptive_threshold_used_for_recognition": False,
-        "preview_profile": "vivo_like_strong",
+    soft = cv2.GaussianBlur(
+        contrasted,
+        (0, 0),
+        sigmaX=0.65,
+        sigmaY=0.65,
+    )
+    sharpen_amount = float(
+        np.clip(0.12 + (110.0 - characteristics["blur_score"]) / 900.0, 0.10, 0.20)
+    )
+    sharpened = cv2.addWeighted(
+        contrasted,
+        1.0 + sharpen_amount,
+        soft,
+        -sharpen_amount,
+        0,
+    )
+
+    whitened = _lift_paper_whites(sharpened, characteristics)
+    final = cv2.cvtColor(whitened, cv2.COLOR_GRAY2BGR)
+
+    stages = {
+        "original": original,
+        "lighting": lighting,
+        "denoised": denoised,
+        "whitened": whitened,
+        "final": final,
     }
 
-    return (
-        display_image,
-        recognition_image,
-        debug,
-    )
+    return final, stages
+
+
+def _write_debug_stages(
+    debug_dir: Path,
+    stages: Dict[str, np.ndarray],
+) -> None:
+    debug_dir.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "05_lighting_corrected.jpg": stages["lighting"],
+        "06_denoised.jpg": stages["denoised"],
+        "07_final_omr_input.jpg": stages["final"],
+    }
+
+    for filename, image in files.items():
+        cv2.imwrite(str(debug_dir / filename), image)
+
+
+def prepare_omr_document_mode(
+    corrected_bgr: np.ndarray,
+    debug_dir: Optional[str | Path] = None,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """
+    Apply document-mode appearance enhancement after canonical registration.
+
+    The caller has already performed page detection, perspective correction,
+    and orientation selection. This function deliberately preserves pixel
+    dimensions and does not alter any OMR coordinates.
+    """
+    document_image, stages = create_document_scan(corrected_bgr)
+
+    if debug_dir is not None:
+        _write_debug_stages(Path(debug_dir), stages)
+
+    height, width = document_image.shape[:2]
+    debug = {
+        "profile": "gentle_document_mode_v2",
+        "preview_only": True,
+        "recognition_image_modified": False,
+        "recognition_source": "canonical_registered",
+        "geometry_changed": False,
+        "adaptive_threshold_used": False,
+        "document_width": int(width),
+        "document_height": int(height),
+        "stages": [
+            "lighting_correction",
+            "edge_preserving_denoise",
+            "controlled_contrast",
+            "controlled_sharpening",
+            "paper_whitening",
+        ],
+        "image_characteristics": _image_characteristics(
+            stages["original"]
+        ),
+    }
+
+    # The document image is intentionally a preview/debug representation.
+    # Recognition receives an exact copy of the canonical registration result,
+    # preserving the baseline bubble intensities as well as geometry.
+    return document_image, corrected_bgr.copy(), debug
