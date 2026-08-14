@@ -182,6 +182,8 @@ let pageCornersDetected = false;
 
 let autoCaptureTriggered = false;
 
+let detectedDocumentBounds = null;
+
 const markerAnalysisCanvas = document.createElement(
     "canvas"
 );
@@ -341,6 +343,8 @@ function stopCamera() {
     pageCornersDetected = false;
 
     autoCaptureTriggered = false;
+
+    detectedDocumentBounds = null;
 
     cameraContainer?.classList.remove(
         "page-corners-detected"
@@ -633,10 +637,20 @@ function detectDocumentCorners() {
 
     const displayHeight = cameraContainer.clientHeight;
 
-    return measurements.map(({ x, y }) => ({
+    const displayPoints = measurements.map(({ x, y }) => ({
         x: x / analysisWidth * displayWidth,
         y: y / analysisHeight * displayHeight,
     }));
+
+    const sourcePoints = measurements.map(({ x, y }) => ({
+        x: crop.x + x / analysisWidth * crop.width,
+        y: crop.y + y / analysisHeight * crop.height,
+    }));
+
+    return {
+        displayPoints,
+        sourcePoints,
+    };
 }
 
 
@@ -653,9 +667,9 @@ function monitorCornerBlocks(timestamp) {
 
         lastCornerCheckAt = timestamp;
 
-        const corners = detectDocumentCorners();
+        const detection = detectDocumentCorners();
 
-        stableCornerChecks = corners
+        stableCornerChecks = detection
             ? stableCornerChecks + 1
             : 0;
 
@@ -664,9 +678,14 @@ function monitorCornerBlocks(timestamp) {
         );
 
         drawDocumentBoundary(
-            corners,
+            detection?.displayPoints,
             stableCornerChecks >= 2
         );
+
+        if (stableCornerChecks >= 2) {
+
+            detectedDocumentBounds = detection.sourcePoints;
+        }
 
         if (
             stableCornerChecks >= 3
@@ -684,6 +703,52 @@ function monitorCornerBlocks(timestamp) {
     cornerDetectionFrame = requestAnimationFrame(
         monitorCornerBlocks
     );
+}
+
+
+function cropFromDetectedDocument(
+    videoWidth,
+    videoHeight
+) {
+
+    if (!detectedDocumentBounds?.length) {
+
+        return calculateA4Crop(videoWidth, videoHeight);
+    }
+
+    const xs = detectedDocumentBounds.map(({ x }) => x);
+
+    const ys = detectedDocumentBounds.map(({ y }) => y);
+
+    const left = Math.min(...xs);
+
+    const right = Math.max(...xs);
+
+    const top = Math.min(...ys);
+
+    const bottom = Math.max(...ys);
+
+    // The black markers sit slightly inside the physical page.  Expand the
+    // marker rectangle so the server still receives the complete document
+    // edges needed for its perspective/document-mode normalization.
+    const marginX = (right - left) * 0.065;
+
+    const marginY = (bottom - top) * 0.045;
+
+    const x = Math.max(0, left - marginX);
+
+    const y = Math.max(0, top - marginY);
+
+    const maxRight = Math.min(videoWidth, right + marginX);
+
+    const maxBottom = Math.min(videoHeight, bottom + marginY);
+
+    return {
+        x,
+        y,
+        width: Math.max(1, maxRight - x),
+        height: Math.max(1, maxBottom - y),
+    };
 }
 
 
@@ -985,7 +1050,7 @@ function captureCameraImage(
 
 
     const crop =
-        calculateA4Crop(
+        cropFromDetectedDocument(
             videoWidth,
             videoHeight
         );
