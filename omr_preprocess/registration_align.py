@@ -383,31 +383,53 @@ def detect_registration_blocks(
         small
     )
 
-    picked = []
-
-    for corner in (
-        "TL",
-        "TR",
-        "BR",
-        "BL",
-    ):
-        candidate = _pick_corner_candidate(
+    picked_dict = {}
+    for corner in ("TL", "TR", "BR", "BL"):
+        cand = _pick_corner_candidate(
             candidates,
             corner,
             w,
             h,
         )
+        if cand is not None:
+            picked_dict[corner] = cand["center"]
 
-        if candidate is None:
+    # Fallback recovery for missing corner blocks (e.g. shadowed or obscured bottom marks):
+    if "TL" in picked_dict and "TR" in picked_dict:
+        tl = picked_dict["TL"]
+        tr = picked_dict["TR"]
+        dx = tr[0] - tl[0]
+        dy = tr[1] - tl[1]
+        perp_x = -dy * 1.375
+        perp_y = dx * 1.375
+
+        if "BL" not in picked_dict:
+            est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
+            sub_cands = [c for c in candidates if c["center"][0] < w * 0.48 and c["center"][1] > h * 0.60]
+            if sub_cands:
+                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_bl))
+                picked_dict["BL"] = best_cand["center"]
+            else:
+                picked_dict["BL"] = est_bl
+
+        if "BR" not in picked_dict:
+            est_br = np.array([tr[0] + perp_x, tr[1] + perp_y], dtype=np.float32)
+            sub_cands = [c for c in candidates if c["center"][0] > w * 0.52 and c["center"][1] > h * 0.60]
+            if sub_cands:
+                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_br))
+                picked_dict["BR"] = best_cand["center"]
+            else:
+                picked_dict["BR"] = est_br
+
+    picked = []
+    for corner in ("TL", "TR", "BR", "BL"):
+        if corner not in picked_dict:
             raise ValueError(
                 f"Could not detect {corner} registration block. "
                 "Keep the whole OMR sheet visible, reduce glare, "
                 "and avoid covering the corner marks."
             )
-
-        picked.append(
-            candidate["center"] / scale
-        )
+        picked.append(picked_dict[corner] / scale)
 
     markers = order_points(
         np.array(

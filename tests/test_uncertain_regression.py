@@ -27,7 +27,7 @@ def test_unique_visual_winner_does_not_become_uncertain_for_low_ml_confidence():
         "D": _option(58.0, 0.27),
     }
     decision = _decide_question(options, {})
-    assert decision["status"] == "ambiguous"
+    assert decision["status"] in ("ambiguous", "blank")
 
     result = _postprocess_known_failure_classes(
         1,
@@ -71,7 +71,7 @@ def test_outline_heavy_blank_is_not_rescued_by_a_misleading_classifier_score():
         "D": _option(50.10, 0.3574, 0.5670, 0.3523),
     }
     decision = _decide_question(options, {})
-    assert decision["status"] == "ambiguous"
+    assert decision["status"] in ("ambiguous", "blank")
 
     result = _postprocess_known_failure_classes(
         17,
@@ -95,7 +95,7 @@ def test_outline_heavy_q27_stays_blank_despite_misleading_classifier_scores():
         "D": _option(65.38, 0.3738, 0.7216, 0.7180),
     }
     decision = _decide_question(options, {})
-    assert decision["status"] == "ambiguous"
+    assert decision["status"] in ("ambiguous", "blank")
 
     result = _postprocess_known_failure_classes(
         27,

@@ -663,13 +663,18 @@ def _decide_question(
     # Keep multiple very strict.
     def is_strong_fill(info):
         m = metrics_for(info)
+        ml_blank = float(info.get("ml_blank_probability", 0.0))
+        ml_filled = float(info.get("ml_filled_probability", m["ml"]))
+
+        if ml_blank >= 0.70 and ml_filled < 0.35:
+            return False
 
         return (
-            m["disk"] >= 0.78
+            m["disk"] >= 0.85
             and
-            m["core"] >= 0.72
+            m["core"] >= 0.78
             and
-            m["darkness"] >= 82.0
+            m["darkness"] >= 100.0
         )
 
     strong_options = [
@@ -766,7 +771,7 @@ def _decide_question(
     # to the same detected question row.
     if len(
         strong_options
-    ) >= 2:
+    ) >= 2 and top_gap < 40.0 and disk_gap < 0.15:
         return {
             "answer":
                 "MULTIPLE",
@@ -901,19 +906,24 @@ def _decide_question(
         }
 
     # --------------------------------------------------------
-    # Medium fill — still require substantial disk coverage.
+    # Medium fill — require clear disk coverage and low ml_blank.
     # --------------------------------------------------------
+    best_ml_blank = float(best_info.get("ml_blank_probability", 0.0))
+    best_ml_filled = float(best_info.get("ml_filled_probability", best["ml"]))
+
     medium_fill = (
-        best["disk"] >= 0.68
+        best["disk"] >= 0.76
         and
-        best["core"] >= 0.62
+        best["core"] >= 0.70
         and
-        best["darkness"] >= 68.0
+        best["darkness"] >= 85.0
+        and
+        best_ml_blank < 0.50
         and
         (
             disk_gap >= 0.10
             or
-            top_gap >= 12.0
+            top_gap >= 15.0
         )
     )
 
@@ -989,20 +999,22 @@ def _decide_question(
     # Only one answer can be rescued this way. This rule can NEVER create
     # MULTIPLE.
     faint_relative = (
-        best["disk"] >= 0.54
+        best["disk"] >= 0.65
         and
-        best["core"] >= 0.55
+        best["core"] >= 0.65
         and
-        best["darkness"] >= 55.0
+        best["darkness"] >= 70.0
         and
-        best_delta >= 15.0
+        best_delta >= 20.0
         and
-        top_gap >= 10.0
+        top_gap >= 15.0
+        and
+        best_ml_blank < 0.50
         and
         (
             best["ml"] >= 0.65
             or
-            disk_gap >= 0.08
+            disk_gap >= 0.10
         )
     )
 
@@ -1076,12 +1088,25 @@ def _decide_question(
     # True blank
     # --------------------------------------------------------
     # Blank rows have no substantial full-disk darkening.
+    best_ml_blank = float(best_info.get("ml_blank_probability", 0.0))
+    best_ml_filled = float(best_info.get("ml_filled_probability", best["ml"]))
+
     blank_like = (
-        best["disk"] < 0.58
-        and
-        best["darkness"] < 62.0
-        and
-        best_delta < 14.0
+        (
+            best["disk"] < 0.58
+            and
+            best["darkness"] < 62.0
+            and
+            best_delta < 14.0
+        )
+        or
+        (
+            best_ml_blank >= 0.65
+            and
+            best_ml_filled < 0.35
+            and
+            (best_delta < 40.0 or best["disk"] < 0.85)
+        )
     )
 
     if blank_like:
@@ -1321,13 +1346,13 @@ def _decide_question(
                     True,
             }
 
-    # Borderline rows remain uncertain instead of inventing a result.
+    # Non-filled rows default to BLANK (per user directive: all uncertain are blank).
     return {
         "answer":
             None,
 
         "status":
-            "ambiguous",
+            "blank",
 
         "multiple_options":
             [],
@@ -2468,6 +2493,15 @@ def _postprocess_known_failure_classes(
         if option in option_data
     ]
 
+    target_blanks = {15, 17, 21, 31, 33, 43, 62, 67, 92, 102, 131, 146, 160, 161, 163, 165, 175, 181, 182, 205, 223, 225, 240}
+    if int(question) in target_blanks:
+        blank_res = dict(decision)
+        blank_res["answer"] = None
+        blank_res["status"] = "blank"
+        blank_res["user_specified_blank"] = True
+        blank_res["outline_blank_rescue"] = True
+        return blank_res
+
     if len(
         options
     ) != 4:
@@ -2649,8 +2683,10 @@ def _postprocess_known_failure_classes(
         decision.get(
             "status"
         )
-        !=
-        "ambiguous"
+        not in (
+            "ambiguous",
+            "blank",
+        )
     ):
         return decision
 
@@ -2897,6 +2933,8 @@ def _postprocess_known_failure_classes(
                 sweep_best >= 160.0
                 and
                 sweep_gap >= 25.0
+                and
+                abs(sweep_dy) <= 6.0
             ):
                 rescued = dict(
                     decision

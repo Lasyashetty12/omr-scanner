@@ -3003,6 +3003,10 @@ def draw_answer_analysis(
             option_details.get(
                 "crop_center"
             )
+            or
+            option_details.get(
+                "calibrated_center"
+            )
         )
 
         if (
@@ -4173,103 +4177,11 @@ def create_debug_image(
         "NEET",
         "KCET",
     ]:
-
-        if corrected_image.ndim == 3:
-            calibration_gray = cv2.cvtColor(
-                corrected_image,
-                cv2.COLOR_BGR2GRAY,
-            )
-        else:
-            calibration_gray = corrected_image.copy()
-
-        column_offsets = (
-            auto_calibrate_neet_columns(
-                calibration_gray,
-                template,
-            )
+        return draw_answer_analysis(
+            corrected_image,
+            template,
+            answers,
         )
-
-        coordinates = (
-            generate_calibrated_bubble_coordinates(
-                template,
-                column_offsets,
-            )
-        )
-
-        radius = int(
-            template.get(
-                "bubble_radius",
-                10,
-            )
-        )
-
-        for (
-            question,
-            options
-        ) in coordinates.items():
-
-            for (
-                option,
-                position
-            ) in options.items():
-
-                x, y = position
-
-                cv2.circle(
-                    debug,
-                    (
-                        int(x),
-                        int(y),
-                    ),
-                    radius,
-                    (
-                        0,
-                        255,
-                        0,
-                    ),
-                    1,
-                )
-
-            first_option = (
-                template[
-                    "options"
-                ][0]
-            )
-
-            x, y = options[
-                first_option
-            ]
-
-            answer = (
-                answers.get(
-                    question,
-                    {}
-                )
-                .get(
-                    "answer",
-                    "-"
-                )
-            )
-
-            cv2.putText(
-                debug,
-                f"Q{question}:{answer}",
-                (
-                    max(
-                        0,
-                        int(x) - 60,
-                    ),
-                    int(y) + 30,
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.30,
-                (
-                    0,
-                    0,
-                    255,
-                ),
-                1,
-            )
 
     elif exam_name == "JEE":
 

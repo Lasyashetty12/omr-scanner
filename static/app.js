@@ -691,18 +691,6 @@ function monitorCornerBlocks(timestamp) {
 
             detectedDocumentBounds = detection.sourcePoints;
         }
-
-        if (
-            stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS
-            && !autoCaptureTriggered
-        ) {
-
-            autoCaptureTriggered = true;
-
-            captureCameraImage(true);
-
-            return;
-        }
     }
 
     cornerDetectionFrame = requestAnimationFrame(
