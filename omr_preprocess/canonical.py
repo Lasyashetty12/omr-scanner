@@ -205,8 +205,8 @@ def detect_document_quad(
 
     if best_quad is None:
         raise ValueError(
-            "Could not detect the full OMR page. Keep all four outer "
-            "paper corners visible inside the camera guide."
+            "OMR sheet could not be detected clearly. "
+            "Please place the complete sheet inside the camera frame and scan again."
         )
 
     return best_quad.astype(np.float32)

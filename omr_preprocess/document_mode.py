@@ -207,7 +207,5 @@ def prepare_omr_document_mode(
         ),
     }
 
-    # The document image is intentionally a preview/debug representation.
-    # Recognition receives an exact copy of the canonical registration result,
-    # preserving the baseline bubble intensities as well as geometry.
-    return document_image, corrected_bgr.copy(), debug
+    # Pass the enhanced document image to the recognition pipeline while preserving pixel dimensions.
+    return document_image, document_image.copy(), debug

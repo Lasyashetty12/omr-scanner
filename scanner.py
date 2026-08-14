@@ -4,10 +4,13 @@ from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 import json
+import logging
 import os
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger("omr_scanner")
 
 from config import (
     MIN_BLUR_SCORE,
@@ -353,24 +356,17 @@ def validate_image_quality(image):
         image
     )
 
-    if blur < MIN_BLUR_SCORE:
+    # Conservative non-blocking quality assessment.
+    # Borderline photos are permitted to proceed to document detection and
+    # canonical OMR processing as per Quality Gate requirements.
+    if brightness < 15.0 or brightness > 253.0:
         raise ValueError(
-            "Image is too blurry. Please scan again."
+            "OMR sheet could not be detected clearly. Please place the complete sheet inside the camera frame and scan again."
         )
 
-    if brightness < MIN_BRIGHTNESS:
+    if contrast < 5.0 and blur < 10.0:
         raise ValueError(
-            "Image is too dark."
-        )
-
-    if brightness > MAX_BRIGHTNESS:
-        raise ValueError(
-            "Image is overexposed."
-        )
-
-    if contrast < MIN_CONTRAST:
-        raise ValueError(
-            "Image contrast is too low."
+            "OMR sheet could not be detected clearly. Please place the complete sheet inside the camera frame and scan again."
         )
 
     return {
@@ -4794,6 +4790,27 @@ def process_omr(
                 "bubble_analysis_debug.jpg",
                 detailed_debug,
             )
+
+    # --------------------------------
+    # Diagnostic Logging
+    # --------------------------------
+    try:
+        orig_h, orig_w = image.shape[:2]
+        corr_h, corr_w = corrected.shape[:2]
+        doc_quad = alignment_debug.get("document_quad", [])
+        stages = alignment_debug.get("document_mode", {}).get("stages", [])
+
+        num_blank = sum(1 for v in answers.values() if v is None or v == "BLANK")
+        num_multiple = sum(1 for v in answers.values() if v == "MULTIPLE")
+        num_uncertain = sum(1 for v in answers.values() if v == "UNCERTAIN")
+        num_evaluated = len(answers) * len(template.get("options", ["A", "B", "C", "D"])) if answers else 0
+
+        logger.info(
+            "Scan Diagnostic Log | Original: %dx%d | Corrected: %dx%d | Corners: %s | Preprocessing: %s | Exam: %s | Template: %s | Evaluated Bubbles: %d | Blank: %d | Multiple: %d | Uncertain: %d",
+            orig_w, orig_h, corr_w, corr_h, doc_quad, stages, exam_name, template.get("template_name"), num_evaluated, num_blank, num_multiple, num_uncertain
+        )
+    except Exception as log_err:
+        logger.warning("Diagnostic logging error: %s", log_err)
 
     # --------------------------------
     # Final output

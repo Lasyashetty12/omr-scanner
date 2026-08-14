@@ -2254,6 +2254,8 @@ def _shape_based_secondary_rescue(
     gray,
     option_data,
     decision,
+    questions_per_column=45,
+    crop_radius=16,
 ):
     """
     Conservative secondary rescue for three known *failure classes*:
@@ -2355,16 +2357,21 @@ def _shape_based_secondary_rescue(
 
                 p = probe[option]["best_compact"]
 
+                is_kcet = (questions_per_column == 60 or crop_radius <= 12)
+                min_sec_micro = 145.0 if is_kcet else 170.0
+                min_sec_dark = 95.0 if is_kcet else 82.0
+                min_sec_disk = 0.65 if is_kcet else 0.42
+
                 # Deliberately strict; intended for a real second fill,
                 # not printed bubble ring.
                 if (
-                    p["micro_darkness"] >= 170.0
+                    p["micro_darkness"] >= min_sec_micro
                     and
-                    p["center_darkness"] >= 82.0
+                    p["center_darkness"] >= min_sec_dark
                     and
                     p["core_dark_ratio"] >= 0.70
                     and
-                    p["disk_dark_ratio"] >= 0.42
+                    p["disk_dark_ratio"] >= min_sec_disk
                 ):
                     second_candidates.append(
                         (
@@ -2436,6 +2443,7 @@ def _postprocess_known_failure_classes(
     decision,
     gray,
     questions_per_column=45,
+    crop_radius=16,
 ):
     """
     General postprocessor for the remaining real-sheet failure classes.
@@ -2698,6 +2706,34 @@ def _postprocess_known_failure_classes(
         )
 
         return blanked
+
+    # --------------------------------------------------------------
+    # KCET DOMINANT SINGLE RESCUE
+    # --------------------------------------------------------------
+    # Fix false UNCERTAIN on KCET where printed grid outlines near A/B
+    # inflate baseline darkness but a single option is unambiguously filled.
+    is_kcet = (questions_per_column == 60 or crop_radius <= 12)
+    if decision.get("status") == "ambiguous" and is_kcet:
+        best_option = decision.get("best_option")
+        top_gap = float(decision.get("top_gap", 0.0))
+        if best_option and best_option in option_data:
+            b_info = option_data[best_option]
+            b_micro = float(b_info.get("micro_core_darkness", 0.0))
+            b_metrics = b_info.get("metrics", {})
+            b_dark = float(b_metrics.get("center_darkness", 0.0))
+            b_disk = float(b_metrics.get("disk_dark_ratio", 0.0))
+
+            if (
+                b_micro >= 145.0
+                and b_dark >= 95.0
+                and b_disk >= 0.58
+                and top_gap >= 12.0
+            ):
+                rescued = dict(decision)
+                rescued["answer"] = best_option
+                rescued["status"] = "answered"
+                rescued["kcet_dominant_single_rescue"] = True
+                return rescued
 
     # --------------------------------------------------------------
     # FINAL-ROW SHARED VERTICAL SWEEP
@@ -3273,6 +3309,8 @@ def _postprocess_known_failure_classes(
         gray,
         option_data,
         decision,
+        questions_per_column=questions_per_column,
+        crop_radius=crop_radius,
     )
 
     return decision
@@ -3505,6 +3543,7 @@ def scan_answers_ml(
             decision,
             gray,
             questions_per_column=questions_per_column,
+            crop_radius=crop_radius,
         )
 
         decisions[
