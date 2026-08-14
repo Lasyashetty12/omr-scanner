@@ -222,6 +222,11 @@ const JPEG_QUALITY =
     0.92;
 
 
+// Check runs four times per second.  Waiting two seconds avoids capturing
+// while the phone is still moving into alignment.
+const AUTO_CAPTURE_STABLE_CHECKS = 8;
+
+
 /* ==========================================================
    UI HELPERS
    ========================================================== */
@@ -688,7 +693,7 @@ function monitorCornerBlocks(timestamp) {
         }
 
         if (
-            stableCornerChecks >= 3
+            stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS
             && !autoCaptureTriggered
         ) {
 
@@ -728,12 +733,11 @@ function cropFromDetectedDocument(
 
     const bottom = Math.max(...ys);
 
-    // The black markers sit slightly inside the physical page.  Expand the
-    // marker rectangle so the server still receives the complete document
-    // edges needed for its perspective/document-mode normalization.
-    const marginX = (right - left) * 0.065;
+    // Keep only a thin safety edge outside the detected OMR markers.  The
+    // previous broad margin retained the surrounding camera background.
+    const marginX = (right - left) * 0.012;
 
-    const marginY = (bottom - top) * 0.045;
+    const marginY = (bottom - top) * 0.012;
 
     const x = Math.max(0, left - marginX);
 
@@ -1103,8 +1107,8 @@ function captureCameraImage(
 
 
     /*
-        Crop the center of the actual camera frame
-        to exact A4 portrait ratio.
+        Crop to the stable document boundary detected from the four corner
+        blocks.  The server then applies its normal perspective correction.
     */
     context.drawImage(
 
