@@ -2435,6 +2435,7 @@ def _postprocess_known_failure_classes(
     option_data,
     decision,
     gray,
+    questions_per_column=45,
 ):
     """
     General postprocessor for the remaining real-sheet failure classes.
@@ -2714,7 +2715,7 @@ def _postprocess_known_failure_classes(
             question
         )
         %
-        45
+        questions_per_column
         ==
         0
     ):
@@ -3283,6 +3284,7 @@ def scan_answers_ml(
     crop_radius=DEFAULT_CROP_RADIUS,
     filled_confidence=0.70,
     ambiguous_confidence=0.60,
+    questions_per_column=45,
 ):
     """
     Final tuned adaptive hybrid reader.
@@ -3334,7 +3336,7 @@ def scan_answers_ml(
                 question
             )
             %
-            45
+            questions_per_column
             ==
             0
         ):
@@ -3502,6 +3504,7 @@ def scan_answers_ml(
             option_data,
             decision,
             gray,
+            questions_per_column=questions_per_column,
         )
 
         decisions[

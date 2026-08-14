@@ -555,6 +555,7 @@ def _expected_points(
 def _initial_correspondences(
     expected,
     candidates,
+    max_match_distance=MAX_INITIAL_MATCH_DISTANCE,
 ):
     """
     Greedy nearest-neighbour assignment from expected lattice to detected circles.
@@ -621,7 +622,7 @@ def _initial_correspondences(
             ]
         )
 
-        if distance <= MAX_INITIAL_MATCH_DISTANCE:
+        if distance <= max_match_distance:
             possible.append(
                 (
                     distance,
@@ -1062,6 +1063,34 @@ def fit_response_grid(
         ]
     )
 
+    # KCET's 60-row response blocks have only ~21 px between rows.  Its
+    # pin/match window must therefore be narrower than NEET's 45-row window
+    # or a ring from the adjacent row can become a valid match.  Templates
+    # without these settings retain the established NEET limits.
+    max_initial_match_distance = float(
+        template.get(
+            "grid_max_initial_match_distance",
+            MAX_INITIAL_MATCH_DISTANCE,
+        )
+    )
+    max_direct_pin_dy = float(
+        template.get(
+            "grid_max_direct_pin_dy",
+            MAX_DIRECT_PIN_DY,
+        )
+    )
+    max_final_dy_from_input = float(
+        template.get(
+            "grid_max_final_dy_from_input",
+            MAX_FINAL_DY_FROM_INPUT,
+        )
+    )
+    last_row_rescue_dy = min(
+        float(LAST_ROW_RESCUE_DY),
+        max_direct_pin_dy,
+        max_final_dy_from_input,
+    )
+
     fitted = {}
     debug_info = {}
 
@@ -1092,6 +1121,7 @@ def fit_response_grid(
         correspondences = _initial_correspondences(
             expected,
             candidates,
+            max_match_distance=max_initial_match_distance,
         )
 
         matrix = None
@@ -1174,7 +1204,7 @@ def fit_response_grid(
                 abs(
                     dy_pin
                 )
-                <= LAST_ROW_RESCUE_DY
+                <= last_row_rescue_dy
             ):
                 last_row_dy_candidates.append(
                     float(
@@ -1247,12 +1277,12 @@ def fit_response_grid(
 
             direct_pin_dy_limit = (
                 (
-                    LAST_ROW_RESCUE_DY
+                    last_row_rescue_dy
                     if last_row_rescue_enabled
                     else LAST_ROW_DIRECT_PIN_DY
                 )
                 if item_row == rows_per_column - 1
-                else MAX_DIRECT_PIN_DY
+                else max_direct_pin_dy
             )
 
             if (
@@ -1423,12 +1453,12 @@ def fit_response_grid(
 
             final_dy_limit = (
                 (
-                    LAST_ROW_RESCUE_DY
+                    last_row_rescue_dy
                     if last_row_rescue_enabled
                     else LAST_ROW_FINAL_DY_FROM_INPUT
                 )
                 if row == rows_per_column - 1
-                else MAX_FINAL_DY_FROM_INPUT
+                else max_final_dy_from_input
             )
 
             fitted[

@@ -2710,6 +2710,11 @@ def scan_answers(
                     0.60,
                 )
             ),
+            questions_per_column=int(
+                template[
+                    "questions_per_column"
+                ]
+            ),
         )
     )
 
