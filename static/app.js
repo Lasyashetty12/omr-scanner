@@ -1042,7 +1042,7 @@ function captureCameraImage(
 
 
     const crop =
-        cropFromDetectedDocument(
+        calculateA4Crop(
             videoWidth,
             videoHeight
         );
@@ -1834,6 +1834,26 @@ function displayResult(
             data.message
             ||
             "";
+    }
+
+
+    const correctedUrl =
+        result.corrected_image_url
+        ||
+        data.corrected_image_url;
+
+    if (
+        correctedUrl
+        &&
+        capturedPreview
+    ) {
+        capturedPreview.src =
+            correctedUrl
+            + "?t="
+            + Date.now();
+
+        capturedPreview.hidden =
+            false;
     }
 
 

@@ -1048,7 +1048,44 @@ async def scan_omr(
         )
 
 
+    result["corrected_image_url"] = f"/results/{scan_id}_corrected.jpg"
+
     return result
+
+
+# ============================================================
+# GET RESULT IMAGE
+# ============================================================
+
+@app.get(
+    "/results/{filename}"
+)
+def get_result_image(
+    filename: str,
+):
+
+    filename = safe_filename(
+        filename
+    )
+
+    image_path = os.path.join(
+        RESULT_DIR,
+        filename,
+    )
+
+    if not os.path.exists(
+        image_path
+    ):
+
+        raise HTTPException(
+            status_code=404,
+            detail="Result image not found.",
+        )
+
+    return FileResponse(
+        image_path,
+        media_type="image/jpeg",
+    )
 
 
 # ============================================================
