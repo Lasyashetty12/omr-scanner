@@ -1,23 +1,39 @@
+# Python & virtual environment
 venv/
 .venv/
-dataset/
-models/bubble_saved_model/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Generated scanner diagnostics
+# Datasets and heavy models
+dataset/
+models/bubble_saved_model/
+
+# Temporary / backup python refactoring files
+*_before_*.py
+*_diagnostic*.py
+
+# Generated scanner diagnostic images and data reports
 alignment_debug/
-bubble_analysis_debug.jpg
-canonical_output.jpg
-column_calibration_debug.jpg
-corrected_omr.jpg
-cropped_omr.jpg
-debug_omr.jpg
-grid_detection_debug.jpg
-local_warp_debug.jpg
-paper_code_debug.jpg
+debug_onnx_inputs/
+debug_uncertain_crops/
+photo_invariance_diagnostic/
+final_five_debug/
 
-# Runtime uploads (retain the directory marker)
+*.jpg
+*.jpeg
+*.png
+!static/*.png
+!static/*.jpg
+!static/*.svg
+!templates/*.png
+
+recognition_report.csv
+recognition_report.json
+*.csv
+
+# Runtime uploads (retain directory marker)
 uploads/*
 !uploads/.gitkeep
 
