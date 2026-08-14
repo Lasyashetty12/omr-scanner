@@ -641,3 +641,41 @@ button:disabled {
         grid-template-columns: 1fr 1fr;
     }
 }
+
+
+.omr-detection-box {
+    position: absolute;
+    inset: 3.5%;
+    pointer-events: none;
+    border: 2px solid rgba(255, 220, 90, 0.75);
+    border-radius: 8px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+
+.page-corners-detected .omr-detection-box {
+    border-color: #31d57a;
+    box-shadow: 0 0 0 999px rgba(23, 161, 84, 0.08) inset;
+}
+
+
+.corner-detection-status {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    z-index: 2;
+    padding: 7px 9px;
+    border-radius: 6px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.68);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+}
+
+
+.page-corners-detected .corner-detection-status {
+    color: #d8ffe8;
+    background: rgba(8, 105, 51, 0.82);
+}

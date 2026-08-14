@@ -65,6 +65,12 @@ const scanButton =
     );
 
 
+const cornerDetectionStatus =
+    document.getElementById(
+        "cornerDetectionStatus"
+    );
+
+
 const loading =
     document.getElementById(
         "loading"
@@ -159,6 +165,18 @@ let previewObjectUrl = null;
     False when image came from file upload.
 */
 let capturedFromCamera = false;
+
+let cornerDetectionFrame = null;
+
+let lastCornerCheckAt = 0;
+
+let stableCornerChecks = 0;
+
+let pageCornersDetected = false;
+
+const markerAnalysisCanvas = document.createElement(
+    "canvas"
+);
 
 
 /* ==========================================================
@@ -301,6 +319,23 @@ function clearPreviewUrl() {
 
 function stopCamera() {
 
+    if (cornerDetectionFrame) {
+
+        cancelAnimationFrame(
+            cornerDetectionFrame
+        );
+
+        cornerDetectionFrame = null;
+    }
+
+    stableCornerChecks = 0;
+
+    pageCornersDetected = false;
+
+    cameraContainer?.classList.remove(
+        "page-corners-detected"
+    );
+
     if (
         cameraStream
     ) {
@@ -331,6 +366,178 @@ function stopCamera() {
         camera.srcObject =
             null;
     }
+}
+
+
+/* ==========================================================
+   LIVE CORNER-BLOCK DETECTION
+   ========================================================== */
+
+function setCornerDetectionState(
+    detected
+) {
+
+    pageCornersDetected = detected;
+
+    cameraContainer?.classList.toggle(
+        "page-corners-detected",
+        detected
+    );
+
+    if (cornerDetectionStatus) {
+
+        cornerDetectionStatus.textContent = detected
+            ? "Page detected - all four corner blocks are visible"
+            : "Looking for the four corner blocks...";
+    }
+
+    if (captureButton && !captureButton.hidden) {
+
+        captureButton.disabled = !detected;
+    }
+}
+
+
+function cornerBlockCoverage(
+    pixels,
+    width,
+    height,
+    startX,
+    startY,
+    endX,
+    endY
+) {
+
+    let darkPixels = 0;
+
+    let totalPixels = 0;
+
+    for (let y = startY; y < endY; y += 1) {
+
+        for (let x = startX; x < endX; x += 1) {
+
+            const offset = (y * width + x) * 4;
+
+            const brightness =
+                pixels[offset] * 0.299
+                + pixels[offset + 1] * 0.587
+                + pixels[offset + 2] * 0.114;
+
+            if (brightness < 72) {
+
+                darkPixels += 1;
+            }
+
+            totalPixels += 1;
+        }
+    }
+
+    return darkPixels / Math.max(totalPixels, 1);
+}
+
+
+function hasFourCornerBlocks() {
+
+    const videoWidth = camera.videoWidth;
+
+    const videoHeight = camera.videoHeight;
+
+    if (!videoWidth || !videoHeight) {
+
+        return false;
+    }
+
+    const crop = calculateA4Crop(videoWidth, videoHeight);
+
+    const analysisWidth = 180;
+
+    const analysisHeight = Math.round(
+        analysisWidth / A4_RATIO
+    );
+
+    markerAnalysisCanvas.width = analysisWidth;
+
+    markerAnalysisCanvas.height = analysisHeight;
+
+    const context = markerAnalysisCanvas.getContext(
+        "2d",
+        { willReadFrequently: true }
+    );
+
+    if (!context) {
+
+        return false;
+    }
+
+    context.drawImage(
+        camera,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        analysisWidth,
+        analysisHeight
+    );
+
+    const pixels = context.getImageData(
+        0,
+        0,
+        analysisWidth,
+        analysisHeight
+    ).data;
+
+    const zoneWidth = Math.round(analysisWidth * 0.18);
+
+    const zoneHeight = Math.round(analysisHeight * 0.13);
+
+    const zones = [
+        [0, 0],
+        [analysisWidth - zoneWidth, 0],
+        [0, analysisHeight - zoneHeight],
+        [analysisWidth - zoneWidth, analysisHeight - zoneHeight],
+    ];
+
+    return zones.every(
+        ([x, y]) => cornerBlockCoverage(
+            pixels,
+            analysisWidth,
+            analysisHeight,
+            x,
+            y,
+            x + zoneWidth,
+            y + zoneHeight
+        ) >= 0.015
+    );
+}
+
+
+function monitorCornerBlocks(timestamp) {
+
+    if (!cameraStream || camera.hidden) {
+
+        cornerDetectionFrame = null;
+
+        return;
+    }
+
+    if (timestamp - lastCornerCheckAt >= 250) {
+
+        lastCornerCheckAt = timestamp;
+
+        stableCornerChecks = hasFourCornerBlocks()
+            ? stableCornerChecks + 1
+            : 0;
+
+        setCornerDetectionState(
+            stableCornerChecks >= 2
+        );
+    }
+
+    cornerDetectionFrame = requestAnimationFrame(
+        monitorCornerBlocks
+    );
 }
 
 
@@ -430,6 +637,9 @@ async function openCamera() {
         captureButton.hidden =
             false;
 
+        captureButton.disabled =
+            true;
+
 
         retakeButton.hidden =
             true;
@@ -440,6 +650,16 @@ async function openCamera() {
 
 
         await camera.play();
+
+        lastCornerCheckAt = 0;
+
+        stableCornerChecks = 0;
+
+        setCornerDetectionState(false);
+
+        cornerDetectionFrame = requestAnimationFrame(
+            monitorCornerBlocks
+        );
 
 
     } catch (
@@ -574,6 +794,15 @@ function captureCameraImage() {
 
         showError(
             "Camera is not active."
+        );
+
+        return;
+    }
+
+    if (!pageCornersDetected) {
+
+        showError(
+            "Keep all four black corner blocks inside the guide before capturing."
         );
 
         return;
