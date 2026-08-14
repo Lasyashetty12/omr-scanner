@@ -71,6 +71,12 @@ const cornerDetectionStatus =
     );
 
 
+const documentBoundaryOverlay =
+    document.getElementById(
+        "documentBoundaryOverlay"
+    );
+
+
 const loading =
     document.getElementById(
         "loading"
@@ -173,6 +179,8 @@ let lastCornerCheckAt = 0;
 let stableCornerChecks = 0;
 
 let pageCornersDetected = false;
+
+let autoCaptureTriggered = false;
 
 const markerAnalysisCanvas = document.createElement(
     "canvas"
@@ -332,6 +340,8 @@ function stopCamera() {
 
     pageCornersDetected = false;
 
+    autoCaptureTriggered = false;
+
     cameraContainer?.classList.remove(
         "page-corners-detected"
     );
@@ -398,7 +408,7 @@ function setCornerDetectionState(
 }
 
 
-function cornerBlockCoverage(
+function cornerBlockMeasurement(
     pixels,
     width,
     height,
@@ -411,6 +421,10 @@ function cornerBlockCoverage(
     let darkPixels = 0;
 
     let totalPixels = 0;
+
+    let weightedX = 0;
+
+    let weightedY = 0;
 
     for (let y = startY; y < endY; y += 1) {
 
@@ -426,17 +440,116 @@ function cornerBlockCoverage(
             if (brightness < 72) {
 
                 darkPixels += 1;
+
+                weightedX += x;
+
+                weightedY += y;
             }
 
             totalPixels += 1;
         }
     }
 
-    return darkPixels / Math.max(totalPixels, 1);
+    return {
+        coverage: darkPixels / Math.max(totalPixels, 1),
+        x: darkPixels ? weightedX / darkPixels : 0,
+        y: darkPixels ? weightedY / darkPixels : 0,
+    };
 }
 
 
-function hasFourCornerBlocks() {
+function drawDocumentBoundary(points, detected) {
+
+    if (!documentBoundaryOverlay || !cameraContainer) {
+
+        return;
+    }
+
+    const bounds = cameraContainer.getBoundingClientRect();
+
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    const width = Math.max(1, Math.round(bounds.width * pixelRatio));
+
+    const height = Math.max(1, Math.round(bounds.height * pixelRatio));
+
+    if (
+        documentBoundaryOverlay.width !== width
+        || documentBoundaryOverlay.height !== height
+    ) {
+
+        documentBoundaryOverlay.width = width;
+
+        documentBoundaryOverlay.height = height;
+    }
+
+    const context = documentBoundaryOverlay.getContext("2d");
+
+    if (!context) {
+
+        return;
+    }
+
+    context.setTransform(1, 0, 0, 1, 0, 0);
+
+    context.clearRect(0, 0, width, height);
+
+    if (!points) {
+
+        return;
+    }
+
+    context.setTransform(
+        pixelRatio,
+        0,
+        0,
+        pixelRatio,
+        0,
+        0
+    );
+
+    context.beginPath();
+
+    points.forEach((point, index) => {
+        if (index === 0) {
+
+            context.moveTo(point.x, point.y);
+        } else {
+
+            context.lineTo(point.x, point.y);
+        }
+    });
+
+    context.closePath();
+
+    context.lineWidth = 3;
+
+    context.strokeStyle = detected ? "#31d57a" : "#ffd85a";
+
+    context.shadowColor = "rgba(0, 0, 0, 0.75)";
+
+    context.shadowBlur = 4;
+
+    context.stroke();
+
+    context.fillStyle = detected
+        ? "rgba(49, 213, 122, 0.10)"
+        : "rgba(255, 216, 90, 0.06)";
+
+    context.fill();
+
+    context.shadowBlur = 0;
+
+    points.forEach((point) => {
+        context.beginPath();
+        context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        context.fillStyle = detected ? "#31d57a" : "#ffd85a";
+        context.fill();
+    });
+}
+
+
+function detectDocumentCorners() {
 
     const videoWidth = camera.videoWidth;
 
@@ -444,7 +557,7 @@ function hasFourCornerBlocks() {
 
     if (!videoWidth || !videoHeight) {
 
-        return false;
+        return null;
     }
 
     const crop = calculateA4Crop(videoWidth, videoHeight);
@@ -466,7 +579,7 @@ function hasFourCornerBlocks() {
 
     if (!context) {
 
-        return false;
+        return null;
     }
 
     context.drawImage(
@@ -499,8 +612,8 @@ function hasFourCornerBlocks() {
         [analysisWidth - zoneWidth, analysisHeight - zoneHeight],
     ];
 
-    return zones.every(
-        ([x, y]) => cornerBlockCoverage(
+    const measurements = zones.map(
+        ([x, y]) => cornerBlockMeasurement(
             pixels,
             analysisWidth,
             analysisHeight,
@@ -508,8 +621,22 @@ function hasFourCornerBlocks() {
             y,
             x + zoneWidth,
             y + zoneHeight
-        ) >= 0.015
+        )
     );
+
+    if (!measurements.every(({ coverage }) => coverage >= 0.015)) {
+
+        return null;
+    }
+
+    const displayWidth = cameraContainer.clientWidth;
+
+    const displayHeight = cameraContainer.clientHeight;
+
+    return measurements.map(({ x, y }) => ({
+        x: x / analysisWidth * displayWidth,
+        y: y / analysisHeight * displayHeight,
+    }));
 }
 
 
@@ -526,13 +653,32 @@ function monitorCornerBlocks(timestamp) {
 
         lastCornerCheckAt = timestamp;
 
-        stableCornerChecks = hasFourCornerBlocks()
+        const corners = detectDocumentCorners();
+
+        stableCornerChecks = corners
             ? stableCornerChecks + 1
             : 0;
 
         setCornerDetectionState(
             stableCornerChecks >= 2
         );
+
+        drawDocumentBoundary(
+            corners,
+            stableCornerChecks >= 2
+        );
+
+        if (
+            stableCornerChecks >= 3
+            && !autoCaptureTriggered
+        ) {
+
+            autoCaptureTriggered = true;
+
+            captureCameraImage(true);
+
+            return;
+        }
     }
 
     cornerDetectionFrame = requestAnimationFrame(
@@ -620,6 +766,11 @@ async function openCamera() {
 
         camera.srcObject =
             cameraStream;
+
+        if (documentBoundaryOverlay) {
+
+            documentBoundaryOverlay.hidden = false;
+        }
 
 
         camera.hidden =
@@ -781,7 +932,9 @@ function calculateA4Crop(
    CAPTURE CAMERA
    ========================================================== */
 
-function captureCameraImage() {
+function captureCameraImage(
+    automatic = false
+) {
 
     clearError();
 
@@ -799,7 +952,7 @@ function captureCameraImage() {
         return;
     }
 
-    if (!pageCornersDetected) {
+    if (!pageCornersDetected && !automatic) {
 
         showError(
             "Keep all four black corner blocks inside the guide before capturing."
@@ -946,6 +1099,17 @@ function captureCameraImage() {
 
             capturedPreview.hidden =
                 false;
+
+            if (documentBoundaryOverlay) {
+
+                documentBoundaryOverlay.hidden = true;
+            }
+
+            if (cornerDetectionStatus) {
+
+                cornerDetectionStatus.textContent =
+                    "Document captured. Review it, then select Scan & Evaluate.";
+            }
 
 
             camera.hidden =
