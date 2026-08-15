@@ -2493,14 +2493,6 @@ def _postprocess_known_failure_classes(
         if option in option_data
     ]
 
-    target_blanks = {15, 17, 21, 31, 33, 43, 62, 67, 92, 102, 131, 146, 160, 161, 163, 165, 175, 181, 182, 205, 223, 225, 240}
-    if int(question) in target_blanks:
-        blank_res = dict(decision)
-        blank_res["answer"] = None
-        blank_res["status"] = "blank"
-        blank_res["user_specified_blank"] = True
-        blank_res["outline_blank_rescue"] = True
-        return blank_res
 
     if len(
         options

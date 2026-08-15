@@ -1,0 +1,2796 @@
+/* ================================================================
+   BULK QUESTION IMPORT MODULE v3 (MODULAR PIPELINE ARCHITECTURE)
+   ================================================================ */
+
+(function () {
+  'use strict';
+
+  // ── STATE ──────────────────────────────────────────────────────
+  const state = {
+    rawText: '',
+    parsedQuestions: [],
+    existingQuestions: [],
+
+    // FAST duplicate lookup
+    duplicateMap: new Map(),
+
+    historyStack: [],
+    historyIndex: -1,
+    autoSaveTimer: null,
+    debounceTimer: null,
+    duplicateRequestId: 0,
+    duplicateCheckPromise: Promise.resolve(),
+    wordWrap: true,
+    filterSearch: '',
+    filterType: '',
+    filterDiff: '',
+    filterStatus: '',
+    filterDup: '',
+    editingIndex: null,
+
+    // Prevent duplicate event listeners
+    initialized: false,
+    editorInitialized: false,
+  };
+
+  // ── METADATA PANEL HELPERS ───────────────────────────────────────
+  function getMeta() {
+    const sEl = document.getElementById('bqMetaSubject') || document.getElementById('subject');
+    const kEl = document.getElementById('bqMetaClass') || document.getElementById('klass');
+    const cEl = document.getElementById('bqMetaChapter') || document.getElementById('chapter');
+    const eEl = document.getElementById('bqMetaExam');
+
+    return {
+      subject: sEl && sEl.value ? sEl.value.trim() : 'Physics',
+      klass: kEl && kEl.value ? kEl.value.trim() : '11',
+      chapter: cEl && cEl.value ? cEl.value.trim() : 'General',
+      exams: eEl && eEl.value ? [eEl.value.trim()] : ['NEET'],
+      language: val('bqMetaLanguage') || 'English',
+      source: val('bqMetaSource') || '',
+      referenceBook: val('bqMetaRefBook') || '',
+      author: val('bqMetaAuthor') || '',
+      defaultMarks: val('bqMetaMarks') || '4',
+      negMarks: val('bqMetaNegMarks') || '1',
+      defaultDiff: val('bqMetaDiff') || 'Medium',
+    };
+  }
+  // ================================================================
+  // CHAPTER SOURCE OF TRUTH
+  // ================================================================
+  // The chapter assigned to a question must ALWAYS come from
+  // the Bulk Import dropdown. Imported @chapter/chapter metadata
+  // is allowed and parsed, but it can NEVER override the dropdown.
+  // ================================================================
+
+
+
+  function val(id) {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  }
+
+  // ── QUESTION TYPE LABELS ──────────────────────────────────────────
+  const QTYPE_LABELS = {
+    mcq_single: 'Standard MCQ',
+    mcq_multiple: 'Multiple Correct',
+    statement_based: 'Statement Based',
+    assertion_reason: 'Assertion Reason',
+    match: 'Match the Following',
+    matrix: 'Matrix Match',
+    numerical: 'Numerical / Float',
+    integer: 'Integer Type',
+    true_false: 'True / False',
+    case_study: 'Case Study / Passage',
+    paragraph: 'Paragraph Based',
+    comprehension: 'Comprehension',
+    diagram: 'Diagram Based',
+    image: 'Image Based',
+    table: 'Table Based',
+    graph: 'Graph Based',
+    sequence: 'Sequence Based',
+    reasoning: 'Reasoning Based',
+    data_interpretation: 'Data Interpretation',
+    fill_blank: 'Fill in the Blank',
+    multi_part: 'Multi-Part Question',
+  };
+
+  // ── OPTION & BOUNDARY PATTERNS ────────────────────────────────────
+  const OPT_PATTERNS = [
+    /^\s*\(([A-Da-d1-4])\)\s+/,      // (A) (1)
+    /^\s*([A-Da-d])[.\):]\s+/,      // A. A) A: (Letters only for standalone)
+    /^\s*([a-d])\s*[\)\.]\s+/,      // a) b.
+    /^\s*\[([A-Da-d1-4])\]\s+/,     // [A]
+    /^\s*Option\s+([A-Da-d1-4])\s*[:\.]\s*/i,
+  ];
+
+  function detectOptionKey(line, isFirstLine = false) {
+    if (isFirstLine) return null; // First line of question is never an option!
+    for (const pat of OPT_PATTERNS) {
+      const m = line.match(pat);
+      if (m) {
+        let key = m[1].toUpperCase();
+        if (key === '1') key = 'A';
+        else if (key === '2') key = 'B';
+        else if (key === '3') key = 'C';
+        else if (key === '4') key = 'D';
+        return key;
+      }
+    }
+    return null;
+  }
+
+  function stripOptionPrefix(line) {
+    for (const pat of OPT_PATTERNS) {
+      if (pat.test(line)) return line.replace(pat, '').trim();
+    }
+    return line.trim();
+  }
+
+  const Q_START_PATTERNS = [
+    /^\s*(?:Q|Question|Que|Problem|Item)\s*#?\s*(\d{1,4})?\s*[:\.]?\s*/i,
+    /^\s*@question\s*[:\.]?\s*/i,
+  ];
+
+  function looksLikeQStart(line) {
+    return Q_START_PATTERNS.some(p => p.test(line));
+  }
+
+  function stripQNumber(line) {
+    for (const p of Q_START_PATTERNS) {
+      const m = line.match(p);
+      if (m) return line.replace(p, '').trim();
+    }
+    return line.trim();
+  }
+
+  const ANS_PATTERNS = [
+    /^\s*(?:Answer|Ans|Correct\s*Answer|Correct\s*Option|Ans\.:?)\s*[:\.\-]?\s*/i,
+  ];
+
+  const SOL_PATTERNS = [
+    /^\s*(?:Solution|Detailed\s*Solution|Explanation|Reason|Working|Answer\s*Explanation|Sol\.|Expl\.)\s*[:\.\-]?/i,
+  ];
+
+  const IGNORE_PATTERNS = [
+    /^\s*Page\s+\d+\s*of\s*\d+/i,
+    /^\s*\d+\s*$/,
+    /^\s*Coaching\s+Institute\s+Question\s+Bank/i,
+  ];
+
+  function shouldIgnoreLine(line) {
+    return IGNORE_PATTERNS.some(p => p.test(line));
+  }
+
+  function isAnsLine(line) {
+    return ANS_PATTERNS.some(p => p.test(line));
+  }
+
+  function isSolLine(line) {
+    return SOL_PATTERNS.some(p => p.test(line));
+  }
+
+  function stripAnsPrefix(line) {
+    for (const p of ANS_PATTERNS) {
+      if (p.test(line)) return line.replace(p, '').trim();
+    }
+    return line.trim();
+  }
+
+  function stripSolPrefix(line) {
+    for (const p of SOL_PATTERNS) {
+      if (p.test(line)) return line.replace(p, '').trim();
+    }
+    return line.trim();
+  }
+
+  // ── INLINE METADATA TAG EXTRACTOR (@concept, @type, @difficulty, etc.) ──
+  function extractInlineMetadata(lines) {
+    const meta = {
+      concept: null,
+      type: null,
+      difficulty: null,
+      subject: null,
+      chapter: null,
+      klass: null,
+      cleanLines: []
+    };
+
+    const tagPatterns = [
+      { key: 'concept', regex: /^\s*(?:@concept|@topic|concept|topic|sub-topic)\s*[:=]\s*(.+)/i },
+      { key: 'type', regex: /^\s*(?:@type|@qtype|type|question\s*type)\s*[:=]\s*(.+)/i },
+      { key: 'difficulty', regex: /^\s*(?:@difficulty|@level|difficulty|level)\s*[:=]\s*(.+)/i },
+      { key: 'subject', regex: /^\s*(?:@subject|subject)\s*[:=]\s*(.+)/i },
+      { key: 'chapter', regex: /^\s*(?:@chapter|chapter)\s*[:=]\s*(.+)/i },
+      { key: 'klass', regex: /^\s*(?:@class|@klass|class|grade)\s*[:=]\s*(.+)/i },
+    ];
+
+    for (const item of lines) {
+      const text = typeof item === 'string' ? item : item.text;
+      let isTag = false;
+      for (const { key, regex } of tagPatterns) {
+        const match = text.match(regex);
+        if (match) {
+          meta[key] = match[1].trim();
+          isTag = true;
+          break;
+        }
+      }
+      if (!isTag) {
+        meta.cleanLines.push(item);
+      }
+    }
+
+    return meta;
+  }
+
+  // ── COMPREHENSIVE CONCEPT DETECTION DICTIONARY ─────────────────────
+  const CHAPTER_CONCEPTS_MAP = {
+    'Alternating Current': ['lcr circuit', 'phasor', 'impedance', 'reactance', 'inductor', 'capacitor', 'rms voltage', 'resonance', 'peak voltage', 'power factor', 'transformer', 'ac generator'],
+    'Electrostatics': ['coulomb law', 'electric field', 'potential difference', 'capacitor', 'gauss law', 'electric charge', 'electric dipole', 'equipotential'],
+    'Kinematics': ['velocity', 'acceleration', 'displacement', 'projectile motion', 'relative motion', 'speed', 'distance', 'v-t graph', 'x-t graph'],
+    'Laws of Motion': ['newtons laws', 'friction', 'tension', 'inertia', 'impulse', 'momentum', 'pulley system', 'free body diagram'],
+    'Thermodynamics': ['entropy', 'enthalpy', 'gibbs free energy', 'hess law', 'internal energy', 'spontaneous process', 'first law', 'second law', 'heat capacity', 'calorimetry'],
+    'Periodic Classification': ['electronegativity', 'ionization energy', 'atomic radius', 'electron affinity', 'pauling scale', 'mendeleev', 'modern periodic law', 's-block', 'p-block', 'd-block', 'f-block', 'periodicity', 'valency', 'effective nuclear charge', 'shielding effect'],
+    'Chemical Bonding': ['hybridization', 'vsepr', 'dipole moment', 'bond order', 'molecular orbital theory', 'mot', 'resonance', 'lewis structure', 'covalent bond', 'ionic bond', 'hydrogen bonding', 'lattice energy', 'diamagnetic', 'paramagnetic'],
+    'Atomic Structure': ['orbitals', 'quantum numbers', 'schrodinger equation', 'bohr model', 'de broglie', 'heisenberg uncertainty', 'photoelectric effect', 'spectrum', 'rydberg constant'],
+    'Cell Biology': ['mitosis', 'meiosis', 'cell cycle', 'organelles', 'cell membrane', 'nucleus', 'mitochondria', 'ribosome', 'endoplasmic reticulum'],
+    'Genetics': ['mendelian genetics', 'dna', 'rna', 'replication', 'transcription', 'translation', 'alleles', 'genes', 'chromosomes', 'pedigree analysis'],
+    'Calculus': ['derivatives', 'integrals', 'limits', 'continuity', 'differential equations', 'rate of change', 'maxima and minima'],
+  };
+
+  function detectConcept(qText, selectedChapter, inlineConcept) {
+    if (inlineConcept) {
+      return { concept: inlineConcept, confidence: 100 };
+    }
+
+    const text = qText.toLowerCase();
+
+    if (selectedChapter && selectedChapter !== 'General' && CHAPTER_CONCEPTS_MAP[selectedChapter]) {
+      const keywords = CHAPTER_CONCEPTS_MAP[selectedChapter];
+      const matches = keywords.filter(kw => text.includes(kw));
+      if (matches.length > 0) {
+        const best = matches[0].split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { concept: best, confidence: Math.min(95, 75 + matches.length * 5) };
+      }
+      return { concept: selectedChapter, confidence: 70 };
+    }
+
+    for (const [chap, keywords] of Object.entries(CHAPTER_CONCEPTS_MAP)) {
+      const matches = keywords.filter(kw => text.includes(kw));
+      if (matches.length > 0) {
+        const best = matches[0].split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { concept: best, confidence: Math.min(95, 70 + matches.length * 5) };
+      }
+    }
+
+    return { concept: (selectedChapter && selectedChapter !== 'General') ? selectedChapter : 'General Concept', confidence: 60 };
+  }
+
+  function detectDifficulty(qText, options, solution, inlineDiff) {
+    if (inlineDiff) {
+      const formatted = inlineDiff.charAt(0).toUpperCase() + inlineDiff.slice(1).toLowerCase();
+      if (['Easy', 'Medium', 'Hard'].includes(formatted)) return formatted;
+    }
+
+    let score = 0;
+    const combined = (qText + ' ' + (solution || '')).toLowerCase();
+    if (qText.length > 350) score += 2;
+    else if (qText.length > 180) score += 1;
+
+    if (/calculate|determine|evaluate|find the value|derived/.test(combined)) score += 1;
+    if (/\\frac|\\int|\\sum|\\sqrt|\\matrix/.test(combined)) score += 1;
+    if (Object.keys(options || {}).length === 0) score += 1;
+    if ((solution || '').length > 250) score += 1;
+
+    if (score >= 4) return 'Hard';
+    if (score >= 2) return 'Medium';
+    return 'Easy';
+  }
+
+  // ================================================================
+  // STAGE 1: QUESTION BOUNDARY DETECTION
+  // ================================================================
+  function blockHasQuestionBody(block) {
+    if (!block || !block.lines || block.lines.length === 0) return false;
+    const hasAnsOrSol = block.lines.some(l => isAnsLine(l.text) || isSolLine(l.text));
+    if (hasAnsOrSol) return true;
+    const hasOpts = block.lines.some((l, idx) => detectOptionKey(l.text, idx === 0));
+    if (hasOpts) return true;
+
+    const nonTagLines = block.lines.filter(l => {
+      const t = l.text.trim();
+      if (/^\s*(?:@chapter|chapter|unit|@topic|topic|@concept|concept|sub-topic|@type|@qtype|type|question\s*type|@subject|subject|@class|@klass|class|grade|@difficulty|@level|difficulty|level)\s*[:=]/i.test(t)) return false;
+      if (/^\s*(?:Question|Q|Que|Problem|Item)\s*[:\.]?\s*$/i.test(t)) return false;
+      return true;
+    });
+    return nonTagLines.length > 0;
+  }
+
+  function splitIntoRawBlocks(rawText) {
+    const lines = rawText.split('\n');
+    const blocks = [];
+    let currentBlock = null;
+    let inColumnSection = false;
+    let inAnsOrSolSection = false;
+
+    function isDelimiterLine(line) {
+      return /^\s*(?:-{3,}|={3,}|_{3,}|\*{3,}|#{3,})\s*$/.test(line);
+    }
+
+    function isBlockStartHeader(line) {
+      if (/^\s*(?:@topic|topic|@concept|concept|sub-topic)\s*[:=]/i.test(line)) return true;
+      if (/^\s*(?:@type|@qtype|type|question\s*type)\s*[:=]/i.test(line)) return true;
+      if (/^\s*(?:@subject|subject|@class|@klass|class|grade|@chapter|chapter)\s*[:=]/i.test(line)) return true;
+      if (/^\s*@question\b/i.test(line)) return true;
+      if (/^\s*(?:Q|Question|Que|Problem|Item)\s*#?\s*\d{1,4}\b/i.test(line)) return true;
+      if (/^\s*\d{1,4}\s*[\.:\)]\s+/i.test(line)) return true;
+      return false;
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const rawLine = lines[i];
+      const trimmed = rawLine.trim();
+
+      if (!trimmed) continue;
+
+      if (isDelimiterLine(trimmed)) {
+        if (currentBlock && currentBlock.lines.length > 0) {
+          blocks.push(currentBlock);
+          currentBlock = null;
+        }
+        inColumnSection = false;
+        inAnsOrSolSection = false;
+        continue;
+      }
+
+      if (shouldIgnoreLine(trimmed)) continue;
+
+      if (getFlexibleMatchColumnSide(trimmed)) {
+        inColumnSection = true;
+      }
+      if (isAnsLine(trimmed) || isSolLine(trimmed)) {
+        inAnsOrSolSection = true;
+        inColumnSection = false;
+      }
+
+      let isNewQ = false;
+      if (!currentBlock) {
+        isNewQ = true;
+      } else {
+        const isHeader = isBlockStartHeader(trimmed);
+
+        if (isHeader) {
+          const isNumItem = /^\s*\d{1,4}\s*[\.:\)]\s+/i.test(trimmed);
+          if (isNumItem && inColumnSection && !inAnsOrSolSection) {
+            isNewQ = false;
+          } else {
+            isNewQ = blockHasQuestionBody(currentBlock);
+          }
+        } else if (/^\s*(?:Question|Q|Que|Problem|Item)\s*[:\.]?\s*$/i.test(trimmed)) {
+          const hasAnsOrSol = inAnsOrSolSection || currentBlock.lines.some(l => isAnsLine(l.text) || isSolLine(l.text));
+          const hasOpts = currentBlock.lines.some((l, idx) => detectOptionKey(l.text, idx === 0));
+          if (hasAnsOrSol || hasOpts) {
+            isNewQ = true;
+          }
+        }
+      }
+
+      if (isNewQ) {
+        if (currentBlock && currentBlock.lines.length > 0) {
+          blocks.push(currentBlock);
+        }
+        currentBlock = {
+          lines: [{ text: trimmed, lineNumber: i + 1 }],
+          startLine: i + 1
+        };
+        inColumnSection = false;
+        inAnsOrSolSection = false;
+      } else {
+        currentBlock.lines.push({ text: trimmed, lineNumber: i + 1 });
+      }
+    }
+    if (currentBlock && currentBlock.lines.length > 0) {
+      blocks.push(currentBlock);
+    }
+    return blocks;
+  }
+
+  // ================================================================
+  // STAGE 2: QUESTION TYPE DETECTION
+  // ================================================================
+  function detectBlockType(block) {
+    const rawLines = block.lines.map(l => l.text);
+    const inline = extractInlineMetadata(rawLines);
+
+    if (inline.type) {
+      const rawType = inline.type.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+      const typeMap = {
+        mcq: 'mcq_single',
+        mcq_single: 'mcq_single',
+        single_correct: 'mcq_single',
+        standard_mcq: 'mcq_single',
+        mcq_single_correct: 'mcq_single',
+        single: 'mcq_single',
+        mcq_multiple: 'mcq_multiple',
+        multiple_correct: 'mcq_multiple',
+        mcq_multiple_correct: 'mcq_multiple',
+        multiple: 'mcq_multiple',
+        matrix: 'matrix',
+        matrix_match: 'matrix',
+        matrix_match_question: 'matrix',
+        match: 'match',
+        match_following: 'match',
+        match_the_following: 'match',
+        matching: 'match',
+        assertion_reason: 'assertion_reason',
+        assertion_and_reason: 'assertion_reason',
+        assertion_reason_question: 'assertion_reason',
+        assertion: 'assertion_reason',
+        statement_based: 'statement_based',
+        statement_based_question: 'statement_based',
+        statement: 'statement_based',
+        numerical: 'numerical',
+        numerical_integer_type: 'numerical',
+        numerical_type: 'numerical',
+        float: 'numerical',
+        integer: 'integer',
+        integer_type: 'integer',
+        integer_question: 'integer',
+        true_false: 'true_false',
+        true_or_false: 'true_false',
+        tf: 'true_false',
+        case_study: 'case_study',
+        case_study_passage: 'case_study',
+        passage: 'case_study',
+        comprehension: 'case_study',
+        diagram: 'diagram',
+        diagram_based: 'diagram',
+        diagram_based_question: 'diagram',
+        graph: 'graph',
+        graph_based: 'graph',
+        table: 'table',
+      };
+      if (typeMap[rawType]) return typeMap[rawType];
+    }
+
+    const text = block.lines.map(l => l.text).join('\n');
+    const matchColumnSides = block.lines
+      .map(line => getFlexibleMatchColumnSide(line.text))
+      .filter(Boolean);
+
+    const hasFlexibleMatchColumns =
+      matchColumnSides.includes('left') &&
+      matchColumnSides.includes('right');
+
+    // 1. Matrix Match
+    if (
+      hasFlexibleMatchColumns &&
+      (
+        /\b[A-D]\s*(?:→|->|=>|-|:)\s*[1-4P-S]/i.test(text) ||
+        /matrix\s+match/i.test(text)
+      )
+    ) {
+      return 'matrix';
+    }
+
+    // 2. Match the Following
+    if (hasFlexibleMatchColumns) {
+      return 'match';
+    }
+
+    // 3. Assertion & Reason
+    if (/\b(assertion|reason)\b.*\b(assertion|reason)\b/is.test(text) || /^A:\s*Assertion/i.test(text) || /\bassertion\s*\([aA]\)/i.test(text)) {
+      return 'assertion_reason';
+    }
+
+    // 4. Statement Based
+    if (/\bstatement\s+(i|ii|1|2)\b/i.test(text)) {
+      return 'statement_based';
+    }
+
+    // 5. Case Study / Paragraph / Comprehension
+    if (/\b(case\s+study|read\s+the\s+following\s+passage|comprehension|passage\s+based)\b/i.test(text)) {
+      return 'case_study';
+    }
+
+    // 6. True / False
+    if (/\btrue\b.*\bfalse\b/i.test(text) || block.lines.some(l => /^\s*(?:Ans|Answer)?\s*[:\.-]?\s*(True|False)\s*$/i.test(l.text))) {
+      return 'true_false';
+    }
+
+    // 7. Multiple Correct
+    if (/more\s+than\s+one\s+correct|multiple\s+correct/i.test(text) || /\bAns(?:wer)?\s*[:\.-]?\s*\(?[A-D]\s*[,;\s]\s*[A-D]\b/i.test(text)) {
+      return 'mcq_multiple';
+    }
+
+    // 8. Diagram / Image
+    if (/\b(diagram|circuit|figure|refer\s+to\s+the\s+image)\b/i.test(text) || /\{\{IMG::/i.test(text)) {
+      return 'diagram';
+    }
+
+    // 9. Graph
+    if (/\b(graph|curve|plot|v-t\s+graph|p-v\s+diagram)\b/i.test(text)) {
+      return 'graph';
+    }
+
+    // 10. Table
+    if (/\|.*\|.*\|/.test(text) || /\btable\b/i.test(text)) {
+      return 'table';
+    }
+
+    // 11. Numerical / Integer (No A-D options found)
+    const hasOptions = block.lines.some((l, idx) => detectOptionKey(l.text, idx === 0));
+    if (!hasOptions) {
+      const hasAnsNum = block.lines.some(l => isAnsLine(l.text) && /[-+]?\d+/.test(l.text));
+      if (hasAnsNum || /\b(numerical|integer|find\s+the\s+value|calculate)\b/i.test(text)) {
+        const ansLine = block.lines.find(l => isAnsLine(l.text));
+        const rawAns = ansLine ? stripAnsPrefix(ansLine.text) : '';
+        return /^\d+$/.test(rawAns.trim()) ? 'integer' : 'numerical';
+      }
+    }
+
+    // Default Fallback
+    return 'mcq_single';
+  }
+
+  // ================================================================
+  // STAGE 3: MODULAR PARSER REGISTRY & INDEPENDENT DEDICATED PARSERS
+  // ================================================================
+
+  class BaseQuestionParser {
+    createBaseObject(block, meta, overrides = {}) {
+      const inline = extractInlineMetadata(block.lines);
+      const qText = overrides.question || '';
+      const solText = overrides.solutionText || '';
+      const opts = overrides.options || {};
+
+      // Priority: Inline @tag > Overrides > Meta panel default
+      const finalSubject = inline.subject || overrides.subject || meta.subject;
+      const finalKlass = inline.klass || overrides.klass || meta.klass;
+      const finalChapter = meta.chapter;
+
+      const { concept, confidence } = detectConcept(qText, finalChapter, inline.concept);
+      const difficulty = detectDifficulty(qText, opts, solText, inline.difficulty || overrides.difficulty);
+
+      return {
+        subject: finalSubject,
+        klass: finalKlass,
+        chapter: finalChapter,
+        topic: concept,
+        exams: meta.exams,
+        language: meta.language,
+        source: meta.source,
+        referenceBook: meta.referenceBook,
+        author: meta.author,
+        marks: meta.defaultMarks,
+        negMarks: meta.negMarks,
+        difficulty: difficulty,
+        qType: inline.type ? detectBlockType(block) : (overrides.qType || 'mcq_single'),
+        question: qText,
+        optA: overrides.optA || opts['A'] || '',
+        optB: overrides.optB || opts['B'] || '',
+        optC: overrides.optC || opts['C'] || '',
+        optD: overrides.optD || opts['D'] || '',
+        answer: overrides.answer || '',
+        answers: overrides.answers || null,
+        matrixAnswer: overrides.matrixAnswer || null,
+        matchOptions: overrides.matchOptions || null,
+        columnA: overrides.columnA || null,
+        columnB: overrides.columnB || null,
+        assertion: overrides.assertion || '',
+        reason: overrides.reason || '',
+        statement1: overrides.statement1 || '',
+        statement2: overrides.statement2 || '',
+        numAnswer: overrides.numAnswer || '',
+        solutionText: solText,
+        concept: concept,
+        confidenceScore: confidence,
+        startLine: block.startLine,
+        errors: [],
+        isValid: true,
+        isDuplicate: false,
+        ignored: false,
+        dupAction: 'skip',
+        collapsed: false,
+      };
+    }
+
+    parseStandard(block, meta) {
+      const inline = extractInlineMetadata(block.lines);
+      const lines = inline.cleanLines;
+      let qLines = [];
+      let solLines = [];
+      let options = {};
+      let answer = '';
+      let mode = 'q';
+
+      for (let i = 0; i < lines.length; i++) {
+        let line = (typeof lines[i] === 'string' ? lines[i] : lines[i].text).trim();
+        if (!line) continue;
+
+        if (i === 0 || mode === 'q') {
+          if (/^\s*(?:Question|Q|Que|Problem|Item)\s*[:\.]?\s*$/i.test(line)) {
+            continue;
+          }
+          const stripped = stripQNumber(line);
+          if (stripped !== line) line = stripped;
+          if (!line) continue;
+        }
+
+        if (/^\s*(?:Options|Choices|Select\s+Option)\s*[:\.-]?\s*$/i.test(line)) {
+          mode = 'opt';
+          continue;
+        }
+
+        if (isAnsLine(line)) {
+          mode = 'ans';
+          let rawAns = stripAnsPrefix(line).toUpperCase();
+          const m = rawAns.match(/([A-D]|TRUE|FALSE|[-+]?\d+(?:\.\d+)?)/i);
+          if (m) answer = m[1].toUpperCase();
+          continue;
+        }
+
+        if (isSolLine(line)) {
+          mode = 'sol';
+          const rest = stripSolPrefix(line);
+          if (rest) solLines.push(rest);
+          continue;
+        }
+
+        const optKey = detectOptionKey(line, i === 0);
+        if (optKey) {
+          mode = 'opt';
+          options[optKey] = stripOptionPrefix(line);
+          continue;
+        }
+
+        if (mode === 'sol') {
+          solLines.push(line);
+        } else if (mode === 'opt') {
+          const lastKey = Object.keys(options).pop();
+          if (lastKey) options[lastKey] += ' ' + line;
+          else qLines.push(line);
+        } else {
+          qLines.push(line);
+        }
+      }
+
+      const qText = qLines.join('\n').trim();
+      return this.createBaseObject(block, meta, {
+        question: qText,
+        options,
+        answer,
+        solutionText: solLines.join('\n').trim(),
+      });
+    }
+  }
+
+  // 1. Standard MCQ Parser
+  class StandardMCQParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const res = this.parseStandard(block, meta);
+      res.qType = 'mcq_single';
+      return res;
+    }
+  }
+
+  // 2. Multiple Correct Parser
+  class MultipleCorrectParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const res = this.parseStandard(block, meta);
+      res.qType = 'mcq_multiple';
+
+      const rawAns = res.answer || block.lines.map(l => l.text).join('\n');
+      const matches = rawAns.match(/[A-D]/gi) || [];
+      const uniqueAnswers = Array.from(new Set(matches.map(m => m.toUpperCase())));
+
+      if (uniqueAnswers.length > 0) {
+        res.answers = uniqueAnswers;
+        res.answer = uniqueAnswers.join(', ');
+      }
+      return res;
+    }
+  }
+
+  // 3. Assertion Reason Parser
+  // 3. Assertion Reason Parser
+  class AssertionReasonParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const inline = extractInlineMetadata(block.lines);
+      const lines = inline.cleanLines;
+
+      let assertion = '';
+      let reason = '';
+      let answer = '';
+      let options = {};
+      let solLines = [];
+      let rawQuestionLines = [];
+
+      const defaultAROptions = {
+        A: 'Both Assertion (A) and Reason (R) are true and Reason (R) is the correct explanation of Assertion (A).',
+        B: 'Both Assertion (A) and Reason (R) are true but Reason (R) is NOT the correct explanation of Assertion (A).',
+        C: 'Assertion (A) is true but Reason (R) is false.',
+        D: 'Assertion (A) is false but Reason (R) is true.'
+      };
+
+      let mode = 'question';
+
+      for (let i = 0; i < lines.length; i++) {
+        let line = (
+          typeof lines[i] === 'string'
+            ? lines[i]
+            : lines[i].text
+        ).trim();
+
+        if (!line) continue;
+
+        if (i === 0) {
+          line = stripQNumber(line);
+        }
+
+        // --------------------------------------------------
+        // ASSERTION
+        // --------------------------------------------------
+        const aMatch = line.match(
+          /^(?:Assertion|Assertion\s*\(A\)|\(A\)|A)\s*[:.\-–—)]?\s*(.*)$/i
+        );
+
+        if (aMatch) {
+          mode = 'assertion';
+
+          if (aMatch[1].trim()) {
+            assertion = aMatch[1].trim();
+          }
+
+          continue;
+        }
+
+        // --------------------------------------------------
+        // REASON
+        // --------------------------------------------------
+        const rMatch = line.match(
+          /^(?:Reason|Reason\s*\(R\)|\(R\)|R)\s*[:.\-–—)]?\s*(.*)$/i
+        );
+
+        if (rMatch) {
+          mode = 'reason';
+
+          if (rMatch[1].trim()) {
+            reason = rMatch[1].trim();
+          }
+
+          continue;
+        }
+
+        // --------------------------------------------------
+        // ANSWER
+        // --------------------------------------------------
+        if (isAnsLine(line)) {
+          const rawAns = stripAnsPrefix(line).trim();
+
+          const m = rawAns.match(/\b([A-D])\b/i);
+
+          if (m) {
+            answer = m[1].toUpperCase();
+          }
+
+          continue;
+        }
+
+        // --------------------------------------------------
+        // SOLUTION
+        // --------------------------------------------------
+        if (isSolLine(line)) {
+          mode = 'solution';
+
+          const rest = stripSolPrefix(line);
+
+          if (rest) {
+            solLines.push(rest);
+          }
+
+          continue;
+        }
+
+        if (mode === 'solution') {
+          solLines.push(line);
+          continue;
+        }
+
+        // --------------------------------------------------
+        // OPTIONS
+        // --------------------------------------------------
+        const optKey = detectOptionKey(line, false);
+
+        if (optKey) {
+          const value = stripOptionPrefix(line);
+
+          if (value) {
+            options[optKey] = value;
+          }
+
+          mode = 'options';
+          continue;
+        }
+
+        // --------------------------------------------------
+        // CONTINUATION OF ASSERTION
+        // --------------------------------------------------
+        if (mode === 'assertion') {
+          assertion += (assertion ? ' ' : '') + line;
+          continue;
+        }
+
+        // --------------------------------------------------
+        // CONTINUATION OF REASON
+        // --------------------------------------------------
+        if (mode === 'reason') {
+          reason += (reason ? ' ' : '') + line;
+          continue;
+        }
+
+        rawQuestionLines.push(line);
+      }
+
+      // --------------------------------------------------
+      // FALLBACK EXTRACTION FROM RAW TEXT
+      // --------------------------------------------------
+      const joined = rawQuestionLines.join('\n');
+
+      if (!assertion) {
+        const m = joined.match(
+          /(?:Assertion\s*\(A\)|Assertion|\(A\))\s*[:.\-–—)]?\s*([\s\S]*?)(?=\n\s*(?:Reason\s*\(R\)|Reason|\(R\))\b)/i
+        );
+
+        if (m) {
+          assertion = m[1].trim();
+        }
+      }
+
+      if (!reason) {
+        const m = joined.match(
+          /(?:Reason\s*\(R\)|Reason|\(R\))\s*[:.\-–—)]?\s*([\s\S]*?)(?=\n\s*(?:\([A-D]\)|[A-D][.):]))/i
+        );
+
+        if (m) {
+          reason = m[1].trim();
+        }
+      }
+
+      // --------------------------------------------------
+      // USE DEFAULT ASSERTION-REASON OPTIONS
+      // --------------------------------------------------
+      options = {
+        A: options.A || defaultAROptions.A,
+        B: options.B || defaultAROptions.B,
+        C: options.C || defaultAROptions.C,
+        D: options.D || defaultAROptions.D
+      };
+
+      const qText =
+        assertion || reason
+          ? `Assertion: ${assertion}\nReason: ${reason}`
+          : joined;
+
+      return this.createBaseObject(block, meta, {
+        qType: 'assertion_reason',
+
+        question: qText,
+
+        assertion,
+        reason,
+
+        optA: options.A,
+        optB: options.B,
+        optC: options.C,
+        optD: options.D,
+
+        options,
+
+        answer: answer || '',
+
+        solutionText: solLines.join('\n').trim()
+      });
+    }
+  }
+
+  // 4. Statement Based Parser
+  // 4. Statement Based Parser
+  class StatementBasedParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const res = this.parseStandard(block, meta);
+      res.qType = 'statement_based';
+
+      const text = String(res.question || '')
+        .replace(/\r\n?/g, '\n')
+        .trim();
+
+      // Supports:
+      // Statement I:
+      // Statement-II:
+      // Statement-1:
+      // Statement 2:
+      // Statement (I):
+      const s1Match = text.match(
+        /(?:^|\n)\s*@?Statement\s*[-–—]?\s*\(?\s*(?:I|1|A)\s*\)?\s*[:.\-)—]?\s*([\s\S]*?)(?=\n\s*@?Statement\s*[-–—]?\s*\(?\s*(?:II|2|B)\s*\)?\b)/i
+      );
+
+      const s2Match = text.match(
+        /(?:^|\n)\s*@?Statement\s*[-–—]?\s*\(?\s*(?:II|2|B)\s*\)?\s*[:.\-)—]?\s*([\s\S]*?)$/i
+      );
+
+      if (s1Match) {
+        res.statement1 = s1Match[1].trim();
+      }
+
+      if (s2Match) {
+        res.statement2 = s2Match[1].trim();
+      }
+
+      // Keep a safe question representation
+      if (res.statement1 || res.statement2) {
+        res.question =
+          'Statement I: ' + (res.statement1 || '') +
+          '\nStatement II: ' + (res.statement2 || '');
+      }
+
+      return res;
+    }
+  }
+  const MATCH_COLUMN_LEFT_LABELS = new Set([
+    'a', '1', 'i', 'one', 'first', 'left'
+  ]);
+
+  const MATCH_COLUMN_RIGHT_LABELS = new Set([
+    'b', '2', 'ii', 'two', 'second', 'right'
+  ]);
+
+  function getFlexibleMatchColumnSide(line) {
+    const text = String(line || '')
+      .replace(/\*\*/g, '')
+      .trim();
+
+    const match = text.match(
+      /^(?:column|list)\s*[-–—:]?\s*[([{]?\s*([A-Za-z]+|\d+)\s*[)\]}]?\s*[:.\-–—]?\s*$/i
+    );
+
+    if (!match) return '';
+
+    const label = match[1].toLowerCase();
+
+    if (MATCH_COLUMN_LEFT_LABELS.has(label)) {
+      return 'left';
+    }
+
+    if (MATCH_COLUMN_RIGHT_LABELS.has(label)) {
+      return 'right';
+    }
+
+    return '';
+  }
+  function parseFlexibleMatchRow(line) {
+
+    const text = String(line || '').trim();
+
+    if (!text) return null;
+
+    const match = text.match(
+      /^\s*(?:Row\s+)?(?:\(\s*([A-Za-z0-9]+)\s*\)|\[\s*([A-Za-z0-9]+)\s*\]|([A-Za-z0-9]+))\s*(?:[.:\-–—)]\s*|\s+)(.+)$/i
+    );
+
+    if (!match) return null;
+
+    return {
+      label: (match[1] || match[2] || match[3] || '').trim(),
+      value: (match[4] || '').trim()
+    };
+  }
+  // 5. Matrix Match Parser (DEDICATED MATRIX ENGINE)
+  class MatrixMatchParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const inline = extractInlineMetadata(block.lines);
+      const lines = inline.cleanLines;
+      let qLines = [];
+      let col1 = [];
+      let col2 = [];
+      let solLines = [];
+      let matrixAnswerMap = {};
+      let optionCombinations = {};
+      let correctAnswer = '';
+      let mode = 'q';
+
+      for (let i = 0; i < lines.length; i++) {
+        let line = (typeof lines[i] === 'string' ? lines[i] : lines[i].text).trim();
+        if (!line) continue;
+
+        if (i === 0) {
+          line = stripQNumber(line);
+        }
+
+        if (/^\s*(?:Option\s+Combinations?|Options|Choices)\s*[:.-]?\s*$/i.test(line)) {
+          mode = 'options';
+          continue;
+        }
+
+        if (isAnsLine(line)) {
+          mode = 'ans';
+          const rawAnswer = stripAnsPrefix(line).trim();
+          const singleOption = rawAnswer.match(/^\(?([A-D])\)?$/i);
+          if (singleOption) correctAnswer = singleOption[1].toUpperCase();
+          else this.extractMatrixPair(rawAnswer, matrixAnswerMap);
+          continue;
+        }
+
+        if (isSolLine(line)) {
+          mode = 'sol';
+          const rest = stripSolPrefix(line);
+          if (rest) solLines.push(rest);
+          continue;
+        }
+
+        if (mode === 'ans') {
+          if (/^\s*[A-D]\s*(?:→|->|=>|-|:)\s*[1-4]/i.test(line)) {
+            this.extractMatrixPair(line, matrixAnswerMap);
+          } else if (isSolLine(line)) {
+            mode = 'sol';
+            solLines.push(stripSolPrefix(line));
+          }
+          continue;
+        }
+
+        if (mode === 'sol') {
+          solLines.push(line);
+          continue;
+        }
+
+        const matchColumnSide = getFlexibleMatchColumnSide(line);
+
+        if (matchColumnSide === 'left') {
+          mode = 'col1';
+          continue;
+        }
+
+        if (matchColumnSide === 'right') {
+          mode = 'col2';
+          continue;
+        }
+
+        // Header-free row format:
+        // Row 1 ... Row 4 belong to Column A.
+        // Row P ... Row S belong to Column B.
+        const numberedRow = line.match(/^\s*Row\s*([1-4])\s*[:.\-)—]\s*(.+)$/i);
+        if (numberedRow) {
+          col1[Number(numberedRow[1]) - 1] = numberedRow[2].trim();
+          mode = 'rows';
+          continue;
+        }
+
+        const letterRow = line.match(/^\s*Row\s*([P-S])\s*[:.\-)—]\s*(.+)$/i);
+        if (letterRow) {
+          col2[letterRow[1].toUpperCase().charCodeAt(0) - 80] = letterRow[2].trim();
+          mode = 'rows';
+          continue;
+        }
+
+        const taggedOption = line.match(/^\s*@?option\s*([A-D])\s*[:.=]\s*(.+)$/i);
+        const detectedOption = detectOptionKey(line, false);
+        const isLetterOptionLine = /^\s*(?:\([A-D]\)|[A-D][.):]|\[[A-D]\]|Option\s+[A-D]\b)/i.test(line);
+        if (taggedOption || (detectedOption && isLetterOptionLine && (mode === 'options' || (mode === 'col2' && col2.length > 0)))) {
+          const key = taggedOption ? taggedOption[1].toUpperCase() : detectedOption;
+          optionCombinations[key] = taggedOption ? taggedOption[2].trim() : stripOptionPrefix(line);
+          mode = 'options';
+          continue;
+        }
+
+        if (mode === 'options') {
+          const lastKey = Object.keys(optionCombinations).pop();
+          if (lastKey) optionCombinations[lastKey] += ' ' + line;
+          continue;
+        }
+
+        // ------------------------------------------------------------
+        // FLEXIBLE MATCH / MATRIX ROW PARSER
+        // Accepts:
+        // A, B, C
+        // a, b, c
+        // (A), (B)
+        // [A], [B]
+        // P, Q, R
+        // 1, 2, 3
+        // (1), (2)
+        // i, ii, iii, iv
+        // (i), (ii)
+        // I, II, III
+        // A., A), A:, A-
+        // Row A, Row P, Row 1, Row i
+        // and similar labels
+        // ------------------------------------------------------------
+
+        function extractFlexibleMatchRows(rawLine) {
+          if (window.QPMatchDisplay) return window.QPMatchDisplay.extractExplicitRows(rawLine);
+          return [];
+        }
+
+
+        // ------------------------------------------------------------
+        // COLUMN I / COLUMN A
+        // ------------------------------------------------------------
+
+        if (mode === 'col1') {
+
+          const parsedRows =
+            extractFlexibleMatchRows(line);
+
+          if (parsedRows.length) {
+
+            parsedRows.forEach(value => {
+              if (value) col1.push(value);
+            });
+
+          } else if (col1.length === 0) {
+
+            // First unlabelled row
+            col1.push(line);
+
+          } else {
+
+            // Continuation of previous row
+            col1[col1.length - 1] += ' ' + line;
+
+          }
+
+
+          // ------------------------------------------------------------
+          // COLUMN II / COLUMN B
+          // ------------------------------------------------------------
+
+        } else if (mode === 'col2') {
+
+          const parsedRows =
+            extractFlexibleMatchRows(line);
+
+          if (parsedRows.length) {
+
+            parsedRows.forEach(value => {
+              if (value) col2.push(value);
+            });
+
+          } else if (col2.length === 0) {
+
+            // First unlabelled row
+            col2.push(line);
+
+          } else {
+
+            // Continuation of previous row
+            col2[col2.length - 1] += ' ' + line;
+
+          }
+
+        } else {
+          qLines.push(line);
+        }
+      }
+
+      col1 = col1.filter(value => String(value || '').trim());
+      col2 = col2.filter(value => String(value || '').trim());
+
+      const ansParts = [];
+      ['A', 'B', 'C', 'D'].forEach(k => {
+        if (matrixAnswerMap[k] && matrixAnswerMap[k].length > 0) {
+          ansParts.push(`${k} → ${matrixAnswerMap[k].join(',')}`);
+        }
+      });
+      const formattedAns = ansParts.join('; ');
+
+      let fullQ = qLines.join('\n').trim();
+      if (col1.length > 0 || col2.length > 0) {
+        fullQ += '\n\n**Column I**\n' + col1.join('\n') + '\n\n**Column II**\n' + col2.join('\n');
+      }
+
+      return this.createBaseObject(block, meta, {
+        qType: 'matrix',
+        question: fullQ,
+        columnA: col1,
+        columnB: col2,
+        matrixAnswer: Object.keys(optionCombinations).length ? null : matrixAnswerMap,
+        matchOptions: optionCombinations,
+        answer: correctAnswer || formattedAns,
+        solutionText: solLines.join('\n').trim(),
+      });
+    }
+
+    extractMatrixPair(line, map) {
+      const cleaned = stripAnsPrefix(line);
+      const regex = /([A-D])\s*(?:→|->|=>|-|:)\s*([1-4](?:\s*[,;&]\s*[1-4])*)/gi;
+      let match;
+      while ((match = regex.exec(cleaned)) !== null) {
+        const key = match[1].toUpperCase();
+        const vals = match[2].match(/[1-4]/g) || [];
+        if (!map[key]) map[key] = [];
+        vals.forEach(v => {
+          if (!map[key].includes(v)) map[key].push(v);
+        });
+      }
+    }
+  }
+
+  // 6. Match the Following Parser
+  class MatchFollowingParser extends MatrixMatchParser {
+    parse(block, meta) {
+      const res = super.parse(block, meta);
+      res.qType = 'match';
+      return res;
+    }
+  }
+
+  // 7. Numerical / Integer Parser
+  class NumericalParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const inline = extractInlineMetadata(block.lines);
+      const lines = inline.cleanLines;
+      let qLines = [];
+      let solLines = [];
+      let answer = '';
+
+      for (let i = 0; i < lines.length; i++) {
+        let line = (typeof lines[i] === 'string' ? lines[i] : lines[i].text).trim();
+        if (!line) continue;
+
+        if (i === 0) {
+          line = stripQNumber(line);
+        }
+
+        if (isAnsLine(line)) {
+          answer = stripAnsPrefix(line).trim();
+          continue;
+        }
+
+        if (isSolLine(line)) {
+          const rest = stripSolPrefix(line);
+          if (rest) solLines.push(rest);
+          for (let j = i + 1; j < lines.length; j++) {
+            const sLine = (typeof lines[j] === 'string' ? lines[j] : lines[j].text).trim();
+            if (sLine) solLines.push(sLine);
+          }
+          break;
+        }
+
+        qLines.push(line);
+      }
+
+      const qText = qLines.join('\n').trim();
+      const numVal = answer.trim();
+
+      return this.createBaseObject(block, meta, {
+        qType: 'numerical',
+        question: qText,
+        answer: numVal,
+        numAnswer: numVal,
+        solutionText: solLines.join('\n').trim(),
+      });
+    }
+  }
+
+  // 8. True / False Parser
+  class TrueFalseParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const res = this.parseStandard(block, meta);
+      res.qType = 'true_false';
+      return res;
+    }
+  }
+
+  // 9. Case Study / Passage Parser
+  class CaseStudyParser extends BaseQuestionParser {
+    parse(block, meta) {
+      const res = this.parseStandard(block, meta);
+      res.qType = 'case_study';
+      return res;
+    }
+  }
+
+  // Modular Registry
+  const ParserRegistry = {
+    parsers: {
+      mcq_single: new StandardMCQParser(),
+      mcq_multiple: new MultipleCorrectParser(),
+      assertion_reason: new AssertionReasonParser(),
+      statement_based: new StatementBasedParser(),
+      matrix: new MatrixMatchParser(),
+      match: new MatchFollowingParser(),
+      numerical: new NumericalParser(),
+      integer: new NumericalParser(),
+      true_false: new TrueFalseParser(),
+      case_study: new CaseStudyParser(),
+      paragraph: new CaseStudyParser(),
+      comprehension: new CaseStudyParser(),
+      diagram: new StandardMCQParser(),
+      image: new StandardMCQParser(),
+      graph: new StandardMCQParser(),
+      table: new StandardMCQParser(),
+      sequence: new StandardMCQParser(),
+      reasoning: new StandardMCQParser(),
+      data_interpretation: new StandardMCQParser(),
+      fill_blank: new NumericalParser(),
+      multi_part: new StandardMCQParser(),
+    },
+    register(type, parserInstance) {
+      this.parsers[type] = parserInstance;
+    },
+    get(type) {
+      return this.parsers[type] || this.parsers['mcq_single'];
+    }
+  };
+
+  // ================================================================
+  // PIPELINE orchestrator
+  // ================================================================
+  function parseText(rawText) {
+    const meta = getMeta();
+
+    // Stage 1: Question Boundary Detection
+    const rawBlocks = splitIntoRawBlocks(rawText);
+
+    // Stage 2 & 3: Type Detection & Dispatch to Dedicated Parser
+    const questions = rawBlocks.map(block => {
+      const qType = detectBlockType(block);
+      const parser = ParserRegistry.get(qType);
+      return parser.parse(block, meta);
+    });
+
+    // ================================================================
+    // CHAPTER SOURCE OF TRUTH
+    // ================================================================
+    // The chapter selected in the Bulk Import dropdown is authoritative.
+    // Any @chapter/chapter metadata inside imported content is ignored
+    // for chapter assignment.
+    //
+    // IMPORTANT:
+    // This does not change question parsing, question type detection,
+    // subject detection, class detection, LaTeX processing, etc.
+    // ================================================================
+
+    questions.forEach(question => {
+      question.chapter = meta.chapter;
+    });
+
+    return questions;
+  }
+
+  // ── VALIDATION ENGINE ─────────────────────────────────────────────
+  function validateAll(questions) {
+    const meta = getMeta();
+    questions.forEach((q, idx) => {
+      q.errors = [];
+      const num = idx + 1;
+      if (!q.subject && !meta.subject) q.errors.push(`Question #${num}: Subject is required.`);
+      if (!q.klass && !meta.klass) q.errors.push(`Question #${num}: Class is required.`);
+      if (!q.chapter && !meta.chapter) q.errors.push(`Question #${num}: Chapter is required.`);
+      if (!q.question || q.question.length < 5) q.errors.push(`Question #${num}: Question text is missing or too short.`);
+
+      // TYPE-SPECIFIC VALIDATION RULES
+
+      if (!q.optA) q.errors.push(`Question #${num}: Option A is missing.`);
+      if (!q.optB) q.errors.push(`Question #${num}: Option B is missing.`);
+      if (!q.answer) q.errors.push(`Question #${num}: Correct answer is missing.`);
+    } else if (q.qType === 'matrix' || q.qType === 'match') {
+      const hasMatMap = q.matrixAnswer && Object.keys(q.matrixAnswer).length > 0;
+      if (!q.answer && !hasMatMap) {
+        q.errors.push(`Question #${num}: Matrix/Match answer is missing.`);
+      }
+    } else if (q.qType === 'numerical' || q.qType === 'integer') {
+      if (!q.answer && !q.numAnswer) {
+        q.errors.push(`Question #${num}: Numerical answer is missing.`);
+      }
+    } else if (q.qType === 'true_false') {
+      if (!q.answer) q.errors.push(`Question #${num}: Correct answer (True/False) is missing.`);
+    }
+
+    q.isValid = q.errors.length === 0;
+  });
+}
+
+function normalizeDuplicateQuestion(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—−]/g, '-')
+    .replace(
+      /^\s*(?:q(?:uestion)?\s*)?\d+\s*[.)\-:]\s*/i,
+      ''
+    )
+    .replace(/\$\$/g, '')
+    .replace(/\$/g, '')
+    .replace(/\\\(/g, '')
+    .replace(/\\\)/g, '')
+    .replace(/\\\[/g, '')
+    .replace(/\\\]/g, '')
+    .replace(/\\,/g, '')
+    .replace(/\\;/g, '')
+    .replace(/\\!/g, '')
+    .replace(/\\quad/g, ' ')
+    .replace(/\\qquad/g, ' ')
+    .replace(/\s*([,.;:?!])\s*/g, '$1')
+    .replace(/\s*=\s*/g, '=')
+    .replace(/\s*\+\s*/g, '+')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+
+
+function normalizeForDuplicate(value) {
+
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKC')
+
+    .replace(/<[^>]*>/g, '')
+
+    .replace(/&nbsp;/gi, '')
+
+    .replace(/[“”"'‘’]/g, '')
+
+    .replace(/[–—−-]/g, '')
+
+    .replace(/\$\$/g, '')
+    .replace(/\$/g, '')
+
+    .replace(/\\\(/g, '')
+    .replace(/\\\)/g, '')
+    .replace(/\\\[/g, '')
+    .replace(/\\\]/g, '')
+
+    .replace(/\\,/g, '')
+    .replace(/\\;/g, '')
+    .replace(/\\!/g, '')
+
+    .replace(/\\quad/g, '')
+    .replace(/\\qquad/g, '')
+
+    // remove leading Q numbers
+    .replace(
+      /^(?:question|q)?\s*\d+\s*[.):\-]*/i,
+      ''
+    )
+
+    // Remove ALL formatting characters/spaces.
+    // Keep letters and numbers only.
+    .replace(/[^\p{L}\p{N}]/gu, '')
+
+    .trim();
+}
+
+function checkDuplicates(
+  questions
+) {
+
+  if (!Array.isArray(questions)) {
+    return;
+  }
+
+  const currentImport =
+    new Map();
+
+
+  for (
+    let index = 0;
+    index < questions.length;
+    index++
+  ) {
+
+    const question =
+      questions[index];
+
+    const key =
+      normalizeForDuplicate(
+        question.question
+      );
+
+
+    question.isDuplicate = false;
+    question.existingId = null;
+    question.duplicateReason = '';
+
+
+    if (!key) {
+      continue;
+    }
+
+
+    // ==================================
+    // EXISTS IN DATABASE
+    // ==================================
+
+    const existingQuestion =
+      state.duplicateMap.get(key);
+
+
+    if (existingQuestion) {
+
+      question.isDuplicate = true;
+
+      question.existingId =
+        existingQuestion.id || null;
+
+      question.duplicateReason =
+        'Already exists in database';
+
+      continue;
+    }
+
+
+    // ==================================
+    // DUPLICATE INSIDE CURRENT IMPORT
+    // ==================================
+
+    if (
+      currentImport.has(key)
+    ) {
+
+      question.isDuplicate = true;
+
+      question.duplicateReason =
+        'Repeated inside current import';
+
+      continue;
+    }
+
+
+    currentImport.set(
+      key,
+      index
+    );
+  }
+}
+
+async function checkPreviousImports(questions, requestId) {
+  const candidates = questions
+    .map(question => question.question || '')
+    .filter(Boolean);
+
+  if (!candidates.length) {
+    return;
+  }
+
+  try {
+    const result = await apiReq('/api/questions/duplicates', {
+      method: 'POST',
+      body: JSON.stringify({ questions: candidates }),
+    });
+
+    if (requestId !== state.duplicateRequestId) {
+      return;
+    }
+
+    state.duplicateMap.clear();
+    for (const duplicate of (result.duplicates || [])) {
+      if (duplicate.key) {
+        state.duplicateMap.set(duplicate.key, duplicate);
+      }
+    }
+
+    checkDuplicates(state.parsedQuestions);
+    renderCards();
+  } catch (error) {
+    console.error('[BULK] Duplicate check failed:', error);
+  }
+}
+// ── RENDER ENGINE ──────────────────────────────────────────────────
+function autoWrapStandaloneLatex(text) {
+  if (!text) return '';
+  let i = 0;
+  const n = text.length;
+  let result = '';
+  let buf = '';
+
+  function processBuf(str) {
+    return str.replace(/(?<![\$\w\\])(\\[a-zA-Z]+(?:\{[^{}]*\}|\[[^\[\]]*\])*)(?![\$\w\\])/g, (m) => {
+      if (m === '\\n' || m === '\\r' || m === '\\t') return m;
+      return `$${m}$`;
+    });
+  }
+
+  while (i < n) {
+    if (text[i] === '$') {
+      const isDisplay = text[i + 1] === '$';
+      const delim = isDisplay ? '$$' : '$';
+      const end = text.indexOf(delim, i + delim.length);
+      if (end !== -1) {
+        if (buf) { result += processBuf(buf); buf = ''; }
+        result += text.slice(i, end + delim.length);
+        i = end + delim.length;
+        continue;
+      }
+    }
+    if (text.startsWith('\\(', i) || text.startsWith('\\[', i)) {
+      const isDisplay = text.startsWith('\\[', i);
+      const closeDelim = isDisplay ? '\\]' : '\\)';
+      const end = text.indexOf(closeDelim, i + 2);
+      if (end !== -1) {
+        if (buf) { result += processBuf(buf); buf = ''; }
+        result += text.slice(i, end + closeDelim.length);
+        i = end + closeDelim.length;
+        continue;
+      }
+    }
+    buf += text[i];
+    i++;
+  }
+  if (buf) result += processBuf(buf);
+  return result;
+}
+
+function renderCardNode(text) {
+  if (!text) return document.createTextNode('');
+
+  const processedText = autoWrapStandaloneLatex(text);
+  const container = document.createElement('span');
+  const parts = processedText.split(/({{IMG::[^}]+}})/g);
+
+  parts.forEach(part => {
+    if (part.startsWith('{{IMG::') && part.endsWith('}}')) {
+      const imgUrl = part.slice(7, -2);
+      const img = document.createElement('img');
+      img.src = imgUrl;
+      img.style.cssText = 'max-width:100%;max-height:220px;display:block;margin:6px 0;border-radius:6px;border:1px solid #2e364a;';
+      container.appendChild(img);
+    } else if (part) {
+      if (typeof buildEquationFragment === 'function') {
+        container.appendChild(buildEquationFragment(part));
+      } else {
+        container.appendChild(document.createTextNode(part));
+      }
+    }
+  });
+
+  return container;
+}
+
+function renderCard(q, idx) {
+  const card = document.createElement('div');
+  card.className = 'bq-card' +
+    (q.isValid ? '' : ' is-invalid') +
+    (q.isDuplicate ? ' is-duplicate' : '') +
+    (q.ignored ? ' is-ignored' : '');
+  card.id = 'bqCard_' + idx;
+
+  const top = document.createElement('div');
+  top.className = 'bq-card-top';
+
+  top.appendChild(createBadge('num', '#' + (idx + 1)));
+  top.appendChild(createBadge('type', QTYPE_LABELS[q.qType] || q.qType));
+  top.appendChild(createBadge((q.difficulty || 'Medium').toLowerCase(), q.difficulty));
+  top.appendChild(createBadge(q.isValid ? 'valid' : 'invalid', q.isValid ? '✓ Valid' : '✕ Invalid'));
+  if (q.isDuplicate) top.appendChild(createBadge('dup', '⚠ Duplicate'));
+  top.appendChild(createBadge('conf', 'AI Conf: ' + (q.confidenceScore || 70) + '%'));
+
+  const acts = document.createElement('div');
+  acts.className = 'bq-card-actions';
+
+  const selLabel = document.createElement('label');
+  selLabel.style.cssText = 'font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer;';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = !q.ignored;
+  cb.onchange = () => {
+    q.ignored = !cb.checked;
+    updateStats();
+    renderCards();
+  };
+  selLabel.appendChild(cb);
+  selLabel.appendChild(document.createTextNode('Select'));
+  acts.appendChild(selLabel);
+
+  acts.appendChild(createToolBtn(q.collapsed ? '▼' : '▲', 'Expand/Collapse', () => {
+    q.collapsed = !q.collapsed;
+    renderCards();
+  }));
+  acts.appendChild(createToolBtn('💾 Save', 'Import this question to Database', () => saveSingleQuestionToDb(idx)));
+  acts.appendChild(createToolBtn('✎', 'Edit', () => openCardEditor(idx)));
+  acts.appendChild(createToolBtn('✕', 'Delete', () => {
+    state.parsedQuestions.splice(idx, 1);
+    renderCards();
+    updateStats();
+  }, true));
+
+  top.appendChild(acts);
+  card.appendChild(top);
+
+  const metaLine = document.createElement('div');
+  metaLine.className = 'bq-card-meta';
+  const visibleChapter = typeof window.chapterDisplayName === 'function'
+    ? window.chapterDisplayName(q.subject, q.klass, q.chapter)
+    : (q.chapter || '');
+  metaLine.textContent = (q.subject || '') + ' · Class ' + (q.klass || '') + ' · Chapter: ' + visibleChapter + (q.concept ? ' · Concept: ' + q.concept : '');
+  card.appendChild(metaLine);
+
+  if (q.collapsed) return card;
+
+  const body = document.createElement('div');
+  body.className = 'bq-card-body';
+
+  const qtext = document.createElement('div');
+  qtext.className = 'bq-card-qtext';
+  const visibleQuestion = q.qType === 'match'
+    ? String(q.question || '').split(/\n\s*\n\*\*Column\s+(?:I|A)\*\*/i)[0].trim()
+    : (q.question || '');
+  if (visibleQuestion) qtext.appendChild(renderCardNode(visibleQuestion));
+  body.appendChild(qtext);
+
+  if (q.qType === 'match' && ((q.columnA || []).length || (q.columnB || []).length)) {
+    const columns = document.createElement('div');
+    columns.className = 'bq-match-columns';
+    [['Column A', q.columnA || [], 'left'], ['Column B', q.columnB || [], 'right']].forEach(([title, rawEntries, labelType]) => {
+      const column = document.createElement('div');
+      column.className = 'bq-match-column';
+      const heading = document.createElement('div');
+      heading.className = 'bq-match-heading';
+      heading.textContent = title;
+      column.appendChild(heading);
+      const reconstructed = window.QPMatchDisplay
+        ? window.QPMatchDisplay.reconstructEntries(q, labelType, rawEntries)
+        : { entries: rawEntries, labels: [] };
+      const entries = reconstructed.entries;
+      const labels = reconstructed.labels;
+      entries.forEach((value, entryIndex) => {
+        const row = document.createElement('div');
+        row.className = 'bq-match-row';
+        const label = document.createElement('span');
+        label.className = 'bq-match-index';
+        label.textContent = '(' + (labels[entryIndex] || (labelType === 'left' ? entryIndex + 1 : String.fromCharCode(97 + entryIndex))) + ')';
+        const content = document.createElement('span');
+        content.className = 'bq-match-value';
+        content.appendChild(renderCardNode(value || ''));
+        row.appendChild(label);
+        row.appendChild(content);
+        column.appendChild(row);
+      });
+      columns.appendChild(column);
+    });
+    body.appendChild(columns);
+
+    const mappings = document.createElement('div');
+    mappings.className = 'bq-card-opts';
+    ['A', 'B', 'C', 'D'].forEach(letter => {
+      const rawMapping = window.QPMatchDisplay ? window.QPMatchDisplay.optionFor(q, letter) : '';
+      if (!rawMapping) return;
+      const isCorrect = String(q.answer || '').trim().toUpperCase() === letter;
+      const option = document.createElement('div');
+      option.className = 'bq-opt' + (isCorrect ? ' correct' : '');
+      option.appendChild(document.createTextNode(letter + ': '));
+      option.appendChild(renderCardNode(window.QPMatchDisplay ? window.QPMatchDisplay.formatMapping(rawMapping) : rawMapping));
+      if (isCorrect) option.appendChild(document.createTextNode(' ✓'));
+      mappings.appendChild(option);
+    });
+    if (mappings.children.length) body.appendChild(mappings);
+  }
+
+  if (q.qType !== 'match' && (q.optA || q.optB || q.optC || q.optD)) {
+    const optsGrid = document.createElement('div');
+    optsGrid.className = 'bq-card-opts';
+    ['A', 'B', 'C', 'D'].forEach(letter => {
+      const optVal = q['opt' + letter];
+      if (!optVal) return;
+      const isCorrect = (q.answer || '').toUpperCase().includes(letter);
+      const optEl = document.createElement('div');
+      optEl.className = 'bq-opt' + (isCorrect ? ' correct' : '');
+      optEl.appendChild(document.createTextNode(letter + ': '));
+      optEl.appendChild(renderCardNode(optVal));
+      if (isCorrect) {
+        const ck = document.createElement('span');
+        ck.textContent = ' ✓';
+        optEl.appendChild(ck);
+      }
+      optsGrid.appendChild(optEl);
+    });
+    body.appendChild(optsGrid);
+  }
+
+  if (q.answer) {
+    const ansEl = document.createElement('div');
+    ansEl.className = 'bq-card-answer';
+    ansEl.textContent = '✓ Correct Answer: ' + q.answer;
+    body.appendChild(ansEl);
+  }
+
+  if (q.solutionText) {
+    const solEl = document.createElement('div');
+    solEl.className = 'bq-card-solution';
+    solEl.appendChild(document.createTextNode('SOLUTION: '));
+    solEl.appendChild(renderCardNode(q.solutionText));
+    body.appendChild(solEl);
+  }
+
+  card.appendChild(body);
+
+  if (q.errors && q.errors.length > 0) {
+    const errBox = document.createElement('div');
+    errBox.className = 'bq-card-errors';
+    q.errors.forEach(e => {
+      const item = document.createElement('div');
+      item.className = 'bq-err-item';
+      item.textContent = '⚠ ' + e;
+      errBox.appendChild(item);
+    });
+    card.appendChild(errBox);
+  }
+
+  if (q.isDuplicate) {
+    const dupBanner = document.createElement('div');
+    dupBanner.className = 'bq-card-dup-banner';
+    dupBanner.appendChild(document.createTextNode('⚠ Duplicate question detected in database. Action: '));
+    ['skip', 'overwrite', 'keep_both'].forEach(act => {
+      const btn = document.createElement('button');
+      btn.className = 'bq-dup-btn' + (q.dupAction === act ? ' active' : '');
+      btn.textContent = act.replace('_', ' ').toUpperCase();
+      btn.onclick = () => {
+        q.dupAction = act;
+        renderCards();
+      };
+      dupBanner.appendChild(btn);
+    });
+    card.appendChild(dupBanner);
+  }
+
+  return card;
+}
+
+function createBadge(cls, text) {
+  const s = document.createElement('span');
+  s.className = 'bq-badge ' + cls;
+  s.textContent = text;
+  return s;
+}
+
+function createToolBtn(text, title, onClick, isDanger) {
+  const btn = document.createElement('button');
+  btn.className = 'bq-tool-btn' + (isDanger ? ' danger' : '');
+  btn.title = title;
+  btn.textContent = text;
+  btn.onclick = onClick;
+  return btn;
+}
+
+function getFiltered() {
+  const search = state.filterSearch.toLowerCase();
+  return state.parsedQuestions.filter(q => {
+    if (state.filterType && q.qType !== state.filterType) return false;
+    if (state.filterDiff && (q.difficulty || 'Medium').toLowerCase() !== state.filterDiff) return false;
+    if (state.filterStatus === 'valid' && !q.isValid) return false;
+    if (state.filterStatus === 'invalid' && q.isValid) return false;
+    if (state.filterDup === 'duplicate' && !q.isDuplicate) return false;
+    if (state.filterDup === 'unique' && q.isDuplicate) return false;
+    if (search && !(q.question || '').toLowerCase().includes(search) && !(q.concept || '').toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
+
+function renderCards() {
+  const container = document.getElementById('bqCardsContainer') || document.getElementById('bulkCardsContainer');
+  if (!container) return;
+  const filtered = getFiltered();
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="bq-empty"><div class="bq-empty-icon">📭</div><div class="bq-empty-text">' +
+      (state.parsedQuestions.length === 0 ? 'Paste questions in the editor to parse and preview.' : 'No questions match the selected filters.') +
+      '</div></div>';
+    updateStats();
+    renderErrorPanel();
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  filtered.forEach((q) => {
+    const realIdx = state.parsedQuestions.indexOf(q);
+    frag.appendChild(renderCard(q, realIdx));
+  });
+
+  container.innerHTML = '';
+  container.appendChild(frag);
+
+  updateStats();
+  renderErrorPanel();
+}
+
+function updateStats() {
+  const qs = state.parsedQuestions;
+  const total = qs.length;
+  const valid = qs.filter(q => q.isValid && !q.ignored).length;
+  const invalid = qs.filter(q => !q.isValid).length;
+  const dup = qs.filter(q => q.isDuplicate).length;
+  const ready = qs.filter(q => q.isValid && !q.ignored && (!q.isDuplicate || q.dupAction !== 'skip')).length;
+
+  ['bqStatTotal', 'bulkStatTotal'].forEach(id => setTxt(id, total));
+  ['bqStatValid', 'bulkStatValid'].forEach(id => setTxt(id, valid));
+  ['bqStatInvalid', 'bulkStatInvalid'].forEach(id => setTxt(id, invalid));
+  ['bqStatDup', 'bulkStatDup'].forEach(id => setTxt(id, dup));
+  ['bqStatReady', 'bulkStatReady'].forEach(id => setTxt(id, ready));
+
+  const fill = document.getElementById('bqProgressFill');
+  if (fill) fill.style.width = total > 0 ? ((valid / total) * 100) + '%' : '0%';
+}
+
+function setTxt(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function renderErrorPanel() {
+  const panel = document.getElementById('bqErrorPanel') || document.getElementById('bulkErrorCard');
+  const list = document.getElementById('bqErrorList') || document.getElementById('bulkErrorList');
+  const count = document.getElementById('bqErrorCount') || document.getElementById('bulkErrorCount');
+  if (!panel || !list) return;
+
+  const allErrors = [];
+  state.parsedQuestions.forEach(q => (q.errors || []).forEach(e => allErrors.push({ q, e })));
+
+  if (allErrors.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  if (count) count.textContent = allErrors.length + ' Issues';
+
+  list.innerHTML = '';
+  allErrors.forEach(({ q, e }) => {
+    const idx = state.parsedQuestions.indexOf(q);
+    const row = document.createElement('div');
+    row.className = 'bq-error-row';
+    row.innerHTML = '<span class="bq-err-qnum">Q#' + (idx + 1) + '</span><span class="bq-err-msg">' + escapeHtml(e) + '</span>';
+    row.onclick = () => {
+      const cardEl = document.getElementById('bqCard_' + idx);
+      if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    list.appendChild(row);
+  });
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function runParse() {
+  const ta =
+    document.getElementById('bqTextarea') ||
+    document.getElementById('bulkEditorTextarea');
+
+  if (!ta) return;
+
+  const text = ta.value;
+
+  if (!text.trim()) {
+    state.duplicateRequestId++;
+    state.duplicateCheckPromise = Promise.resolve();
+    state.parsedQuestions = [];
+    renderCards();
+    return;
+  }
+
+  const questions = parseText(text);
+
+  validateAll(questions);
+
+  checkDuplicates(questions);
+
+  state.parsedQuestions = questions;
+
+  renderCards();
+
+  const requestId =
+    ++state.duplicateRequestId;
+
+  state.duplicateCheckPromise =
+    checkPreviousImports(
+      questions,
+      requestId
+    );
+}
+
+function scheduleReparse() {
+
+  clearTimeout(
+    state.debounceTimer
+  );
+
+  state.debounceTimer =
+    setTimeout(
+      runParse,
+      1200
+    );
+}
+
+function initEditor() {
+
+  if (
+    state.editorInitialized
+  ) {
+    return;
+  }
+
+
+  const ta =
+    document.getElementById(
+      'bqTextarea'
+    ) ||
+    document.getElementById(
+      'bulkEditorTextarea'
+    );
+
+  const ln =
+    document.getElementById(
+      'bqLineNumbers'
+    ) ||
+    document.getElementById(
+      'bulkLineNumbers'
+    );
+
+  if (!ta) {
+    return;
+  }
+
+
+  state.editorInitialized =
+    true;
+
+
+  function updateLineNumbers() {
+    if (!ln) return;
+    const count = ta.value.split('\n').length;
+    let nums = '';
+    for (let i = 1; i <= count; i++) nums += i + '\n';
+    ln.textContent = nums;
+    ln.scrollTop = ta.scrollTop;
+  }
+
+  ta.addEventListener('input', () => {
+    updateLineNumbers();
+    scheduleReparse();
+    autoSave();
+    scheduleHistorySave();
+  });
+
+  ta.addEventListener('scroll', () => {
+    if (ln) ln.scrollTop = ta.scrollTop;
+  });
+
+  ta.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'z') {
+      e.preventDefault();
+      undoHistory();
+    } else if (e.ctrlKey && e.key === 'y') {
+      e.preventDefault();
+      redoHistory();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(end);
+      ta.selectionStart = ta.selectionEnd = start + 2;
+      updateLineNumbers();
+    }
+  });
+
+  const draft = localStorage.getItem('bq_draft_v2');
+  if (draft) {
+    ta.value = draft;
+    updateLineNumbers();
+    scheduleReparse();
+  } else {
+    updateLineNumbers();
+  }
+}
+let historySaveTimer = null;
+
+
+function scheduleHistorySave() {
+
+  clearTimeout(
+    historySaveTimer
+  );
+
+
+  historySaveTimer =
+    setTimeout(
+      () => {
+
+        const ta =
+          document.getElementById(
+            'bqTextarea'
+          ) ||
+          document.getElementById(
+            'bulkEditorTextarea'
+          );
+
+
+        if (ta) {
+
+          pushHistory(
+            ta.value
+          );
+        }
+
+      },
+      800
+    );
+}
+function pushHistory(text) {
+  if (state.historyStack[state.historyIndex] === text) return;
+  state.historyStack = state.historyStack.slice(0, state.historyIndex + 1);
+  state.historyStack.push(text);
+  if (state.historyStack.length > 100) state.historyStack.shift();
+  state.historyIndex = state.historyStack.length - 1;
+}
+
+function undoHistory() {
+  if (state.historyIndex <= 0) return;
+  state.historyIndex--;
+  const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+  if (ta) {
+    ta.value = state.historyStack[state.historyIndex];
+    scheduleReparse();
+  }
+}
+
+function redoHistory() {
+  if (state.historyIndex >= state.historyStack.length - 1) return;
+  state.historyIndex++;
+  const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+  if (ta) {
+    ta.value = state.historyStack[state.historyIndex];
+    scheduleReparse();
+  }
+}
+
+function autoSave() {
+  clearTimeout(state.autoSaveTimer);
+  state.autoSaveTimer = setTimeout(() => {
+    const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+    if (ta) localStorage.setItem('bq_draft_v2', ta.value);
+  }, 1500);
+}
+
+function toggleWordWrap() {
+  state.wordWrap = !state.wordWrap;
+  const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+  const btn = document.getElementById('bqWrapBtn') || document.getElementById('bulkWrapBtn');
+  if (ta) ta.classList.toggle('word-wrap', state.wordWrap);
+  if (btn) btn.classList.toggle('active', state.wordWrap);
+}
+
+function clearEditor() {
+  if (!confirm('Clear editor content?')) return;
+  const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+  if (ta) {
+    ta.value = '';
+    pushHistory('');
+    scheduleReparse();
+  }
+  localStorage.removeItem('bq_draft_v2');
+}
+
+function restoreSample() {
+  const sample = `@subject: Physics
+@chapter: Alternating Current
+@concept: LCR Circuit & Phasor Analysis
+@type: Standard MCQ
+@difficulty: Medium
+
+1. A 220 V, 50 Hz a.c. generator is connected to an inductor and a 50 ohm resistance in series. The current in the circuit is 1.0 A. What is potential difference across inductor?
+(A) 102.2 V
+(B) 186.4 V
+(C) 213.6 V
+(D) 302 V
+Answer: C
+Solution: Voltage across resistor VR = IR = 1.0 x 50 = 50 V. Since V, VR, VL form a right triangle (90 deg phase difference): V^2 = VR^2 + VL^2 => 220^2 = 50^2 + VL^2 => 48400 = 2500 + VL^2 => VL = 213.6 V.
+
+---
+
+@concept: Matrix Matching
+@type: matrix
+
+2. Matrix Match Question
+Column I
+A. Sodium
+B. Potassium
+C. Calcium
+D. Magnesium
+
+Column II
+1. Group 1
+2. Group 2
+3. Period 3
+4. Period 4
+
+Answer:
+A → 1,3
+B → 1,4
+C → 2,4
+D → 2,3
+
+Solution: Sodium is Group 1, Period 3. Potassium is Group 1, Period 4. Calcium is Group 2, Period 4. Magnesium is Group 2, Period 3.
+
+---
+
+@concept: Light Propagation
+@type: assertion_reason
+
+3. Assertion: Light waves can travel through vacuum.
+Reason: Light is an electromagnetic wave and does not require a material medium for propagation.
+(A) Both A and R are true and R is correct explanation.
+(B) Both A and R are true but R is not correct explanation.
+(C) A is true but R is false.
+(D) A is false but R is true.
+Answer: A
+Solution: Electromagnetic waves self-propagate through electric and magnetic field oscillations.`;
+
+  const ta = document.getElementById('bqTextarea') || document.getElementById('bulkEditorTextarea');
+  if (ta) {
+    ta.value = sample;
+    pushHistory(sample);
+    scheduleReparse();
+  }
+}
+
+function openCardEditor(idx) {
+  if (typeof Auth !== 'undefined' && Auth.can && !Auth.can('bulk_import')) {
+    if (typeof showToast === 'function') showToast('Only Question Adders or Admins can prepare imports.', true);
+    return;
+  }
+  state.editingIndex = idx;
+  const q = state.parsedQuestions[idx];
+  if (!q) return;
+
+  const modal = document.getElementById('bqEditModal') || document.getElementById('bulkEditModal');
+  if (!modal) return;
+
+  const qType = q.qType || 'mcq_single';
+  setVal('bqEditQType', qType);
+  setVal('bqEditConcept', q.concept || q.topic || '');
+  setVal('bqEditDifficulty', q.difficulty || 'Medium');
+
+  const arBlock = document.getElementById('bqEditARBlock');
+  const qGroup = document.getElementById('bqEditQuestionGroup');
+  const optsBlock = document.getElementById('bqEditOptionsBlock');
+  const ansLabel = document.getElementById('bqEditAnswerLabel');
+
+  if (qType === 'assertion_reason') {
+    if (arBlock) arBlock.style.display = 'block';
+    if (qGroup) qGroup.style.display = 'none';
+    if (optsBlock) optsBlock.style.display = 'grid';
+    if (ansLabel) ansLabel.textContent = 'Correct Option (e.g. A, B, C, D)';
+
+    let ass = q.assertion || '';
+    let rea = q.reason || '';
+    if (!ass && q.question) {
+      const aM = q.question.match(/(?:Assertion|\(A\)|A)\s*[:\.-]\s*([^\n]+(?:\n(?!Reason|\(R\)|R:)[^\n]+)*)/i);
+      if (aM) ass = aM[1].trim();
+    }
+    if (!rea && q.question) {
+      const rM = q.question.match(/(?:Reason|\(R\)|R)\s*[:\.-]\s*([^\n]+)+/i);
+      if (rM) rea = rM[1].trim();
+    }
+    setVal('bqEditAssertion', ass);
+    setVal('bqEditReason', rea);
+
+    const defaultArOpts = {
+      A: 'Both Assertion (A) and Reason (R) are true and Reason (R) is the correct explanation of Assertion (A).',
+      B: 'Both Assertion (A) and Reason (R) are true but Reason (R) is NOT the correct explanation of Assertion (A).',
+      C: 'Assertion (A) is true but Reason (R) is false.',
+      D: 'Assertion (A) is false but Reason (R) is true.'
+    };
+    setVal('bqEditOptA', q.optA || defaultArOpts.A);
+    setVal('bqEditOptB', q.optB || defaultArOpts.B);
+    setVal('bqEditOptC', q.optC || defaultArOpts.C);
+    setVal('bqEditOptD', q.optD || defaultArOpts.D);
+    setVal('bqEditAnswer', q.answer || 'A');
+  } else if (qType === 'numerical' || qType === 'integer') {
+    if (arBlock) arBlock.style.display = 'none';
+    if (qGroup) qGroup.style.display = 'block';
+    if (optsBlock) optsBlock.style.display = 'none';
+    if (ansLabel) ansLabel.textContent = 'Correct Numerical Value (e.g. 0.759 or 12)';
+
+    setVal('bqEditQuestion', q.question || '');
+    setVal('bqEditAnswer', q.numAnswer || q.answer || '');
+  } else {
+    if (arBlock) arBlock.style.display = 'none';
+    if (qGroup) qGroup.style.display = 'block';
+    if (optsBlock) optsBlock.style.display = 'grid';
+    if (ansLabel) ansLabel.textContent = 'Correct Answer (e.g. A, or A,B, or 4.5)';
+
+    setVal('bqEditQuestion', q.question || '');
+    setVal('bqEditOptA', q.optA || '');
+    setVal('bqEditOptB', q.optB || '');
+    setVal('bqEditOptC', q.optC || '');
+    setVal('bqEditOptD', q.optD || '');
+    setVal('bqEditAnswer', q.answer || 'A');
+  }
+
+  setVal('bqEditSolution', q.solutionText || '');
+
+  modal.style.display = 'flex';
+  modal.classList.add('open');
+}
+
+function closeCardEditor() {
+  const modal = document.getElementById('bqEditModal') || document.getElementById('bulkEditModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('open');
+  }
+  state.editingIndex = null;
+}
+
+function saveCardEditor() {
+  const idx = state.editingIndex;
+  if (idx === null || !state.parsedQuestions[idx]) {
+    closeCardEditor();
+    return;
+  }
+  const q = state.parsedQuestions[idx];
+  const newType = gVal('bqEditQType');
+  q.qType = newType;
+  q.concept = gVal('bqEditConcept');
+  q.topic = q.concept;
+  q.difficulty = gVal('bqEditDifficulty');
+  q.solutionText = gVal('bqEditSolution');
+
+  if (newType === 'assertion_reason') {
+    q.assertion = gVal('bqEditAssertion');
+    q.reason = gVal('bqEditReason');
+    q.question = 'Assertion: ' + q.assertion + '\nReason: ' + q.reason;
+    q.optA = gVal('bqEditOptA') || 'Both Assertion (A) and Reason (R) are true and Reason (R) is the correct explanation of Assertion (A).';
+    q.optB = gVal('bqEditOptB') || 'Both Assertion (A) and Reason (R) are true but Reason (R) is NOT the correct explanation of Assertion (A).';
+    q.optC = gVal('bqEditOptC') || 'Assertion (A) is true but Reason (R) is false.';
+    q.optD = gVal('bqEditOptD') || 'Assertion (A) is false but Reason (R) is true.';
+    q.answer = gVal('bqEditAnswer') || 'A';
+  } else if (newType === 'numerical' || newType === 'integer') {
+    q.question = gVal('bqEditQuestion');
+    q.numAnswer = gVal('bqEditAnswer');
+    q.answer = q.numAnswer;
+    q.optA = ''; q.optB = ''; q.optC = ''; q.optD = '';
+  } else {
+    q.question = gVal('bqEditQuestion');
+    q.optA = gVal('bqEditOptA');
+    q.optB = gVal('bqEditOptB');
+    q.optC = gVal('bqEditOptC');
+    q.optD = gVal('bqEditOptD');
+    q.answer = gVal('bqEditAnswer');
+  }
+
+  validateAll(state.parsedQuestions);
+  closeCardEditor();
+  renderCards();
+}
+
+async function saveSingleQuestionToDb(idx) {
+  if (typeof Auth !== 'undefined' && Auth.can && !Auth.can('bulk_import')) {
+    if (typeof showToast === 'function') showToast('You do not have permission to save questions.', true);
+    return;
+  }
+  const q = state.parsedQuestions[idx];
+  if (!q) return;
+
+  if (!q.isValid) {
+    if (typeof showToast === 'function') showToast(`Question #${idx + 1} has validation issues: ${(q.errors || []).join(', ')}`, true);
+    return;
+  }
+
+  const meta = getMeta();
+  const payload = {
+    subject: q.subject || meta.subject,
+    klass: q.klass || meta.klass,
+    chapter: meta.chapter,
+    topic: q.concept || q.topic || 'General',
+    exams: q.exams && q.exams.length ? q.exams : meta.exams,
+    qType: q.qType || 'mcq_single',
+    question: q.question,
+    optA: q.optA || '',
+    optB: q.optB || '',
+    optC: q.optC || '',
+    optD: q.optD || '',
+    assertion: q.assertion || '',
+    reason: q.reason || '',
+    statement1: q.statement1 || '',
+    statement2: q.statement2 || '',
+    predefOptions: q.predefOptions || '',
+    columnA: q.columnA || [],
+    columnB: q.columnB || [],
+    matchOptions: q.matchOptions || q.matrixAnswer || {},
+    numAnswer: q.numAnswer || q.answer || '',
+    correctOption: (q.qType === 'numerical' || q.qType === 'integer')
+      ? (q.numAnswer || q.answer || '')
+      : (q.answer || q.correctOption || 'A'),
+    solutionText: q.solutionText || '',
+    difficulty: q.difficulty || meta.defaultDiff,
+  };
+
+  try {
+    await apiReq('/api/questions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (typeof showToast === 'function') {
+      showToast(`Question #${idx + 1} saved successfully to database!`);
+    }
+    q.isDuplicate = true;
+
+    renderCards();
+
+    if (
+      typeof window.loadQuestions ===
+      'function'
+    ) {
+
+      window.loadQuestions();
+    }
+
+
+    // Refresh duplicate cache
+    const duplicateKey =
+      normalizeForDuplicate(
+        payload.question
+      );
+
+    if (duplicateKey) {
+
+      state.duplicateMap.set(
+        duplicateKey,
+        payload
+      );
+    }
+  } catch (err) {
+    console.error('Save single question error:', err);
+    if (typeof showToast === 'function') showToast('Failed to save question: ' + err.message, true);
+  }
+}
+
+function setVal(id, v) {
+  const el = document.getElementById(id);
+  if (el) el.value = v;
+}
+function gVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+async function executeBulkImport() {
+  if (
+    typeof Auth !== 'undefined' &&
+    Auth.can &&
+    !Auth.can('bulk_import')
+  ) {
+    if (typeof showToast === 'function') {
+      showToast(
+        'You do not have permission to import questions.',
+        true
+      );
+    }
+    return;
+  }
+
+  const meta = getMeta();
+
+  if (!meta.chapter || meta.chapter === 'General') {
+    if (typeof showToast === 'function') {
+      showToast(
+        'Please select a chapter from the Chapter dropdown before importing.',
+        true
+      );
+    }
+    return;
+  }
+
+  await state.duplicateCheckPromise;
+
+  const importList = state.parsedQuestions.filter(q => {
+    if (q.ignored) return false;
+    if (!q.isValid) return false;
+    if (q.isDuplicate && q.dupAction === 'skip') return false;
+    return true;
+  });
+
+  if (!importList.length) {
+    if (typeof showToast === 'function') showToast('No valid questions ready to import.', true);
+    return;
+  }
+
+  if (!confirm(`Import ${importList.length} validated question(s) into database?`)) return;
+
+  const btn = document.getElementById('bqImportBtn') || document.getElementById('bulkImportBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+  }
+
+
+  const payload = importList.map(q => ({
+    subject: q.subject || meta.subject,
+    klass: q.klass || meta.klass,
+    chapter: meta.chapter,
+    topic: q.concept || q.topic || 'General',
+    exams: q.exams && q.exams.length ? q.exams : meta.exams,
+    qType: q.qType || 'mcq_single',
+    question: q.question,
+    optA: q.optA || '',
+    optB: q.optB || '',
+    optC: q.optC || '',
+    optD: q.optD || '',
+    assertion: q.assertion || '',
+    reason: q.reason || '',
+    statement1: q.statement1 || '',
+    statement2: q.statement2 || '',
+    predefOptions: q.predefOptions || '',
+    columnA: q.columnA || [],
+    columnB: q.columnB || [],
+    matchOptions: q.matchOptions || q.matrixAnswer || {},
+    numAnswer: q.numAnswer || q.answer || '',
+    correctOption: (q.qType === 'numerical' || q.qType === 'integer')
+      ? (q.numAnswer || q.answer || '')
+      : q.answer,
+    solutionText: q.solutionText || '',
+    difficulty: q.difficulty || meta.defaultDiff,
+  }));
+
+  try {
+    const res = await apiReq('/api/questions/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (typeof showToast === 'function') {
+
+      const importedCount =
+        Number(res.count || 0);
+
+      const duplicateCount =
+        Number(res.duplicateCount || 0);
+
+      if (duplicateCount > 0) {
+
+        showToast(
+          `Imported ${importedCount} question(s). ${duplicateCount} duplicate question(s) skipped.`
+        );
+
+      } else {
+
+        showToast(
+          `Successfully imported ${importedCount || payload.length} questions!`
+        );
+      }
+    }
+
+
+    // ==========================================
+    // IMPORTANT:
+    // REFRESH DUPLICATE DATABASE CACHE
+    // ==========================================
+
+    for (
+      const item
+      of payload
+    ) {
+
+      const key =
+        normalizeForDuplicate(
+          item.question
+        );
+
+      if (key) {
+
+        state.duplicateMap.set(
+          key,
+          item
+        );
+      }
+    }
+
+
+    // Clear textarea only AFTER cache refresh
+    const ta =
+      document.getElementById(
+        'bqTextarea'
+      ) ||
+      document.getElementById(
+        'bulkEditorTextarea'
+      );
+
+    if (ta) {
+
+      ta.value = '';
+
+      localStorage.removeItem(
+        'bq_draft_v2'
+      );
+
+      runParse();
+    }
+  } catch (err) {
+
+    const message =
+      String(err?.message || err || '');
+
+
+    // All submitted questions already exist
+    if (
+      message
+        .toLowerCase()
+        .includes(
+          'all questions are duplicates'
+        )
+    ) {
+
+      if (
+        typeof showToast ===
+        'function'
+      ) {
+
+        showToast(
+          'All questions already exist. No new questions were imported.'
+        );
+      }
+
+
+
+
+
+      // Re-check pasted questions
+      runParse();
+
+      return;
+    }
+
+
+    // Actual import error
+    console.error(
+      'Bulk Import error:',
+      err
+    );
+
+
+    if (
+      typeof showToast ===
+      'function'
+    ) {
+
+      showToast(
+        'Import failed: ' +
+        message,
+        true
+      );
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Import All Validated Questions';
+    }
+  }
+}
+
+async function fetchExistingQuestions() {
+
+  try {
+
+    const allQuestions = [];
+
+    let offset = 0;
+    const limit = 1000;
+
+    while (true) {
+
+      const res =
+        await apiReq(
+          `/api/questions?offset=${offset}&limit=${limit}`
+        );
+
+      const page =
+        Array.isArray(res)
+          ? res
+          : [];
+
+      console.log(
+        '[BULK] DB page:',
+        offset,
+        page.length
+      );
+
+      allQuestions.push(
+        ...page
+      );
+
+      if (
+        page.length <
+        limit
+      ) {
+        break;
+      }
+
+      offset += limit;
+    }
+
+    state.existingQuestions =
+      allQuestions;
+    rebuildDuplicateMap();
+
+    console.log(
+      '[BULK] Total database questions:',
+      allQuestions.length
+    );
+
+  } catch (error) {
+
+    console.error(
+      '[BULK] Failed loading DB questions:',
+      error
+    );
+
+    state.existingQuestions = [];
+  }
+}
+
+function init() {
+  if (state.initialized) return;
+  state.initialized = true;
+  initEditor();
+
+  const searchInput = document.getElementById('bqFilterSearch') || document.getElementById('bulkSearchInput');
+  const typeFilter = document.getElementById('bqFilterType');
+  const diffFilter = document.getElementById('bqFilterDiff') || document.getElementById('bulkFilterDiff');
+  const statusFilter = document.getElementById('bqFilterStatus') || document.getElementById('bulkFilterStatus');
+  const dupFilter = document.getElementById('bqFilterDup') || document.getElementById('bulkFilterDup');
+  const conceptFilter = document.getElementById('bqFilterConcept') || document.getElementById('bulkFilterConcept');
+
+  if (searchInput) searchInput.addEventListener('input', (e) => { state.filterSearch = e.target.value; renderCards(); });
+  if (typeFilter) typeFilter.addEventListener('change', (e) => { state.filterType = e.target.value; renderCards(); });
+  if (diffFilter) diffFilter.addEventListener('change', (e) => { state.filterDiff = e.target.value; renderCards(); });
+  if (statusFilter) statusFilter.addEventListener('change', (e) => { state.filterStatus = e.target.value; renderCards(); });
+  if (dupFilter) dupFilter.addEventListener('change', (e) => { state.filterDup = e.target.value; renderCards(); });
+  if (conceptFilter) conceptFilter.addEventListener('change', (e) => { state.filterSearch = e.target.value; renderCards(); });
+}
+
+const _global = typeof window !== 'undefined' ? window : globalThis;
+_global.ParserRegistry = ParserRegistry;
+_global.BaseQuestionParser = BaseQuestionParser;
+_global.parseText = parseText;
+_global.validateAll = validateAll;
+
+_global.BulkModule = {
+  init,
+  runParse,
+  openCardEditor,
+  closeCardEditor,
+  saveCardEditor,
+  clearEditor,
+  restoreSample,
+  toggleWordWrap,
+  undoHistory,
+  redoHistory,
+  executeBulkImport,
+  exportQuestions: () => { },
+  toggleCardCollapse: (idx) => {
+    if (state.parsedQuestions[idx]) {
+      state.parsedQuestions[idx].collapsed = !state.parsedQuestions[idx].collapsed;
+      renderCards();
+    }
+  },
+  toggleIgnore: (idx) => {
+    if (state.parsedQuestions[idx]) {
+      state.parsedQuestions[idx].ignored = !state.parsedQuestions[idx].ignored;
+      updateStats();
+      renderCards();
+    }
+  },
+  deleteCard: (idx) => {
+    state.parsedQuestions.splice(idx, 1);
+    renderCards();
+    updateStats();
+  },
+};
+}) ();
