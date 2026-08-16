@@ -3398,6 +3398,12 @@ def detect_paper_code(
                     f"at position {position_index}."
                 )
 
+        confidence_gap = (
+            best_score
+            -
+            second_score
+        )
+
         detected_characters.append(
             best_value
         )
