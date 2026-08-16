@@ -1639,16 +1639,10 @@ function displayResult(
         ||
         data.corrected_image_url;
 
+    /* Preserve original captured/uploaded photo in capturedPreview without overwriting */
     if (
-        correctedUrl
-        &&
         capturedPreview
     ) {
-        capturedPreview.src =
-            correctedUrl
-            + "?t="
-            + Date.now();
-
         capturedPreview.hidden =
             false;
     }
