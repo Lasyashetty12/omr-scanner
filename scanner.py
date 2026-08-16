@@ -6,6 +6,8 @@ from omr_preprocess.quality import assess_document_quality
 import json
 import logging
 import os
+from io import BytesIO
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -157,27 +159,75 @@ def load_template(template_path):
 # IMAGE LOADING
 # ============================================================
 
-def load_image(image_path):
+def load_image(image_source, *, filename=None, mime_type=None, return_debug=False):
+    """Decode an upload once into the BGR working image used by OMR.
 
-    # Apply EXIF rotation tags (e.g. photos taken on mobile phones in portrait/landscape)
-    # before converting to OpenCV BGR numpy array.
+    ``image_source`` may be the raw request bytes or a path, retaining path
+    support for existing callers and command-line workflows.  Pillow owns
+    EXIF handling here so neither browser preview behaviour nor OpenCV build
+    options can decide the orientation reaching registration.
+    """
+    if isinstance(image_source, (bytes, bytearray, memoryview)):
+        raw_bytes = bytes(image_source)
+        source_name = filename or "uploaded_image"
+    else:
+        source_path = Path(image_source)
+        raw_bytes = source_path.read_bytes()
+        source_name = filename or source_path.name
+
+    if not raw_bytes:
+        raise ValueError("Unable to read uploaded image.")
+
+    raw_decoded = None
+    orientation = None
+    orientation_applied = False
+    decoder = "Pillow"
     try:
         from PIL import Image, ImageOps
-        pil_img = Image.open(str(image_path))
-        pil_img = ImageOps.exif_transpose(pil_img)
-        pil_img = pil_img.convert("RGB")
-        image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    except Exception:
-        image = cv2.imread(str(image_path))
 
-    if image is None:
-        raise ValueError(
-            "Unable to read uploaded image."
-        )
+        with Image.open(BytesIO(raw_bytes)) as pil_source:
+            # Load before leaving the file object and record the physical
+            # matrix before EXIF transpose for diagnostics.
+            raw_decoded = np.asarray(pil_source.convert("RGB")).copy()
+            exif = pil_source.getexif()
+            orientation_value = exif.get(274)
+            orientation = int(orientation_value) if orientation_value else None
+            oriented = ImageOps.exif_transpose(pil_source).convert("RGB")
+            oriented_rgb = np.asarray(oriented).copy()
+        orientation_applied = orientation not in (None, 1)
+        decoded_bgr = cv2.cvtColor(oriented_rgb, cv2.COLOR_RGB2BGR)
+    except Exception as error:
+        # A few valid images are unsupported by Pillow.  OpenCV is used only
+        # as a byte decoder and told to ignore EXIF, avoiding version-specific
+        # automatic orientation behaviour.  There is no EXIF to apply in this
+        # fallback path.
+        decoder = "OpenCV (Pillow fallback)"
+        flags = cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+        decoded_bgr = cv2.imdecode(np.frombuffer(raw_bytes, dtype=np.uint8), flags)
+        if decoded_bgr is None:
+            raise ValueError("Unable to decode uploaded image.") from error
+        raw_decoded = cv2.cvtColor(decoded_bgr, cv2.COLOR_BGR2RGB)
 
-    image = normalize_image_resolution(image)
-
-    return image
+    original_height, original_width = raw_decoded.shape[:2]
+    oriented_height, oriented_width = decoded_bgr.shape[:2]
+    normalized = normalize_image_resolution(decoded_bgr)
+    normalized_height, normalized_width = normalized.shape[:2]
+    debug = {
+        "original_filename": os.path.basename(source_name),
+        "mime_type": mime_type or "",
+        "original_width": int(original_width),
+        "original_height": int(original_height),
+        "orientation_normalized_width": int(oriented_width),
+        "orientation_normalized_height": int(oriented_height),
+        "normalized_width": int(normalized_width),
+        "normalized_height": int(normalized_height),
+        "exif_orientation": orientation,
+        "orientation_applied": orientation_applied,
+        "decoder": decoder,
+        "resolution_normalized": (oriented_width, oriented_height) != (normalized_width, normalized_height),
+        "color_space": "BGR uint8",
+    }
+    return (normalized, debug, raw_decoded, decoded_bgr) if return_debug else normalized
 
 
 # ============================================================
@@ -4229,10 +4279,10 @@ def create_debug_image(
     original_image=None,
     homography=None,
 ):
-
-    debug = (
-        original_image.copy() if original_image is not None else corrected_image.copy()
-    )
+    # The debug overlay is intentionally tied to the exact canonical image
+    # used for recognition.  A browser/original-photo overlay is visually
+    # useful but cannot be compared reliably across devices.
+    debug = corrected_image.copy()
 
     exam_name = (
         str(
@@ -4253,8 +4303,6 @@ def create_debug_image(
             corrected_image,
             template,
             answers,
-            original_image=original_image,
-            homography=homography,
         )
 
     elif exam_name == "JEE":
@@ -4290,6 +4338,10 @@ def create_debug_image(
 def process_omr(
     image_path,
     template_path,
+    *,
+    input_filename=None,
+    input_mime_type=None,
+    diagnostic_dir=None,
 ):
 
     # --------------------------------
@@ -4304,9 +4356,24 @@ def process_omr(
     # Load original image
     # --------------------------------
 
-    image = load_image(
-        image_path
+    image, input_debug, raw_decoded_rgb, orientation_normalized = load_image(
+        image_path,
+        filename=input_filename,
+        mime_type=input_mime_type,
+        return_debug=True,
     )
+
+    debug_input_enabled = bool(os.environ.get("OMR_DEBUG_INPUT"))
+    if debug_input_enabled and diagnostic_dir is None and not os.environ.get("VERCEL"):
+        diagnostic_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alignment_debug", "input")
+    if debug_input_enabled and diagnostic_dir:
+        os.makedirs(diagnostic_dir, exist_ok=True)
+        cv2.imwrite(os.path.join(diagnostic_dir, "01_raw_decoded.jpg"), cv2.cvtColor(raw_decoded_rgb, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(diagnostic_dir, "02_orientation_normalized.jpg"), orientation_normalized)
+        cv2.imwrite(os.path.join(diagnostic_dir, "03_resolution_normalized.jpg"), image)
+        # Registration uses the normalized full frame directly; it has no
+        # independent crop operation before registration.
+        cv2.imwrite(os.path.join(diagnostic_dir, "04_document_crop.jpg"), image)
 
     # --------------------------------
     # Quality validation
@@ -4377,6 +4444,8 @@ def process_omr(
                 debug_dir=local_debug_dir,
             )
         )
+
+        alignment_debug["input"] = input_debug
 
         # Keep two representations after canonical registration:
         # - document_preview: enhanced for visual document-scan inspection
@@ -4549,7 +4618,12 @@ def process_omr(
                     ),
             },
         }
+        alignment_debug["input"] = input_debug
 
+
+    if debug_input_enabled and diagnostic_dir:
+        cv2.imwrite(os.path.join(diagnostic_dir, "05_canonical_registered.jpg"), corrected)
+        cv2.imwrite(os.path.join(diagnostic_dir, "06_existing_recognition_input.jpg"), corrected)
 
     # --------------------------------
     # Grayscale is already prepared by canonical preprocessing.
@@ -4781,6 +4855,32 @@ def process_omr(
                 detailed_debug,
             )
 
+    if debug_input_enabled and diagnostic_dir:
+        cv2.imwrite(os.path.join(diagnostic_dir, "07_bubble_debug.jpg"), debug)
+        diagnostic_json = {
+            "input": input_debug,
+            "orientation": {
+                "exif_orientation": input_debug["exif_orientation"],
+                "orientation_applied": input_debug["orientation_applied"],
+            },
+            "resolution": {
+                "width": input_debug["normalized_width"],
+                "height": input_debug["normalized_height"],
+                "normalized": input_debug["resolution_normalized"],
+            },
+            "registration": {
+                "document_bounds": alignment_debug.get("document_detection", {}).get("bounds"),
+                "markers": alignment_debug.get("registration", {}).get("markers"),
+                "orb_applied": alignment_debug.get("orb_applied", False),
+                "orb_inliers": alignment_debug.get("orb_inliers", 0),
+                "ecc_applied": alignment_debug.get("ecc_applied", False),
+                "ecc_score": alignment_debug.get("ecc_score"),
+            },
+            "final_geometry": {"width": int(corrected.shape[1]), "height": int(corrected.shape[0])},
+        }
+        with open(os.path.join(diagnostic_dir, "diagnostics.json"), "w", encoding="utf-8") as diagnostic_file:
+            json.dump(diagnostic_json, diagnostic_file, indent=2, default=str)
+
     # --------------------------------
     # Diagnostic Logging
     # --------------------------------
@@ -4816,6 +4916,8 @@ def process_omr(
         "quality":
             quality,
 
+        "input_debug": input_debug,
+
         "crop_debug":
             crop_debug,
 
@@ -4839,4 +4941,37 @@ def process_omr(
 
         "debug":
             debug,
+    }
+
+
+def compare_omr_inputs(laptop_image, mobile_image, template_path):
+    """Run two files through the frozen OMR pipeline and report first-order differences.
+
+    This is deliberately a helper rather than a second recognition path.  It
+    is useful in a shell or regression test with a known laptop/mobile pair.
+    """
+    laptop = process_omr(laptop_image, template_path)
+    mobile = process_omr(mobile_image, template_path)
+
+    def registration(result):
+        debug = result.get("alignment_debug", {})
+        return {
+            "canonical_dimensions": debug.get("output_size"),
+            "document_bounds": debug.get("document_detection", {}).get("bounds"),
+            "orb_inliers": debug.get("orb_inliers", 0),
+            "ecc_score": debug.get("ecc_score"),
+        }
+
+    laptop_answers = laptop.get("answers", {})
+    mobile_answers = mobile.get("answers", {})
+    answer_differences = {
+        str(question): {"laptop": laptop_answers.get(question), "mobile": mobile_answers.get(question)}
+        for question in sorted(set(laptop_answers) | set(mobile_answers))
+        if laptop_answers.get(question) != mobile_answers.get(question)
+    }
+    return {
+        "laptop": {"input": laptop["input_debug"], "registration": registration(laptop)},
+        "mobile": {"input": mobile["input_debug"], "registration": registration(mobile)},
+        "answer_differences": answer_differences,
+        "recognition_same": not answer_differences,
     }

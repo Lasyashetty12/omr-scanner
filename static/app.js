@@ -1722,7 +1722,11 @@ async function scanOMR() {
             capturedBlob,
             capturedFromCamera
                 ? "camera_omr.jpg"
-                : "uploaded_omr.jpg"
+                // Keep the original file bytes and name.  The server owns
+                // the one deterministic decode/EXIF normalization pass;
+                // re-encoding here would introduce device-dependent JPEG
+                // artifacts before recognition.
+                : (capturedBlob.name || "uploaded_omr.jpg")
         );
 
 

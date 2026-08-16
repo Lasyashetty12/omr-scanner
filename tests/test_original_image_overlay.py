@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from scanner import draw_answer_analysis, create_debug_image
 
-def test_original_image_overlay_projection():
-    """Verify that draw_answer_analysis renders overlay on original photo coordinates."""
+def test_debug_overlay_uses_canonical_recognition_coordinates():
+    """The downloadable bubble debug must use the recognition image itself."""
     orig_h, orig_w = 3000, 4000
     orig_img = np.full((orig_h, orig_w, 3), 240, dtype=np.uint8)
 
@@ -51,4 +51,15 @@ def test_original_image_overlay_projection():
     )
 
     assert debug_out is not None
+    # Direct helper compatibility remains available for diagnostics, while
+    # create_debug_image (used by process_omr) selects canonical output.
     assert debug_out.shape[:2] == (orig_h, orig_w)
+
+    canonical_debug = create_debug_image(
+        corrected_dummy,
+        answers,
+        template,
+        original_image=orig_img,
+        homography=H,
+    )
+    assert canonical_debug.shape[:2] == corrected_dummy.shape[:2]

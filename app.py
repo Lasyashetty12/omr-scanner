@@ -374,8 +374,15 @@ async def scan_omr(
     try:
 
         processing = process_omr(
-            upload_path,
+            contents,
             template_path,
+            input_filename=original_filename,
+            input_mime_type=image.content_type,
+            diagnostic_dir=(
+                os.path.join(RESULT_DIR, f"{scan_id}_input_diagnostics")
+                if os.environ.get("OMR_DEBUG_INPUT")
+                else None
+            ),
         )
 
     except ValueError as error:
@@ -415,6 +422,8 @@ async def scan_omr(
             processing.get(
                 "quality"
             ),
+
+        "input": processing.get("input_debug"),
 
     }
 
