@@ -4039,8 +4039,17 @@ def draw_paper_code_debug(
     Draw the exact paper-code sampling circles on the corrected
     1600 x 2200 image. Useful for coordinate calibration.
     """
+    if corrected_image is None or corrected_image.size == 0:
+        return corrected_image
 
-    debug = corrected_image.copy()
+    if corrected_image.shape[:2] != (2200, 1600):
+        debug = cv2.resize(
+            corrected_image,
+            (1600, 2200),
+            interpolation=cv2.INTER_LINEAR,
+        )
+    else:
+        debug = corrected_image.copy()
 
     config = template.get(
         "paper_code",
@@ -4298,23 +4307,6 @@ def process_omr(
             )
         )
 
-        # Keep two representations after canonical registration:
-        # - document_preview: enhanced for visual document-scan inspection
-        # - corrected: the conservative canonical image used by the frozen
-        #   recognition pipeline. This avoids changing bubble intensities.
-        (
-            document_preview,
-            _recognition_image,
-            document_mode_debug,
-        ) = prepare_omr_document_mode(
-            corrected,
-            debug_dir=local_debug_dir,
-        )
-
-        alignment_debug[
-            "document_mode"
-        ] = document_mode_debug
-
         expected_width = int(
             template["sheet_width"]
         )
@@ -4349,6 +4341,23 @@ def process_omr(
                 f"Expected {expected_width}x{expected_height}, "
                 f"got {corrected.shape[1]}x{corrected.shape[0]}."
             )
+
+        # Keep two representations after canonical registration:
+        # - document_preview: enhanced for visual document-scan inspection
+        # - corrected: the conservative canonical image used by the frozen
+        #   recognition pipeline. This avoids changing bubble intensities.
+        (
+            document_preview,
+            _recognition_image,
+            document_mode_debug,
+        ) = prepare_omr_document_mode(
+            corrected,
+            debug_dir=local_debug_dir,
+        )
+
+        alignment_debug[
+            "document_mode"
+        ] = document_mode_debug
 
         gray = normalize_grayscale(
             corrected
