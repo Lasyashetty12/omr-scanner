@@ -648,6 +648,17 @@ def auto_calibrate_neet_columns(
         y_positions
     )
 
+    row_spacing = (
+        float(y_positions[-1] - y_positions[0]) / float(len(y_positions) - 1)
+        if len(y_positions) > 1
+        else 28.0
+    )
+
+    calib_patch_radius = min(
+        DEFAULT_PATCH_RADIUS,
+        max(8, int(round(row_spacing * 0.42))),
+    )
+
     # Include first and last rows explicitly.
     anchor_rows = list(
         range(
@@ -712,7 +723,7 @@ def auto_calibrate_neet_columns(
                         search_radius=
                             search_radius,
                         patch_radius=
-                            DEFAULT_PATCH_RADIUS,
+                            calib_patch_radius,
                     )
 
                     dx_values.append(
