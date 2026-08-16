@@ -211,14 +211,16 @@ def _local_search_best_center(
         ),
     )
 
-    # 1 px search gives best accuracy; area is small so this is still practical.
+    # 2 px search step provides spatial noise filtering for mobile photo sensors.
     for dy in range(
         -search_radius,
         search_radius + 1,
+        2,
     ):
         for dx in range(
             -search_radius,
             search_radius + 1,
+            2,
         ):
             cx = int(
                 round(
