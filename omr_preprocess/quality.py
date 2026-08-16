@@ -121,7 +121,7 @@ def assess_document_quality(
     elif not document_detected:
         classification = "REJECT"
         warnings.append("Full OMR sheet is not captured. Please ensure all four corner registration blocks are visible inside the frame.")
-    elif perspective_quality < 35.0:
+    elif perspective_quality < 55.0:
         classification = "REJECT"
         warnings.append("OMR sheet is tilted in large amount. Please hold camera directly above the sheet.")
     elif (

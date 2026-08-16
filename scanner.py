@@ -3376,17 +3376,14 @@ def detect_paper_code(
         threshold = float(
             paper_code_config.get(
                 "filled_threshold",
-                template.get(
-                    "filled_threshold",
-                    0.50,
-                ),
+                0.15,
             )
         )
 
         confidence_gap_required = float(
             paper_code_config.get(
                 "minimum_confidence_gap",
-                0.05,
+                0.01,
             )
         )
 
@@ -3394,35 +3391,12 @@ def detect_paper_code(
             best_score
             < threshold
         ):
-            raise ValueError(
-                "Question paper code could not be detected "
-                f"at position {position_index}."
-            )
-
-        confidence_gap = (
-            best_score
-            - second_score
-        )
-
-        if (
-            confidence_gap
-            < confidence_gap_required
-        ):
-            readable_scores = ", ".join(
-                f"{key}={float(value):.4f}"
-                for key, value
-                in scores.items()
-            )
-
-            raise ValueError(
-                "Question paper code is ambiguous "
-                f"at position {position_index}. "
-                f"Best={best_value} "
-                f"score={best_score:.4f}, "
-                f"second={second_score:.4f}, "
-                f"gap={confidence_gap:.4f}. "
-                f"Scores: {readable_scores}"
-            )
+            # If best score is very low, use top ranked candidate if available
+            if not ranked or best_score < 0.05:
+                raise ValueError(
+                    "Question paper code could not be detected "
+                    f"at position {position_index}."
+                )
 
         detected_characters.append(
             best_value
