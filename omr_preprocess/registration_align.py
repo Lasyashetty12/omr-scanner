@@ -1552,24 +1552,38 @@ def ensure_canonical_orientation(
     height: int,
 ) -> tuple[np.ndarray, dict]:
     """
-    Keep natural image orientation without applying auto-rotations.
+    Ensure the Manchester header is at the TOP (upright portrait orientation).
+    If the image is upside down (180°), rotate 180° to bring header to the top.
     """
     h, w = image.shape[:2]
     if (w, h) != (width, height):
-        oriented = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+
+    top_region = image[50:350, 100:1500]
+    bottom_region = cv2.rotate(image, cv2.ROTATE_180)[50:350, 100:1500]
+    ref_top = reference[50:350, 100:1500]
+
+    g_top = cv2.cvtColor(top_region, cv2.COLOR_BGR2GRAY) if top_region.ndim == 3 else top_region
+    g_bot = cv2.cvtColor(bottom_region, cv2.COLOR_BGR2GRAY) if bottom_region.ndim == 3 else bottom_region
+    g_ref = cv2.cvtColor(ref_top, cv2.COLOR_BGR2GRAY) if ref_top.ndim == 3 else ref_top
+
+    diff_0 = float(np.mean(np.abs(g_top.astype(float) - g_ref.astype(float))))
+    diff_180 = float(np.mean(np.abs(g_bot.astype(float) - g_ref.astype(float))))
+
+    if diff_180 < diff_0 * 0.85:
+        oriented = cv2.rotate(image, cv2.ROTATE_180)
+        selected_rotation = 180
     else:
         oriented = image.copy()
+        selected_rotation = 0
 
     return oriented, {
-        "selected_rotation": 0,
+        "selected_rotation": selected_rotation,
         "orientation_scores": {
-            "0": 1.0,
-            "90": 0.0,
-            "180": 0.0,
-            "270": 0.0,
+            "0": round(diff_0, 2),
+            "180": round(diff_180, 2),
         },
-        "orientation_method":
-            "none",
+        "orientation_method": "header_structure_matching",
     }
 
 

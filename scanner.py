@@ -158,14 +158,14 @@ def load_template(template_path):
 # ============================================================
 
 def load_image(image_path):
-    image = cv2.imread(str(image_path))
-    if image is None:
-        try:
-            from PIL import Image
-            pil_img = Image.open(str(image_path)).convert("RGB")
-            image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        except Exception:
-            pass
+    try:
+        from PIL import Image, ImageOps
+        pil_img = Image.open(str(image_path))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        pil_img = pil_img.convert("RGB")
+        image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    except Exception:
+        image = cv2.imread(str(image_path))
 
     if image is None:
         raise ValueError(
