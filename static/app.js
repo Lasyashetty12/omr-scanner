@@ -1915,6 +1915,49 @@ if (examSelect) {
     examSelect.addEventListener("change", updateExamStreamVisibility);
 }
 
+/* LIGHTBOX FULLSCREEN ZOOM */
+const imageLightbox = document.getElementById("imageLightbox");
+const lightboxImg = document.getElementById("lightboxImg");
+const lightboxClose = document.getElementById("lightboxClose");
+
+function openLightbox(src) {
+    if (imageLightbox && lightboxImg && src) {
+        lightboxImg.src = src;
+        imageLightbox.classList.remove("hidden");
+    }
+}
+
+function closeLightbox() {
+    if (imageLightbox) {
+        imageLightbox.classList.add("hidden");
+    }
+}
+
+if (bubbleDebugPreview) {
+    bubbleDebugPreview.addEventListener("click", () => {
+        openLightbox(bubbleDebugPreview.src);
+    });
+}
+
+if (capturedPreview) {
+    capturedPreview.style.cursor = "zoom-in";
+    capturedPreview.addEventListener("click", () => {
+        openLightbox(capturedPreview.src);
+    });
+}
+
+if (lightboxClose) {
+    lightboxClose.addEventListener("click", closeLightbox);
+}
+
+if (imageLightbox) {
+    imageLightbox.addEventListener("click", (e) => {
+        if (e.target === imageLightbox) {
+            closeLightbox();
+        }
+    });
+}
+
 
 /* ==========================================================
    PAGE CLEANUP

@@ -179,15 +179,23 @@
                 <!-- EVALUATED OMR BUBBLE ANALYSIS DISPLAY CARD -->
                 <div id="bubbleAnalysisCard" class="bubble-analysis-card hidden">
                     <div class="bubble-analysis-title-bar">
-                        <h4>🔍 Evaluated OMR Sheet Analysis</h4>
+                        <h4>🔍 Evaluated OMR Sheet Analysis (Tap image to zoom full screen)</h4>
                         <p>Visual overlay displaying all detected bubbles, answer keys, and grid alignment.</p>
                     </div>
-                    <div class="bubble-analysis-img-wrapper">
+                    <div class="bubble-analysis-img-wrapper" style="cursor: zoom-in;">
                         <img id="bubbleDebugPreview" class="preview-img bubble-debug-img" alt="Evaluated OMR Bubble Analysis">
                     </div>
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- FULLSCREEN IMAGE LIGHTBOX MODAL -->
+    <div id="imageLightbox" class="lightbox-modal hidden">
+        <span class="lightbox-close" id="lightboxClose">&times;</span>
+        <div class="lightbox-content-wrapper">
+            <img id="lightboxImg" class="lightbox-img" alt="Full Resolution View">
+        </div>
     </div>
 
     <script src="/static/app.js?v=3.0"></script>

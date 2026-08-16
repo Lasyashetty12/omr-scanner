@@ -175,8 +175,65 @@ def load_image(image_path):
             "Unable to read uploaded image."
         )
 
+    image = normalize_image_resolution(image)
+
     return image
 
+
+# ============================================================
+# RESOLUTION NORMALIZATION
+# ============================================================
+#
+# Laptop webcams / older reference images are typically well under
+# 2MP (e.g. ~1280x720). Mobile phone cameras routinely capture
+# 8-12MP+ photos (e.g. 4000x3000) for the exact same physical sheet.
+#
+# Every blur/morphology step used for registration-marker and
+# page-corner detection (crop_omr_by_corner_boxes,
+# detect_page_corners_from_crop, detect_registration_markers_in_crop,
+# find_marker_candidates, etc.) uses FIXED, absolute-pixel kernel
+# sizes such as GaussianBlur(..., (5, 5)) or a (15, 15) morphological
+# close. Those kernels behave very differently depending on the raw
+# resolution of the photo: on a high-resolution mobile photo the same
+# kernel is proportionally tiny, so noise isn't suppressed and gaps
+# in the paper/marker mask aren't bridged the way they are on a
+# lower-resolution laptop image. That is what makes the corner-box /
+# page-corner detection pick different points for a mobile photo than
+# for a laptop image of the same sheet, which shows up downstream as
+# a wrong or inconsistent crop.
+#
+# Downscaling (never upscaling) every image to a common working
+# resolution before detection removes resolution as a variable, so
+# detection behaves the same regardless of source device. The final
+# canonical sheet is still forced to template["sheet_width"] /
+# ["sheet_height"] later in preprocess_to_canonical, so this does not
+# reduce final output quality.
+#
+NORMALIZED_MAX_DIMENSION = 1600
+
+
+def normalize_image_resolution(
+    image,
+    max_dimension=NORMALIZED_MAX_DIMENSION,
+):
+    height, width = image.shape[:2]
+    longer_side = max(height, width)
+
+    if longer_side <= max_dimension:
+        return image
+
+    scale = max_dimension / float(longer_side)
+
+    resized = cv2.resize(
+        image,
+        (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        ),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    return resized
 
 
 # ============================================================
