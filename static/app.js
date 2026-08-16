@@ -781,11 +781,11 @@ function cropFromDetectedDocument(
 
     const bottom = Math.max(...ys);
 
-    // Keep only a thin safety edge outside the detected OMR markers.  The
-    // previous broad margin retained the surrounding camera background.
-    const marginX = (right - left) * 0.012;
+    // Provide a generous safety margin (6% of detected bounding dimensions)
+    // to ensure corner registration marks are never clipped off.
+    const marginX = (right - left) * 0.06;
 
-    const marginY = (bottom - top) * 0.012;
+    const marginY = (bottom - top) * 0.06;
 
     const x = Math.max(0, left - marginX);
 
@@ -971,92 +971,17 @@ function calculateA4Crop(
     videoHeight
 ) {
 
-    const sourceRatio =
-        videoWidth
-        / videoHeight;
-
-
-    let cropWidth;
-
-    let cropHeight;
-
-    let cropX;
-
-    let cropY;
-
-
-    /*
-        Camera frame wider than A4:
-        crop left/right.
-    */
-    if (
-        sourceRatio
-        > A4_RATIO
-    ) {
-
-        cropHeight =
-            videoHeight;
-
-
-        cropWidth =
-            cropHeight
-            * A4_RATIO;
-
-
-        cropX =
-            (
-                videoWidth
-                - cropWidth
-            )
-            / 2;
-
-
-        cropY =
-            0;
-    }
-
-
-    /*
-        Camera frame taller/narrower than A4:
-        crop top/bottom.
-    */
-    else {
-
-        cropWidth =
-            videoWidth;
-
-
-        cropHeight =
-            cropWidth
-            / A4_RATIO;
-
-
-        cropX =
-            0;
-
-
-        cropY =
-            (
-                videoHeight
-                - cropHeight
-            )
-            / 2;
-    }
-
-
+    // Return the full camera stream area without aggressive top/bottom truncation
+    // so the server's OpenCV pipeline receives all four corner registration blocks.
     return {
 
-        x:
-            cropX,
+        x: 0,
 
-        y:
-            cropY,
+        y: 0,
 
-        width:
-            cropWidth,
+        width: videoWidth,
 
-        height:
-            cropHeight
+        height: videoHeight
     };
 }
 
@@ -1109,19 +1034,16 @@ function captureCameraImage(
 
 
     const crop =
-        calculateA4Crop(
+        cropFromDetectedDocument(
             videoWidth,
             videoHeight
         );
 
+    const outWidth = CAMERA_OUTPUT_WIDTH;
+    const outHeight = Math.round(outWidth * (crop.height / Math.max(1, crop.width)));
 
-    captureCanvas.width =
-        CAMERA_OUTPUT_WIDTH;
-
-
-    captureCanvas.height =
-        CAMERA_OUTPUT_HEIGHT;
-
+    captureCanvas.width = outWidth;
+    captureCanvas.height = outHeight;
 
     const context =
         captureCanvas.getContext(
@@ -1131,7 +1053,6 @@ function captureCameraImage(
                     false
             }
         );
-
 
     if (
         !context
@@ -1144,27 +1065,16 @@ function captureCameraImage(
         return;
     }
 
-
-    /*
-        White background prevents transparent
-        or undefined regions.
-    */
     context.fillStyle =
         "#ffffff";
-
 
     context.fillRect(
         0,
         0,
-        CAMERA_OUTPUT_WIDTH,
-        CAMERA_OUTPUT_HEIGHT
+        outWidth,
+        outHeight
     );
 
-
-    /*
-        Crop to the stable document boundary detected from the four corner
-        blocks.  The server then applies its normal perspective correction.
-    */
     context.drawImage(
 
         camera,
@@ -1177,8 +1087,8 @@ function captureCameraImage(
         0,
         0,
 
-        CAMERA_OUTPUT_WIDTH,
-        CAMERA_OUTPUT_HEIGHT
+        outWidth,
+        outHeight
     );
 
 

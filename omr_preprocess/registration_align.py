@@ -361,40 +361,19 @@ def _validate_marker_geometry(
         )
 
 
-def detect_registration_blocks(
-    image: np.ndarray,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """
-    Detect the four large black registration blocks visible on the OMR sheet.
-
-    Output order: TL, TR, BR, BL.
-    """
-    if image is None or image.size == 0:
-        raise ValueError("Empty image.")
-
-    small, scale = _resize_for_detection(
-        image,
-        max_side=1500,
-    )
-
+def _detect_registration_blocks_internal(
+    small: np.ndarray,
+) -> Tuple[Dict[str, np.ndarray], list[Dict[str, Any]]]:
     h, w = small.shape[:2]
-
-    candidates = _candidate_black_blocks(
-        small
-    )
+    candidates = _candidate_black_blocks(small)
 
     picked_dict = {}
     for corner in ("TL", "TR", "BR", "BL"):
-        cand = _pick_corner_candidate(
-            candidates,
-            corner,
-            w,
-            h,
-        )
+        cand = _pick_corner_candidate(candidates, corner, w, h)
         if cand is not None:
             picked_dict[corner] = cand["center"]
 
-    # Fallback recovery for missing corner blocks (e.g. shadowed or obscured bottom marks):
+    # Fallback recovery for missing corner blocks
     if "TL" in picked_dict and "TR" in picked_dict:
         tl = picked_dict["TL"]
         tr = picked_dict["TR"]
@@ -420,6 +399,46 @@ def detect_registration_blocks(
                 picked_dict["BR"] = best_cand["center"]
             else:
                 picked_dict["BR"] = est_br
+
+    return picked_dict, candidates
+
+
+def detect_registration_blocks(
+    image: np.ndarray,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """
+    Detect the four large black registration blocks visible on the OMR sheet.
+    Handles both portrait and landscape input photos automatically.
+
+    Output order: TL, TR, BR, BL.
+    """
+    if image is None or image.size == 0:
+        raise ValueError("Empty image.")
+
+    small, scale = _resize_for_detection(
+        image,
+        max_side=1500,
+    )
+
+    h, w = small.shape[:2]
+
+    # Primary attempt in natural orientation
+    picked_dict, candidates = _detect_registration_blocks_internal(small)
+
+    # If landscape image and not all 4 blocks found in natural view, try 90° CW rotation
+    if (len(picked_dict) < 4 or w > h) and w > h:
+        small_rot = cv2.rotate(small, cv2.ROTATE_90_CLOCKWISE)
+        rot_h, rot_w = small_rot.shape[:2]
+        rot_picked, rot_cands = _detect_registration_blocks_internal(small_rot)
+
+        if len(rot_picked) >= len(picked_dict):
+            # Map rotated points (rot_x, rot_y) back to original small coordinates
+            # For 90° CW rotation: x_orig = h - y_rot, y_orig = x_rot
+            mapped_dict = {}
+            for k, pt in rot_picked.items():
+                x_rot, y_rot = pt
+                mapped_dict[k] = np.array([h - y_rot, x_rot], dtype=np.float32)
+            picked_dict = mapped_dict
 
     picked = []
     for corner in ("TL", "TR", "BR", "BL"):
@@ -1539,9 +1558,8 @@ def ensure_canonical_orientation(
     """
     Force the Manchester header to the TOP.
 
-    Only 0° and 180° are considered because the mobile capture workflow
-    is portrait. The orientation decision is based on the header region,
-    not on the repetitive response grid.
+    Evaluates 0°, 90°, 180°, and 270° rotations against the canonical reference header
+    to guarantee proper upright orientation regardless of photo capture orientation.
     """
 
     candidates = {
@@ -1552,11 +1570,24 @@ def ensure_canonical_orientation(
                 width,
                 height,
             ),
-
+        90:
+            _rotate_to_candidate(
+                image,
+                90,
+                width,
+                height,
+            ),
         180:
             _rotate_to_candidate(
                 image,
                 180,
+                width,
+                height,
+            ),
+        270:
+            _rotate_to_candidate(
+                image,
+                270,
                 width,
                 height,
             ),
@@ -1598,7 +1629,7 @@ def ensure_canonical_orientation(
         },
 
         "orientation_method":
-            "header_only_0_or_180",
+            "header_structural_matching_0_90_180_270",
     }
 
 
