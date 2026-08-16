@@ -504,13 +504,14 @@ function setCornerDetectionState(
     if (cornerDetectionStatus) {
 
         cornerDetectionStatus.textContent = detected
-            ? "Page detected - all four corner blocks are visible"
-            : "Looking for the four corner blocks...";
+            ? "Page detected — all four corner blocks visible"
+            : "Point camera at OMR sheet (Tap Capture anytime)";
     }
 
-    if (captureButton && !captureButton.hidden) {
+    if (captureButton) {
 
-        captureButton.disabled = !detected;
+        captureButton.disabled = false;
+        captureButton.classList.remove("hidden");
     }
 }
 
@@ -919,6 +920,10 @@ async function openCamera() {
                 );
 
 
+        camera.setAttribute("playsinline", "true");
+        camera.setAttribute("autoplay", "true");
+        camera.setAttribute("muted", "true");
+
         camera.srcObject =
             cameraStream;
 
@@ -931,6 +936,8 @@ async function openCamera() {
         camera.hidden =
             false;
 
+        camera.classList.remove("hidden");
+
 
         capturedPreview.hidden =
             true;
@@ -939,16 +946,22 @@ async function openCamera() {
         cameraContainer.hidden =
             false;
 
+        cameraContainer.classList.remove("hidden");
+
 
         captureButton.hidden =
             false;
 
+        captureButton.classList.remove("hidden");
+
         captureButton.disabled =
-            true;
+            false;
 
 
         retakeButton.hidden =
             true;
+
+        retakeButton.classList.add("hidden");
 
 
         scanButton.disabled =
@@ -1106,15 +1119,6 @@ function captureCameraImage(
 
         showError(
             "Camera is not active."
-        );
-
-        return;
-    }
-
-    if (!pageCornersDetected && !automatic) {
-
-        showError(
-            "Keep all four black corner blocks inside the guide before capturing."
         );
 
         return;
