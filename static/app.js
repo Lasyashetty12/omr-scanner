@@ -161,6 +161,16 @@ const message =
         "message"
     );
 
+const bubbleAnalysisCard =
+    document.getElementById(
+        "bubbleAnalysisCard"
+    );
+
+const bubbleDebugPreview =
+    document.getElementById(
+        "bubbleDebugPreview"
+    );
+
 const resultStream =
     document.getElementById(
         "resultStream"
@@ -1651,6 +1661,28 @@ function displayResult(
 
         capturedPreview.hidden =
             false;
+    }
+
+
+    const bubbleDebugUrl =
+        result.bubble_debug_image_url
+        ||
+        data.bubble_debug_image_url;
+
+    if (
+        bubbleDebugUrl
+        &&
+        bubbleDebugPreview
+    ) {
+        bubbleDebugPreview.src =
+            bubbleDebugUrl
+            + "?t="
+            + Date.now();
+
+        if (bubbleAnalysisCard) {
+            bubbleAnalysisCard.hidden = false;
+            bubbleAnalysisCard.classList.remove("hidden");
+        }
     }
 
 

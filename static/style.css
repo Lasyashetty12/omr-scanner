@@ -556,6 +556,46 @@ video#camera {
   line-height: 1.5;
 }
 
+/* BUBBLE ANALYSIS DISPLAY CARD */
+.bubble-analysis-card {
+  margin-top: 16px;
+  background: var(--card-bg2);
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble-analysis-title-bar h4 {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--gold);
+  margin: 0;
+}
+
+.bubble-analysis-title-bar p {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.bubble-analysis-img-wrapper {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.bubble-debug-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 .hidden { display: none !important; }
 
 @media (max-width: 600px) {
