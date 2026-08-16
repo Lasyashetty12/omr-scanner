@@ -1574,73 +1574,33 @@ def ensure_canonical_orientation(
     """
 
     candidates = {
-        0:
-            _rotate_to_candidate(
-                image,
-                0,
-                width,
-                height,
-            ),
-        90:
-            _rotate_to_candidate(
-                image,
-                90,
-                width,
-                height,
-            ),
-        180:
-            _rotate_to_candidate(
-                image,
-                180,
-                width,
-                height,
-            ),
-        270:
-            _rotate_to_candidate(
-                image,
-                270,
-                width,
-                height,
-            ),
+        0: image.copy(),
+        180: cv2.rotate(image, cv2.ROTATE_180),
     }
 
     scores = {
-        rotation:
-            _header_structure_score(
-                candidate,
-                reference,
-            )
-        for rotation, candidate
-        in candidates.items()
+        rotation: _header_structure_score(
+            candidate,
+            reference,
+        )
+        for rotation, candidate in candidates.items()
     }
 
-    best_rotation = max(
-        scores,
-        key=scores.get,
-    )
+    # Default to 0° upright orientation from 4-corner registration alignment.
+    # Only flip 180° if 180° score is significantly higher.
+    best_rotation = 0
+    if scores[180] > scores[0] + 150.0:
+        best_rotation = 180
 
-    oriented = candidates[
-        best_rotation
-    ]
+    oriented = candidates[best_rotation]
 
     return oriented, {
-        "selected_rotation":
-            int(
-                best_rotation
-            ),
-
+        "selected_rotation": int(best_rotation),
         "orientation_scores": {
-            str(rotation):
-                round(
-                    float(score),
-                    3,
-                )
-            for rotation, score
-            in scores.items()
+            str(rotation): round(float(score), 3)
+            for rotation, score in scores.items()
         },
-
-        "orientation_method":
-            "header_structural_matching_0_90_180_270",
+        "orientation_method": "registration_aligned_0_180_check",
     }
 
 
