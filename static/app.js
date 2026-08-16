@@ -270,79 +270,40 @@ const AUTO_CAPTURE_STABLE_CHECKS = 8;
    UI HELPERS
    ========================================================== */
 
-function showError(
-    text
-) {
-
-    if (!errorBox) {
-        return;
-    }
-
-
-    errorBox.textContent =
-        text;
-
-
-    errorBox.hidden =
-        false;
+function showError(text) {
+    if (!errorBox) return;
+    errorBox.textContent = text;
+    errorBox.hidden = false;
+    errorBox.classList.remove("hidden");
+    errorBox.scrollIntoView({ behavior: "smooth" });
 }
-
 
 function clearError() {
-
-    if (!errorBox) {
-        return;
-    }
-
-
-    errorBox.textContent =
-        "";
-
-
-    errorBox.hidden =
-        true;
+    if (!errorBox) return;
+    errorBox.textContent = "";
+    errorBox.hidden = true;
+    errorBox.classList.add("hidden");
 }
 
-
-function showLoading(
-    text = "Processing OMR..."
-) {
-
-    if (!loading) {
-        return;
-    }
-
-
-    loading.textContent =
-        text;
-
-
-    loading.hidden =
-        false;
+function showLoading(text = "Processing OMR...") {
+    if (!loading) return;
+    const txtEl = document.getElementById("loadingText");
+    if (txtEl) txtEl.textContent = text;
+    else loading.textContent = text;
+    loading.hidden = false;
+    loading.classList.remove("hidden");
 }
-
 
 function hideLoading() {
-
-    if (!loading) {
-        return;
-    }
-
-
-    loading.hidden =
-        true;
+    if (!loading) return;
+    loading.hidden = true;
+    loading.classList.add("hidden");
 }
 
-
 function hideResult() {
-
-    if (!resultSection) {
-        return;
-    }
-
-
-    resultSection.hidden =
-        true;
+    if (!resultSection) return;
+    resultSection.hidden = true;
+    resultSection.classList.add("hidden");
 }
 
 
