@@ -736,8 +736,8 @@ def crop_omr_by_corner_boxes(
     )
 
     if (
-        x2 - x1 < width * 0.35
-        or y2 - y1 < height * 0.35
+        x2 - x1 < width * 0.05
+        or y2 - y1 < height * 0.05
     ):
         raise ValueError(
             "Initial OMR crop is too small."

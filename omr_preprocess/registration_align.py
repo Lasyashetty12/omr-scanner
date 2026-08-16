@@ -353,7 +353,7 @@ def _validate_marker_geometry(
     left = np.linalg.norm(bl - tl)
     right = np.linalg.norm(br - tr)
 
-    if min(top, bottom, left, right) < min(width, height) * 0.32:
+    if min(top, bottom, left, right) < min(width, height) * 0.05:
         raise ValueError(
             "Registration markers are too close together. "
             "A wrong black object was probably selected."
@@ -367,18 +367,18 @@ def _validate_marker_geometry(
     area = abs(float(cv2.contourArea(polygon)))
     coverage = area / float(width * height)
 
-    if coverage < 0.35:
+    if coverage < 0.05:
         raise ValueError(
             "Registration-marker quadrilateral is too small."
         )
 
     # Opposite sides should not differ absurdly.
-    if max(top, bottom) / max(min(top, bottom), 1.0) > 1.8:
+    if max(top, bottom) / max(min(top, bottom), 1.0) > 2.5:
         raise ValueError(
             "Top/bottom registration geometry is inconsistent."
         )
 
-    if max(left, right) / max(min(left, right), 1.0) > 1.8:
+    if max(left, right) / max(min(left, right), 1.0) > 2.5:
         raise ValueError(
             "Left/right registration geometry is inconsistent."
         )
