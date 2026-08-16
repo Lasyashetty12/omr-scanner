@@ -639,12 +639,10 @@ function detectDocumentCorners() {
         return null;
     }
 
-    const crop = calculateA4Crop(videoWidth, videoHeight);
-
     const analysisWidth = 180;
 
     const analysisHeight = Math.round(
-        analysisWidth / A4_RATIO
+        analysisWidth * (videoHeight / videoWidth)
     );
 
     markerAnalysisCanvas.width = analysisWidth;
@@ -663,10 +661,10 @@ function detectDocumentCorners() {
 
     context.drawImage(
         camera,
-        crop.x,
-        crop.y,
-        crop.width,
-        crop.height,
+        0,
+        0,
+        videoWidth,
+        videoHeight,
         0,
         0,
         analysisWidth,
@@ -718,8 +716,8 @@ function detectDocumentCorners() {
     }));
 
     const sourcePoints = measurements.map(({ x, y }) => ({
-        x: crop.x + x / analysisWidth * crop.width,
-        y: crop.y + y / analysisHeight * crop.height,
+        x: x / analysisWidth * videoWidth,
+        y: y / analysisHeight * videoHeight,
     }));
 
     return {
@@ -773,43 +771,11 @@ function cropFromDetectedDocument(
     videoWidth,
     videoHeight
 ) {
-
-    if (!detectedDocumentBounds?.length) {
-
-        return calculateA4Crop(videoWidth, videoHeight);
-    }
-
-    const xs = detectedDocumentBounds.map(({ x }) => x);
-
-    const ys = detectedDocumentBounds.map(({ y }) => y);
-
-    const left = Math.min(...xs);
-
-    const right = Math.max(...xs);
-
-    const top = Math.min(...ys);
-
-    const bottom = Math.max(...ys);
-
-    // Provide a generous safety margin (6% of detected bounding dimensions)
-    // to ensure corner registration marks are never clipped off.
-    const marginX = (right - left) * 0.06;
-
-    const marginY = (bottom - top) * 0.06;
-
-    const x = Math.max(0, left - marginX);
-
-    const y = Math.max(0, top - marginY);
-
-    const maxRight = Math.min(videoWidth, right + marginX);
-
-    const maxBottom = Math.min(videoHeight, bottom + marginY);
-
     return {
-        x,
-        y,
-        width: Math.max(1, maxRight - x),
-        height: Math.max(1, maxBottom - y),
+        x: 0,
+        y: 0,
+        width: videoWidth,
+        height: videoHeight,
     };
 }
 
@@ -980,33 +946,11 @@ function calculateA4Crop(
     videoWidth,
     videoHeight
 ) {
-
-    const sourceRatio =
-        videoWidth
-        / videoHeight;
-
-    let cropWidth, cropHeight, cropX, cropY;
-
-    if (
-        sourceRatio
-        > A4_RATIO
-    ) {
-        cropHeight = videoHeight;
-        cropWidth = cropHeight * A4_RATIO;
-        cropX = (videoWidth - cropWidth) / 2;
-        cropY = 0;
-    } else {
-        cropWidth = videoWidth;
-        cropHeight = cropWidth / A4_RATIO;
-        cropX = 0;
-        cropY = (videoHeight - cropHeight) / 2;
-    }
-
     return {
-        x: cropX,
-        y: cropY,
-        width: cropWidth,
-        height: cropHeight
+        x: 0,
+        y: 0,
+        width: videoWidth,
+        height: videoHeight,
     };
 }
 
