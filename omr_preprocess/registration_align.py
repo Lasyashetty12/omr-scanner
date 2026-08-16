@@ -152,27 +152,27 @@ def _candidate_black_blocks(
         area = float(cv2.contourArea(contour))
 
         # Registration blocks are visually large but still small relative to frame.
-        if area < image_area * 0.00015:
+        if area < image_area * 0.00008:
             continue
 
-        if area > image_area * 0.035:
+        if area > image_area * 0.045:
             continue
 
         x, y, bw, bh = cv2.boundingRect(contour)
 
-        if bw < 10 or bh < 10:
+        if bw < 8 or bh < 8:
             continue
 
         aspect = bw / float(bh)
 
         # Bottom marks can merge slightly with page rules, so allow some elongation.
-        if not 0.45 <= aspect <= 2.2:
+        if not 0.38 <= aspect <= 2.6:
             continue
 
         rect_area = float(bw * bh)
         fill = area / max(rect_area, 1.0)
 
-        if fill < 0.52:
+        if fill < 0.40:
             continue
 
         perimeter = cv2.arcLength(contour, True)
@@ -372,33 +372,6 @@ def _detect_registration_blocks_internal(
         cand = _pick_corner_candidate(candidates, corner, w, h)
         if cand is not None:
             picked_dict[corner] = cand["center"]
-
-    # Fallback recovery for missing corner blocks
-    if "TL" in picked_dict and "TR" in picked_dict:
-        tl = picked_dict["TL"]
-        tr = picked_dict["TR"]
-        dx = tr[0] - tl[0]
-        dy = tr[1] - tl[1]
-        perp_x = -dy * 1.375
-        perp_y = dx * 1.375
-
-        if "BL" not in picked_dict:
-            est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
-            sub_cands = [c for c in candidates if c["center"][0] < w * 0.48 and c["center"][1] > h * 0.60]
-            if sub_cands:
-                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_bl))
-                picked_dict["BL"] = best_cand["center"]
-            else:
-                picked_dict["BL"] = est_bl
-
-        if "BR" not in picked_dict:
-            est_br = np.array([tr[0] + perp_x, tr[1] + perp_y], dtype=np.float32)
-            sub_cands = [c for c in candidates if c["center"][0] > w * 0.52 and c["center"][1] > h * 0.60]
-            if sub_cands:
-                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_br))
-                picked_dict["BR"] = best_cand["center"]
-            else:
-                picked_dict["BR"] = est_br
 
     return picked_dict, candidates
 
