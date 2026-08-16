@@ -1091,6 +1091,16 @@ def fit_response_grid(
         max_final_dy_from_input,
     )
 
+    y_positions = template.get("question_y_positions", [])
+    row_spacing = (
+        float(y_positions[-1] - y_positions[0]) / float(len(y_positions) - 1)
+        if len(y_positions) > 1
+        else 28.0
+    )
+    outlier_min_dist = min(9.0, max(5.5, row_spacing * 0.30))
+    min_pair_sep = min(10.0, max(6.0, row_spacing * 0.32))
+    max_pair_sep = min(22.0, max(14.0, row_spacing * 0.75))
+
     fitted = {}
     debug_info = {}
 
@@ -1658,7 +1668,7 @@ def fit_response_grid(
                                 option_y
                                 -
                                 cluster_y
-                            ) >= 9.0
+                            ) >= outlier_min_dist
                         ):
                             original_x, original_y = coordinates[
                                 question
@@ -1808,9 +1818,9 @@ def fit_response_grid(
                         and
                         high_spread <= 3.5
                         and
-                        10.0
+                        min_pair_sep
                         <= pair_separation
-                        <= 22.0
+                        <= max_pair_sep
                     ):
                         original_row_y = float(
                             np.median(

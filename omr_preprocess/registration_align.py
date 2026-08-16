@@ -422,23 +422,34 @@ def detect_registration_blocks(
 
     h, w = small.shape[:2]
 
-    # Primary attempt in natural orientation
+    # Primary attempt in natural orientation (0°)
     picked_dict, candidates = _detect_registration_blocks_internal(small)
 
-    # If landscape image and not all 4 blocks found in natural view, try 90° CW rotation
-    if (len(picked_dict) < 4 or w > h) and w > h:
-        small_rot = cv2.rotate(small, cv2.ROTATE_90_CLOCKWISE)
-        rot_h, rot_w = small_rot.shape[:2]
-        rot_picked, rot_cands = _detect_registration_blocks_internal(small_rot)
+    # If not all 4 blocks found in natural view, try remaining cardinal rotations
+    if len(picked_dict) < 4:
+        rotations = [
+            (cv2.ROTATE_90_CLOCKWISE, "90_cw"),
+            (cv2.ROTATE_180, "180"),
+            (cv2.ROTATE_90_COUNTERCLOCKWISE, "270_ccw"),
+        ]
 
-        if len(rot_picked) >= len(picked_dict):
-            # Map rotated points (rot_x, rot_y) back to original small coordinates
-            # For 90° CW rotation: x_orig = h - y_rot, y_orig = x_rot
-            mapped_dict = {}
-            for k, pt in rot_picked.items():
-                x_rot, y_rot = pt
-                mapped_dict[k] = np.array([h - y_rot, x_rot], dtype=np.float32)
-            picked_dict = mapped_dict
+        for rot_code, rot_name in rotations:
+            small_rot = cv2.rotate(small, rot_code)
+            rot_picked, rot_cands = _detect_registration_blocks_internal(small_rot)
+
+            if len(rot_picked) > len(picked_dict):
+                mapped_dict = {}
+                for k, pt in rot_picked.items():
+                    x_rot, y_rot = pt
+                    if rot_name == "90_cw":
+                        mapped_dict[k] = np.array([y_rot, h - x_rot], dtype=np.float32)
+                    elif rot_name == "180":
+                        mapped_dict[k] = np.array([w - x_rot, h - y_rot], dtype=np.float32)
+                    elif rot_name == "270_ccw":
+                        mapped_dict[k] = np.array([w - y_rot, x_rot], dtype=np.float32)
+                picked_dict = mapped_dict
+                if len(picked_dict) >= 4:
+                    break
 
     picked = []
     for corner in ("TL", "TR", "BR", "BL"):
