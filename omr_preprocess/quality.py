@@ -117,22 +117,36 @@ def assess_document_quality(
 
     if tiny_image or no_usable_detail:
         classification = "REJECT"
-        warnings.append("Image quality is too low to scan reliably. Please scan again.")
+        warnings.append("Image resolution or detail is too low to evaluate with 100% accuracy.")
+    elif not document_detected:
+        classification = "REJECT"
+        warnings.append("Could not confidently detect all four corner registration blocks. Ensure the complete sheet is visible and uncovered.")
+    elif perspective_quality < 48.0:
+        classification = "REJECT"
+        warnings.append("Camera angle is strongly tilted. Hold your device directly above the sheet.")
+    elif severe_lighting:
+        classification = "REJECT"
+        warnings.append("Uneven shadow or heavy glare is present on the OMR sheet. Move to balanced lighting.")
+    elif sharpness < 110.0:
+        classification = "REJECT"
+        warnings.append("Image focus is blurry. Hold camera steady and tap to focus.")
+    elif brightness < 45.0:
+        classification = "REJECT"
+        warnings.append("Lighting is too dark. Turn on torch/flashlight or scan under bright light.")
+    elif brightness > 252.0:
+        classification = "REJECT"
+        warnings.append("Image is overexposed with heavy flash glare. Tilt away from direct bulb reflections.")
     elif (
         sharpness < 150.0
         or brightness < 70.0
         or brightness > 248.0
         or contrast < 15.0
         or not resolution_ok
-        or not document_detected
         or coverage < 0.45
-        or perspective_quality < 55.0
-        or severe_lighting
     ):
         classification = "POOR"
         warnings.append(
-            "Image quality is below optimal. For more reliable scanning, use "
-            "Document Mode and scan again."
+            "Image quality is below optimal. For 100% accuracy, ensure the sheet is flat and well-lit."
         )
     elif sharpness < 600.0 or brightness < 105.0 or brightness > 245.0 or contrast < 20.0:
         classification = "ACCEPTABLE"
@@ -141,26 +155,15 @@ def assess_document_quality(
     else:
         classification = "ACCEPTABLE"
 
-    if sharpness < 600.0:
+    if sharpness < 600.0 and classification != "REJECT":
         warnings.append(
-            f"Sharpness is low ({sharpness:.2f}); OMR recognition may be unreliable."
+            f"Sharpness is moderate ({sharpness:.2f})."
         )
-    if brightness < 70.0:
-        warnings.append(f"Document is underexposed ({brightness:.2f}).")
-    elif brightness > 248.0:
-        warnings.append(f"Document is overexposed ({brightness:.2f}).")
-    if not document_detected:
-        warnings.append("Could not confidently detect all document registration anchors.")
-    if severe_lighting:
-        warnings.append("Uneven illumination or a broad shadow is present on the document.")
-    if perspective_quality and perspective_quality < 55.0:
-        warnings.append("Document perspective is strongly distorted.")
+    if brightness < 70.0 and classification != "REJECT":
+        warnings.append(f"Document is slightly underexposed ({brightness:.2f}).")
+    elif brightness > 248.0 and classification != "REJECT":
+        warnings.append(f"Document is slightly overexposed ({brightness:.2f}).")
 
-    if not resolution_ok:
-        warnings.append("Camera resolution is below the recommended level for bubble visibility.")
-
-    # POOR is a non-blocking advisory.  This preserves the practical operating
-    # range of the pre-existing recognition pipeline.
     can_scan = classification != "REJECT"
 
     return {
