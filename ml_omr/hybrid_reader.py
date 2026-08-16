@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+from functools import lru_cache
+
 import cv2
 import numpy as np
 
@@ -181,6 +183,7 @@ def refine_bubble_center(
 
 
 
+@lru_cache(maxsize=256)
 def _circle_mask(size, radius):
     center = (size - 1) / 2.0
     yy, xx = np.ogrid[:size, :size]
@@ -211,12 +214,7 @@ def _bubble_metrics(crop):
 
     crop = crop.astype(np.uint8)
 
-    clahe = cv2.createCLAHE(
-        clipLimit=1.6,
-        tileGridSize=(4, 4),
-    )
-
-    normalized = clahe.apply(crop)
+    normalized = crop
 
     h, w = normalized.shape[:2]
     size = min(h, w)
@@ -655,18 +653,98 @@ def _decide_question(
     )
 
     # --------------------------------------------------------
-    # Strong filled bubble
+    # Blank row check (MUST RUN FIRST before strong/medium fill)
     # --------------------------------------------------------
+    best_ml_blank = float(best_info.get("ml_blank_probability", 0.0))
+    best_ml_filled = float(best_info.get("ml_filled_probability", best["ml"]))
+    best_core_mean = float(best_info.get("metrics", {}).get("core_mean", 255.0))
+
+    blank_like = (
+        (best["disk"] < 0.60 and best["darkness"] < 85.0 and top_gap < 25.0)
+        or
+        (best_ml_blank >= 0.55 and best_ml_filled < 0.45)
+        or
+        (best["darkness"] < 45.0 and best["disk"] < 0.45)
+    )
+
+    if blank_like:
+        return {
+            "answer":
+                None,
+
+            "status":
+                "blank",
+
+            "multiple_options":
+                [],
+
+            "best_option":
+                best_option,
+
+            "best_darkness":
+                round(
+                    best["darkness"],
+                    3,
+                ),
+
+            "second_darkness":
+                round(
+                    second["darkness"],
+                    3,
+                ),
+
+            "top_gap":
+                round(
+                    top_gap,
+                    3,
+                ),
+
+            "best_disk_ratio":
+                round(
+                    best["disk"],
+                    4,
+                ),
+
+            "second_disk_ratio":
+                round(
+                    second["disk"],
+                    4,
+                ),
+
+            "disk_gap":
+                round(
+                    disk_gap,
+                    4,
+                ),
+
+            "question_blank_baseline":
+                round(
+                    question_blank_baseline,
+                    3,
+                ),
+
+            "best_delta":
+                round(
+                    best_delta,
+                    3,
+                ),
+        }
+
     # The report shows genuine full marks are typically near disk=1.0,
     # while many false "second fills" are around 0.40-0.65.
     #
     # Keep multiple very strict.
     def is_strong_fill(info):
         m = metrics_for(info)
+        core_m = float(info.get("metrics", {}).get("core_mean", 0.0))
         ml_blank = float(info.get("ml_blank_probability", 0.0))
+        ml_ambiguous = float(info.get("ml_ambiguous_probability", 0.0))
         ml_filled = float(info.get("ml_filled_probability", m["ml"]))
 
-        if ml_blank >= 0.70 and ml_filled < 0.35:
+        if (ml_blank >= 0.70 or ml_ambiguous >= 0.85) and m["darkness"] < 145.0:
+            return False
+
+        if core_m > 100.0:
             return False
 
         return (
@@ -674,7 +752,7 @@ def _decide_question(
             and
             m["core"] >= 0.78
             and
-            m["darkness"] >= 100.0
+            m["darkness"] >= 80.0
         )
 
     strong_options = [
@@ -911,12 +989,16 @@ def _decide_question(
     best_ml_blank = float(best_info.get("ml_blank_probability", 0.0))
     best_ml_filled = float(best_info.get("ml_filled_probability", best["ml"]))
 
+    best_core_mean = float(best_info.get("metrics", {}).get("core_mean", 0.0))
+
     medium_fill = (
         best["disk"] >= 0.76
         and
         best["core"] >= 0.70
         and
         best["darkness"] >= 85.0
+        and
+        (best_core_mean == 0.0 or best_core_mean <= 100.0)
         and
         best_ml_blank < 0.50
         and
@@ -1005,6 +1087,8 @@ def _decide_question(
         and
         best["darkness"] >= 70.0
         and
+        (best_core_mean == 0.0 or best_core_mean <= 100.0)
+        and
         best_delta >= 20.0
         and
         top_gap >= 15.0
@@ -1091,7 +1175,17 @@ def _decide_question(
     best_ml_blank = float(best_info.get("ml_blank_probability", 0.0))
     best_ml_filled = float(best_info.get("ml_filled_probability", best["ml"]))
 
+    best_core_mean = float(best_info.get("metrics", {}).get("core_mean", 255.0))
+
     blank_like = (
+        (
+            best_core_mean > 125.0
+            and
+            best["darkness"] < 135.0
+            and
+            top_gap < 40.0
+        )
+        or
         (
             best["disk"] < 0.58
             and
@@ -1254,12 +1348,16 @@ def _decide_question(
         # - enough separation on at least one feature
         #
         # ML is supporting evidence only; it cannot rescue on its own.
+        winner_core_mean = float(winner_metrics.get("core_mean", 0.0))
+
         ambiguous_rescue = (
             winner_darkness >= 64.0
             and
-            winner_disk >= 0.61
+            winner_disk >= 0.70
             and
             winner_core >= 0.64
+            and
+            (winner_core_mean == 0.0 or winner_core_mean <= 100.0)
             and
             (
                 darkness_gap >= 10.0
@@ -1981,7 +2079,7 @@ def _final_row_hough_y(
 
         y0 = max(
             0,
-            y - 25,
+            y - 12,
         )
         y1 = min(
             gray.shape[0],
@@ -2058,7 +2156,7 @@ def _final_row_hough_y(
 
             # Never search as far as the previous full question row.
             if (
-                -23.0
+                -11.0
                 <= shift
                 <= 5.0
             ):
@@ -2154,7 +2252,7 @@ def _final_row_hough_y(
 
     # Only activate for a meaningful downward-line failure.
     if not (
-        -23.0
+        -11.0
         <= shift
         <= -7.0
     ):
@@ -3004,11 +3102,11 @@ def _postprocess_known_failure_classes(
         )
 
         if (
-            disk >= 0.47
+            disk >= 0.65
             and
             core >= 0.80
             and
-            darkness >= 60.0
+            darkness >= 145.0
             and
             probability >= 0.90
         ):
@@ -3214,11 +3312,15 @@ def _postprocess_known_failure_classes(
         -
         value(darkness_ranked[1], "center_darkness")
     )
+    winner_core_mean = float(infos[disk_winner].get("metrics", {}).get("core_mean", 0.0))
+
     if (
         disk_winner == darkness_winner
         and ambiguous_max_disk >= 0.45
         and disk_gap >= 0.10
         and darkness_gap >= 10.0
+        and value(disk_winner, "center_darkness") >= 75.0
+        and (winner_core_mean == 0.0 or winner_core_mean <= 100.0)
     ):
         answered = dict(decision)
         answered["answer"] = disk_winner

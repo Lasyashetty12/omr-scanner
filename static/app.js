@@ -16,6 +16,13 @@ const openCameraButton =
         "openCameraButton"
     );
 
+const torchButton =
+    document.getElementById(
+        "torchButton"
+    );
+
+let torchEnabled = false;
+
 
 const imageUpload =
     document.getElementById(
@@ -153,6 +160,38 @@ const message =
     document.getElementById(
         "message"
     );
+
+const resultStream =
+    document.getElementById(
+        "resultStream"
+    );
+
+const kcetStreamSection =
+    document.getElementById(
+        "kcetStreamSection"
+    );
+
+const streamPcmbBtn =
+    document.getElementById(
+        "streamPcmbBtn"
+    );
+
+const streamPcmBtn =
+    document.getElementById(
+        "streamPcmBtn"
+    );
+
+const previewContainer =
+    document.getElementById(
+        "previewContainer"
+    );
+
+const scanLaserLine =
+    document.getElementById(
+        "scanLaserLine"
+    );
+
+let selectedStream = "pcmb";
 
 
 /* ==========================================================
@@ -355,6 +394,15 @@ function stopCamera() {
         "page-corners-detected"
     );
 
+    if (torchEnabled && cameraStream) {
+        const track = cameraStream.getVideoTracks()[0];
+        if (track) {
+            try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch (e) {}
+        }
+    }
+    torchEnabled = false;
+    updateTorchUI(false, false);
+
     if (
         cameraStream
     ) {
@@ -384,6 +432,56 @@ function stopCamera() {
 
         camera.srcObject =
             null;
+    }
+}
+
+async function checkTorchSupport(track) {
+    if (!track) return false;
+    try {
+        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        const settings = track.getSettings ? track.getSettings() : {};
+        return !!capabilities.torch || 'torch' in settings;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function toggleTorch() {
+    if (!cameraStream) return;
+    const track = cameraStream.getVideoTracks()[0];
+    if (!track) return;
+
+    try {
+        torchEnabled = !torchEnabled;
+        await track.applyConstraints({
+            advanced: [{ torch: torchEnabled }]
+        });
+        updateTorchUI(torchEnabled, true);
+    } catch (err) {
+        console.warn("Torch toggle failed:", err);
+        try {
+            await track.applyConstraints({ torch: torchEnabled });
+            updateTorchUI(torchEnabled, true);
+        } catch (e2) {
+            showError("Flashlight Error: Not supported on this device/camera.");
+            torchEnabled = false;
+            updateTorchUI(false, false);
+        }
+    }
+}
+
+function updateTorchUI(active, supported = true) {
+    if (!torchButton) return;
+    if (!supported) {
+        torchButton.classList.add("hidden");
+        return;
+    }
+    torchButton.classList.remove("hidden");
+    torchButton.classList.toggle("torch-active", active);
+    torchButton.setAttribute("aria-pressed", active ? "true" : "false");
+    const icon = torchButton.querySelector(".torch-icon");
+    if (icon) {
+        icon.textContent = active ? "⚡ Torch ON" : "⚡ Torch OFF";
     }
 }
 
@@ -859,6 +957,10 @@ async function openCamera() {
 
         await camera.play();
 
+        const videoTrack = cameraStream.getVideoTracks()[0];
+        const torchSupported = await checkTorchSupport(videoTrack);
+        updateTorchUI(false, torchSupported);
+
         lastCornerCheckAt = 0;
 
         stableCornerChecks = 0;
@@ -1153,9 +1255,12 @@ function captureCameraImage(
             capturedPreview.src =
                 previewObjectUrl;
 
-
             capturedPreview.hidden =
                 false;
+
+            if (previewContainer) {
+                previewContainer.classList.remove("hidden");
+            }
 
             if (documentBoundaryOverlay) {
 
@@ -1165,21 +1270,28 @@ function captureCameraImage(
             if (cornerDetectionStatus) {
 
                 cornerDetectionStatus.textContent =
-                    "Document captured. Review it, then select Scan & Evaluate.";
+                    "Document captured. Select Scan & Evaluate.";
             }
 
+            if (cameraContainer) {
+                cameraContainer.classList.add("hidden");
+            }
 
             camera.hidden =
                 true;
 
-
             captureButton.hidden =
                 true;
-
 
             retakeButton.hidden =
                 false;
 
+            retakeButton.classList.remove("hidden");
+
+            scanButton.hidden =
+                false;
+
+            scanButton.classList.remove("hidden");
 
             scanButton.disabled =
                 false;
@@ -1240,241 +1352,46 @@ function prepareUploadedImage(
     }
 
 
-    const objectUrl =
-        URL.createObjectURL(
-            file
-        );
-
-
-    const image =
-        new Image();
-
-
-    image.onload =
-        function () {
-
-            try {
-
-                const sourceWidth =
-                    image.naturalWidth;
-
-
-                const sourceHeight =
-                    image.naturalHeight;
-
-
-                if (
-                    !sourceWidth
-                    ||
-                    !sourceHeight
-                ) {
-
-                    throw new Error(
-                        "Invalid uploaded image."
-                    );
-                }
-
-
-                /*
-                    Uploaded images should NOT be forcibly
-                    cropped to A4 because some existing
-                    calibrated files may already be correctly
-                    prepared.
-
-                    Resize only.
-                */
-
-                const maximumWidth =
-                    1400;
-
-
-                let outputWidth =
-                    sourceWidth;
-
-
-                let outputHeight =
-                    sourceHeight;
-
-
-                if (
-                    outputWidth
-                    > maximumWidth
-                ) {
-
-                    const scale =
-                        maximumWidth
-                        / outputWidth;
-
-
-                    outputWidth =
-                        Math.round(
-                            outputWidth
-                            * scale
-                        );
-
-
-                    outputHeight =
-                        Math.round(
-                            outputHeight
-                            * scale
-                        );
-                }
-
-
-                captureCanvas.width =
-                    outputWidth;
-
-
-                captureCanvas.height =
-                    outputHeight;
-
-
-                const context =
-                    captureCanvas
-                        .getContext(
-                            "2d",
-                            {
-                                alpha:
-                                    false
-                            }
-                        );
-
-
-                context.fillStyle =
-                    "#ffffff";
-
-
-                context.fillRect(
-                    0,
-                    0,
-                    outputWidth,
-                    outputHeight
-                );
-
-
-                context.drawImage(
-                    image,
-                    0,
-                    0,
-                    outputWidth,
-                    outputHeight
-                );
-
-
-                captureCanvas.toBlob(
-
-                    function (
-                        blob
-                    ) {
-
-                        URL.revokeObjectURL(
-                            objectUrl
-                        );
-
-
-                        if (
-                            !blob
-                        ) {
-
-                            showError(
-                                "Could not prepare uploaded image."
-                            );
-
-                            return;
-                        }
-
-
-                        capturedBlob =
-                            blob;
-
-
-                        capturedFromCamera =
-                            false;
-
-
-                        clearPreviewUrl();
-
-
-                        previewObjectUrl =
-                            URL.createObjectURL(
-                                blob
-                            );
-
-
-                        capturedPreview.src =
-                            previewObjectUrl;
-
-
-                        capturedPreview.hidden =
-                            false;
-
-
-                        camera.hidden =
-                            true;
-
-
-                        cameraContainer.hidden =
-                            false;
-
-
-                        captureButton.hidden =
-                            true;
-
-
-                        retakeButton.hidden =
-                            false;
-
-
-                        scanButton.disabled =
-                            false;
-
-                    },
-
-                    "image/jpeg",
-
-                    0.92
-                );
-
-
-            } catch (
-            error
-            ) {
-
-                URL.revokeObjectURL(
-                    objectUrl
-                );
-
-
-                console.error(
-                    error
-                );
-
-
-                showError(
-                    error.message
-                    ||
-                    "Unable to prepare uploaded image."
-                );
-            }
-        };
-
-
-    image.onerror =
-        function () {
-
-            URL.revokeObjectURL(
-                objectUrl
-            );
-
-
-            showError(
-                "Unable to read uploaded image."
-            );
-        };
-
-
-    image.src =
-        objectUrl;
+    capturedBlob = file;
+    capturedFromCamera = false;
+
+    clearPreviewUrl();
+    previewObjectUrl = URL.createObjectURL(file);
+
+    if (capturedPreview) {
+        capturedPreview.src = previewObjectUrl;
+        capturedPreview.hidden = false;
+    }
+
+    if (previewContainer) {
+        previewContainer.classList.remove("hidden");
+        previewContainer.hidden = false;
+    }
+
+    if (cameraContainer) {
+        cameraContainer.classList.add("hidden");
+        cameraContainer.hidden = true;
+    }
+
+    if (camera) {
+        camera.hidden = true;
+    }
+
+    if (captureButton) {
+        captureButton.hidden = true;
+        captureButton.classList.add("hidden");
+    }
+
+    if (retakeButton) {
+        retakeButton.hidden = false;
+        retakeButton.classList.remove("hidden");
+    }
+
+    if (scanButton) {
+        scanButton.hidden = false;
+        scanButton.classList.remove("hidden");
+        scanButton.disabled = false;
+    }
 }
 
 
@@ -1710,11 +1627,15 @@ function displayResult(
     ) {
 
         resultExam.textContent =
-            result.exam
-            ||
-            result.exam_name
-            ||
-            "-";
+            (result.exam || result.exam_name || "-").toUpperCase();
+    }
+
+    if (
+        resultStream
+    ) {
+
+        resultStream.textContent =
+            (result.stream || selectedStream || "PCMB").toUpperCase();
     }
 
 
@@ -1863,6 +1784,10 @@ function displayResult(
 
         resultSection.hidden =
             false;
+
+        resultSection.classList.remove("hidden");
+
+        resultSection.scrollIntoView({ behavior: "smooth" });
     }
 }
 
@@ -1911,10 +1836,17 @@ async function scanOMR() {
     scanButton.disabled =
         true;
 
+    if (scanLaserLine) {
+        scanLaserLine.classList.remove("hidden");
+    }
 
     showLoading(
-        "Scanning OMR..."
+        "⚡ Scanning & Evaluating OMR Sheet... Analyzing Bubbles... Please Wait..."
     );
+
+    if (loading) {
+        loading.scrollIntoView({ behavior: "smooth" });
+    }
 
 
     try {
@@ -1928,6 +1860,10 @@ async function scanOMR() {
             exam
         );
 
+        formData.append(
+            "stream",
+            exam === "kcet" ? selectedStream : "pcmb"
+        );
 
         formData.append(
             "image",
@@ -1979,6 +1915,10 @@ async function scanOMR() {
 
 
     } finally {
+
+        if (scanLaserLine) {
+            scanLaserLine.classList.add("hidden");
+        }
 
         hideLoading();
 
@@ -2036,6 +1976,16 @@ if (
     );
 }
 
+if (
+    torchButton
+) {
+
+    torchButton.addEventListener(
+        "click",
+        toggleTorch
+    );
+}
+
 
 if (
     imageUpload
@@ -2071,6 +2021,46 @@ if (
                 "";
         }
     );
+}
+
+function updateStreamUI(stream) {
+    selectedStream = stream.toLowerCase();
+    if (streamPcmbBtn && streamPcmBtn) {
+        if (selectedStream === "pcm") {
+            streamPcmbBtn.classList.remove("active");
+            streamPcmBtn.classList.add("active");
+        } else {
+            streamPcmBtn.classList.remove("active");
+            streamPcmbBtn.classList.add("active");
+        }
+    }
+}
+
+if (streamPcmbBtn) {
+    streamPcmbBtn.addEventListener("click", function() {
+        updateStreamUI("pcmb");
+    });
+}
+
+if (streamPcmBtn) {
+    streamPcmBtn.addEventListener("click", function() {
+        updateStreamUI("pcm");
+    });
+}
+
+function updateExamStreamVisibility() {
+    const selected = examSelect?.value?.toLowerCase()?.trim();
+    if (kcetStreamSection) {
+        if (selected === "kcet") {
+            kcetStreamSection.classList.remove("hidden");
+        } else {
+            kcetStreamSection.classList.add("hidden");
+        }
+    }
+}
+
+if (examSelect) {
+    examSelect.addEventListener("change", updateExamStreamVisibility);
 }
 
 

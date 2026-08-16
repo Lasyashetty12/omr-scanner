@@ -165,53 +165,18 @@ def save_debug_images(
     processing,
 ):
 
-    corrected = processing.get(
-        "corrected"
-    )
+    def _fast_write(path, img):
+        if img is None:
+            return
+        h, w = img.shape[:2]
+        if w > 1200:
+            scale = 1200.0 / w
+            img = cv2.resize(img, (1200, int(h * scale)), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
-    threshold = processing.get(
-        "threshold"
-    )
-
-    debug = processing.get(
-        "debug"
-    )
-
+    corrected = processing.get("corrected")
     if corrected is not None:
-
-        corrected_path = os.path.join(
-            RESULT_DIR,
-            f"{scan_id}_corrected.jpg",
-        )
-
-        cv2.imwrite(
-            corrected_path,
-            corrected,
-        )
-
-    if threshold is not None:
-
-        threshold_path = os.path.join(
-            RESULT_DIR,
-            f"{scan_id}_threshold.jpg",
-        )
-
-        cv2.imwrite(
-            threshold_path,
-            threshold,
-        )
-
-    if debug is not None:
-
-        debug_path = os.path.join(
-            RESULT_DIR,
-            f"{scan_id}_debug.jpg",
-        )
-
-        cv2.imwrite(
-            debug_path,
-            debug,
-        )
+        _fast_write(os.path.join(RESULT_DIR, f"{scan_id}_corrected.jpg"), corrected)
 
 
 # ============================================================
@@ -231,7 +196,8 @@ def home():
     ):
 
         return FileResponse(
-            index_path
+            index_path,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
         )
 
     return {
@@ -264,6 +230,8 @@ async def scan_omr(
     image: UploadFile = File(...),
 
     exam: str = Form(...),
+
+    stream: str = Form("pcmb"),
 
 ):
 
@@ -718,15 +686,20 @@ async def scan_omr(
         )
 
 
+        kcet_answer_key = answer_key_data["answers"]
+        if stream and stream.lower().strip() == "pcm":
+            kcet_answer_key = {
+                k: v for k, v in kcet_answer_key.items()
+                if int(k) <= 180
+            }
+
         score_data = calculate_score(
 
             detected_answers=
                 detected_answers,
 
             answer_key=
-                answer_key_data[
-                    "answers"
-                ],
+                kcet_answer_key,
 
             correct_marks=
                 marking.get(
@@ -757,6 +730,9 @@ async def scan_omr(
 
         result.update(
             {
+
+                "stream":
+                    (stream or "PCMB").upper(),
 
                 "paper_code":
                     paper_code,

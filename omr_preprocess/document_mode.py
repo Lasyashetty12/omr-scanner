@@ -89,6 +89,26 @@ def _lift_paper_whites(
     return np.clip(values, 0, 255).astype(np.uint8)
 
 
+def enhance_color_saturation(
+    bgr_image: np.ndarray,
+    saturation_factor: float = 1.4,
+    saturation_boost: float = 12.0,
+) -> np.ndarray:
+    """
+    Enhance saturation channel in HSV color space to make blue/black/colored pen marks
+    stand out clearly from paper background and printed text.
+    """
+    if bgr_image is None or bgr_image.size == 0 or bgr_image.ndim != 3:
+        return bgr_image
+
+    hsv = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(
+        hsv[:, :, 1] * saturation_factor + saturation_boost, 0.0, 255.0
+    )
+    enhanced_hsv = hsv.astype(np.uint8)
+    return cv2.cvtColor(enhanced_hsv, cv2.COLOR_HSV2BGR)
+
+
 def create_document_scan(
     corrected_bgr: np.ndarray,
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
@@ -99,6 +119,9 @@ def create_document_scan(
     background subtraction. Those operations are prone to erasing thin OMR
     rings or producing artificial patches under uneven camera lighting.
     """
+    if corrected_bgr is not None and corrected_bgr.ndim == 3:
+        corrected_bgr = enhance_color_saturation(corrected_bgr)
+
     original = _as_gray(corrected_bgr)
     characteristics = _image_characteristics(original)
     lighting = _gentle_illumination_correction(original, characteristics)

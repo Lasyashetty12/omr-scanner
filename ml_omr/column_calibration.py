@@ -4,6 +4,9 @@ import cv2
 import numpy as np
 
 
+from functools import lru_cache
+
+
 # ============================================================
 # MOBILE-PHOTO CALIBRATION SETTINGS
 # ============================================================
@@ -24,6 +27,7 @@ HARD_LOCAL_JUMP = 16.0
 # LOW-LEVEL LOCAL CENTER SEARCH
 # ============================================================
 
+@lru_cache(maxsize=256)
 def _circle_mask(
     height,
     width,

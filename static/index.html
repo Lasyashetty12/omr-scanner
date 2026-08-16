@@ -2,353 +2,184 @@
 <html lang="en">
 
 <head>
-
     <meta charset="UTF-8">
-
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>
-        OMR Evaluation Dashboard
-    </title>
-
-    <link rel="stylesheet" href="/static/style.css">
-
+    <title>OMR Evaluation Dashboard — Manchester Technologies</title>
+    <meta name="description" content="Manchester Technologies OMR Evaluation System — Simple Single-Page OMR Scanner with Stream Selection and Flashlight support.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=3.0">
 </head>
 
-
 <body>
+    <div class="page-container">
+        <!-- BRAND HEADER -->
+        <header class="main-header">
+            <div class="brand-info">
+                <img src="/static/logo.jpg?v=3.5" alt="Manchester Technologies Logo" class="brand-logo-img">
+                <div>
+                    <h1>Manchester Technologies</h1>
+                    <p>Optical Mark Recognition System</p>
+                </div>
+            </div>
+            <div class="online-status">
+                <span class="pulse-dot"></span> SCANNER ONLINE
+            </div>
+        </header>
 
-    <header>
-
-        <div class="brand">
-
-            <div class="logo">
-                OMR
+        <!-- MAIN EVALUATION CARD -->
+        <main class="main-card">
+            <div class="card-title-bar">
+                <h2>Scan & Evaluate OMR Sheet</h2>
+                <p>Select your exam type and upload or capture an OMR sheet.</p>
             </div>
 
-            <div>
-
-                <h1>
-                    Manchester Technologies
-                </h1>
-
-                <p>
-                    Optical Mark Recognition System
-                </p>
-
-            </div>
-
-        </div>
-
-        <div class="online">
-            ● SCANNER ONLINE
-        </div>
-
-    </header>
-
-
-    <main>
-
-        <!-- ================================================== -->
-        <!-- HERO -->
-        <!-- ================================================== -->
-
-        <section class="hero">
-
-            <h2>
-                OMR Evaluation Dashboard
-            </h2>
-
-            <p>
-                Scan and evaluate NEET,
-                JEE and KCET OMR sheets.
-            </p>
-
-        </section>
-
-
-        <!-- ================================================== -->
-        <!-- SCANNER -->
-        <!-- ================================================== -->
-
-        <section class="card">
-
-            <h3>
-                Scan OMR Sheet
-            </h3>
-
-
-            <!-- EXAM -->
-
-            <label for="exam">
-                Exam
-            </label>
-
-            <select id="exam">
-
-                <option value="">
-                    Select Exam
-                </option>
-
-                <option value="neet">
-                    NEET
-                </option>
-
-                <option value="jee">
-                    JEE
-                </option>
-
-                <option value="kcet">
-                    KCET
-                </option>
-
-            </select>
-
-
-            <!-- ================================================== -->
-            <!-- SCAN OPTIONS -->
-            <!-- ================================================== -->
-
-            <div class="scanner-card">
-
-
-                <!-- CAMERA BUTTON -->
-
-                <button id="openCameraButton" type="button">
-                    Open Camera
-                </button>
-
-
-                <div class="or-text">
-                    OR
+            <!-- EXAM SELECTION & KCET STREAM OPTIONS -->
+            <div class="form-section">
+                <div class="field-box">
+                    <label for="exam">TARGET EXAM</label>
+                    <select id="exam">
+                        <option value="kcet" selected>KCET (Karnataka CET)</option>
+                        <option value="neet">NEET (Medical Entrance — 180Q)</option>
+                        <option value="jee">JEE (Engineering Entrance)</option>
+                    </select>
                 </div>
 
+                <!-- KCET STREAM SELECTOR (PCMB vs PCM) -->
+                <div id="kcetStreamSection" class="field-box stream-box">
+                    <label>KCET STREAM SELECTOR</label>
+                    <div class="stream-btn-group">
+                        <button id="streamPcmbBtn" type="button" class="stream-btn active" data-stream="pcmb">
+                            PCMB (240 Questions)
+                        </button>
+                        <button id="streamPcmBtn" type="button" class="stream-btn" data-stream="pcm">
+                            PCM (180 Questions — No Bio)
+                        </button>
+                    </div>
+                </div>
+            </div>
 
-                <!-- UPLOAD BUTTON -->
-
-                <label for="imageUpload" class="upload-button">
-                    Upload OMR Image
+            <!-- SCANNER ACTION BUTTONS -->
+            <div class="actions-group">
+                <button id="openCameraButton" type="button" class="action-btn camera-btn">
+                    <span>📷</span> Live Camera Scan
+                </button>
+                <label for="imageUpload" class="action-btn upload-btn">
+                    <span>📁</span> Upload OMR Image
                 </label>
-
                 <input id="imageUpload" type="file" accept="image/jpeg,image/png" hidden>
+            </div>
 
+            <!-- LIVE CAMERA PREVIEW & TORCH -->
+            <div id="cameraContainer" class="camera-preview-wrapper hidden">
+                <video id="camera" autoplay playsinline muted></video>
+                <canvas id="documentBoundaryOverlay" class="document-overlay" aria-hidden="true"></canvas>
 
-                <!-- ================================================== -->
-                <!-- CAMERA -->
-                <!-- ================================================== -->
+                <!-- FLASHLIGHT / TORCH TOGGLE BUTTON -->
+                <button id="torchButton" type="button" class="torch-btn hidden" title="Toggle Flashlight / Torch">
+                    <span class="torch-icon">⚡ Torch OFF</span>
+                </button>
 
-                <div id="cameraContainer" class="camera-container hidden">
+                <!-- OMR ALIGNMENT CORNER GUIDE -->
+                <div class="omr-detection-guide">
+                    <span class="c-box tl"></span>
+                    <span class="c-box tr"></span>
+                    <span class="c-box bl"></span>
+                    <span class="c-box br"></span>
+                </div>
 
-                    <video id="camera" autoplay playsinline muted></video>
+                <div id="cornerDetectionStatus" class="detection-status-badge">
+                    Looking for four corner blocks…
+                </div>
+            </div>
 
-                    <canvas id="documentBoundaryOverlay" class="document-boundary-overlay" aria-hidden="true"></canvas>
+            <!-- HIDDEN CAPTURE CANVAS -->
+            <canvas id="captureCanvas" class="hidden"></canvas>
 
+            <!-- CAPTURED IMAGE PREVIEW & SCANNING LASER LINE -->
+            <div id="previewContainer" class="preview-container hidden">
+                <div id="scanLaserLine" class="scan-laser-line hidden"></div>
+                <img id="capturedPreview" class="preview-img" alt="OMR Preview Image">
+            </div>
 
-                    <!-- OMR GUIDE -->
+            <!-- CAMERA CONTROLS -->
+            <div class="controls-bar">
+                <button id="captureButton" type="button" class="control-btn capture-btn hidden">
+                    ⚡ Capture OMR
+                </button>
+                <button id="retakeButton" type="button" class="control-btn retake-btn hidden">
+                    🔄 Retake / Upload Another
+                </button>
+                <button id="scanButton" type="button" class="control-btn scan-btn hidden">
+                    ✨ Scan & Evaluate Sheet
+                </button>
+            </div>
 
-                    <div class="omr-detection-box">
+            <!-- LOADING SPINNER -->
+            <div id="loading" class="loading-container hidden">
+                <div class="loading-spinner"></div>
+                <span id="loadingText">Processing OMR Sheet...</span>
+            </div>
 
-                        <span class="corner tl"></span>
-                        <span class="corner tr"></span>
-                        <span class="corner bl"></span>
-                        <span class="corner br"></span>
+            <!-- ERROR ALERT -->
+            <div id="error" class="error-banner hidden"></div>
 
+            <!-- EVALUATION RESULTS DISPLAY SECTION -->
+            <section id="resultSection" class="results-container hidden">
+                <div class="results-header">
+                    <h3>Evaluation Summary</h3>
+                </div>
+
+                <div class="summary-tiles-row">
+                    <div class="tile gold-tile">
+                        <span class="t-lbl">TOTAL SCORE</span>
+                        <strong id="score" class="t-val">-</strong>
                     </div>
-
-                    <div id="cornerDetectionStatus" class="corner-detection-status" aria-live="polite">
-                        Looking for the four corner blocks…
+                    <div class="tile">
+                        <span class="t-lbl">EXAM</span>
+                        <strong id="resultExam" class="t-val">-</strong>
                     </div>
-
+                    <div class="tile">
+                        <span class="t-lbl">STREAM</span>
+                        <strong id="resultStream" class="t-val">PCMB</strong>
+                    </div>
+                    <div class="tile">
+                        <span class="t-lbl">PAPER / SERIES</span>
+                        <strong id="paperCode" class="t-val">-</strong>
+                    </div>
                 </div>
 
-
-                <!-- ================================================== -->
-                <!-- CAPTURE CANVAS -->
-                <!-- ================================================== -->
-
-                <canvas id="captureCanvas" class="hidden"></canvas>
-
-
-                <!-- ================================================== -->
-                <!-- IMAGE PREVIEW -->
-                <!-- ================================================== -->
-
-                <img id="capturedPreview" class="captured-preview hidden" alt="OMR Preview">
-
-
-                <!-- ================================================== -->
-                <!-- CONTROLS -->
-                <!-- ================================================== -->
-
-                <button id="captureButton" type="button" class="hidden">
-                    Capture OMR
-                </button>
-
-
-                <button id="retakeButton" type="button" class="hidden">
-                    Retake / Choose Another
-                </button>
-
-
-                <button id="scanButton" type="button" class="hidden">
-                    Scan & Evaluate
-                </button>
-
-            </div>
-
-
-            <!-- ================================================== -->
-            <!-- LOADING -->
-            <!-- ================================================== -->
-
-            <div id="loading" class="hidden">
-                Processing OMR...
-            </div>
-
-
-            <!-- ================================================== -->
-            <!-- ERROR -->
-            <!-- ================================================== -->
-
-            <div id="error" class="error hidden"></div>
-
-        </section>
-
-
-        <!-- ================================================== -->
-        <!-- RESULT -->
-        <!-- ================================================== -->
-
-        <section id="resultSection" class="card hidden">
-
-            <h3>
-                Result
-            </h3>
-
-
-            <div class="summary">
-
-                <div class="result-box">
-
-                    <span>
-                        Exam
-                    </span>
-
-                    <strong id="resultExam">
-                        -
-                    </strong>
-
+                <div class="metrics-tiles-row">
+                    <div class="tile ok-tile">
+                        <span class="t-lbl">CORRECT</span>
+                        <strong id="correct" class="t-val">0</strong>
+                    </div>
+                    <div class="tile danger-tile">
+                        <span class="t-lbl">WRONG</span>
+                        <strong id="wrong" class="t-val">0</strong>
+                    </div>
+                    <div class="tile warn-tile">
+                        <span class="t-lbl">BLANK</span>
+                        <strong id="blank" class="t-val">0</strong>
+                    </div>
+                    <div class="tile info-tile">
+                        <span class="t-lbl">MULTIPLE</span>
+                        <strong id="multiple" class="t-val">0</strong>
+                    </div>
+                    <div class="tile muted-tile">
+                        <span class="t-lbl">UNCERTAIN</span>
+                        <strong id="uncertain" class="t-val">0</strong>
+                    </div>
                 </div>
 
+                <div id="quality" class="quality-info"></div>
+                <div id="message" class="message-info"></div>
+            </section>
+        </main>
+    </div>
 
-                <div class="result-box">
-
-                    <span>
-                        Paper / Series
-                    </span>
-
-                    <strong id="paperCode">
-                        -
-                    </strong>
-
-                </div>
-
-
-                <div class="result-box">
-
-                    <span>
-                        Score
-                    </span>
-
-                    <strong id="score">
-                        -
-                    </strong>
-
-                </div>
-
-            </div>
-
-
-            <div class="summary">
-
-                <div class="result-box">
-
-                    <span>
-                        Correct
-                    </span>
-
-                    <strong id="correct">
-                        -
-                    </strong>
-
-                </div>
-
-
-                <div class="result-box">
-
-                    <span>
-                        Wrong
-                    </span>
-
-                    <strong id="wrong">
-                        -
-                    </strong>
-
-                </div>
-
-
-                <div class="result-box">
-
-                    <span>
-                        Blank
-                    </span>
-
-                    <strong id="blank">
-                        -
-                    </strong>
-
-                </div>
-
-
-                <div class="result-box">
-
-                    <span>
-                        Multiple
-                    </span>
-
-                    <strong id="multiple">
-                        -
-                    </strong>
-
-                </div>
-
-
-                <div class="result-box">
-
-                    <span>
-                        Uncertain
-                    </span>
-
-                    <strong id="uncertain">
-                        -
-                    </strong>
-
-                </div>
-
-            </div>
-
-
-            <div id="quality"></div>
-
-            <div id="message"></div>
-
-        </section>
-
-    </main>
-
-
-    <script src="/static/app.js"></script>
-
+    <script src="/static/app.js?v=3.0"></script>
 </body>
 
 </html>
