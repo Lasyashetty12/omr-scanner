@@ -215,12 +215,10 @@ def _local_search_best_center(
     for dy in range(
         -search_radius,
         search_radius + 1,
-        2,
     ):
         for dx in range(
             -search_radius,
             search_radius + 1,
-            2,
         ):
             cx = int(
                 round(
