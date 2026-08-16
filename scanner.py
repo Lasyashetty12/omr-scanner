@@ -158,6 +158,9 @@ def load_template(template_path):
 # ============================================================
 
 def load_image(image_path):
+
+    # Apply EXIF rotation tags (e.g. photos taken on mobile phones in portrait/landscape)
+    # before converting to OpenCV BGR numpy array.
     try:
         from PIL import Image, ImageOps
         pil_img = Image.open(str(image_path))
@@ -733,8 +736,8 @@ def crop_omr_by_corner_boxes(
     )
 
     if (
-        x2 - x1 < width * 0.05
-        or y2 - y1 < height * 0.05
+        x2 - x1 < width * 0.35
+        or y2 - y1 < height * 0.35
     ):
         raise ValueError(
             "Initial OMR crop is too small."
@@ -2164,41 +2167,31 @@ def perspective_transform(
 # ============================================================
 
 def normalize_grayscale(image):
-    if image is None or image.size == 0:
-        return image
 
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image.copy()
-
-    # Smooth illumination division to flatten broad mobile lighting gradients & room shadows:
-    short_side = min(gray.shape[:2])
-    sigma = float(np.clip(short_side / 28.0, 30.0, 75.0))
-    background = cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma, sigmaY=sigma)
-    paper_level = max(float(np.percentile(background, 92.0)), 1.0)
-
-    normalized = cv2.divide(
-        gray,
-        np.maximum(background, 1).astype(np.uint8),
-        scale=paper_level,
+    gray = cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2GRAY,
     )
 
-    gentle = cv2.addWeighted(
-        gray,
-        0.35,
-        normalized,
-        0.65,
-        0,
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(
+            8,
+            8,
+        ),
     )
 
-    smoothed = cv2.GaussianBlur(
-        gentle,
+    gray = clahe.apply(
+        gray
+    )
+
+    gray = cv2.GaussianBlur(
+        gray,
         (3, 3),
         0,
     )
 
-    return smoothed
+    return gray
 
 
 def create_threshold_image(image):
@@ -3373,14 +3366,17 @@ def detect_paper_code(
         threshold = float(
             paper_code_config.get(
                 "filled_threshold",
-                0.15,
+                template.get(
+                    "filled_threshold",
+                    0.50,
+                ),
             )
         )
 
         confidence_gap_required = float(
             paper_code_config.get(
                 "minimum_confidence_gap",
-                0.01,
+                0.05,
             )
         )
 
@@ -3388,18 +3384,35 @@ def detect_paper_code(
             best_score
             < threshold
         ):
-            # If best score is very low, use top ranked candidate if available
-            if not ranked or best_score < 0.05:
-                raise ValueError(
-                    "Question paper code could not be detected "
-                    f"at position {position_index}."
-                )
+            raise ValueError(
+                "Question paper code could not be detected "
+                f"at position {position_index}."
+            )
 
         confidence_gap = (
             best_score
-            -
-            second_score
+            - second_score
         )
+
+        if (
+            confidence_gap
+            < confidence_gap_required
+        ):
+            readable_scores = ", ".join(
+                f"{key}={float(value):.4f}"
+                for key, value
+                in scores.items()
+            )
+
+            raise ValueError(
+                "Question paper code is ambiguous "
+                f"at position {position_index}. "
+                f"Best={best_value} "
+                f"score={best_score:.4f}, "
+                f"second={second_score:.4f}, "
+                f"gap={confidence_gap:.4f}. "
+                f"Scores: {readable_scores}"
+            )
 
         detected_characters.append(
             best_value
@@ -4039,17 +4052,8 @@ def draw_paper_code_debug(
     Draw the exact paper-code sampling circles on the corrected
     1600 x 2200 image. Useful for coordinate calibration.
     """
-    if corrected_image is None or corrected_image.size == 0:
-        return corrected_image
 
-    if corrected_image.shape[:2] != (2200, 1600):
-        debug = cv2.resize(
-            corrected_image,
-            (1600, 2200),
-            interpolation=cv2.INTER_LINEAR,
-        )
-    else:
-        debug = corrected_image.copy()
+    debug = corrected_image.copy()
 
     config = template.get(
         "paper_code",
@@ -4307,6 +4311,23 @@ def process_omr(
             )
         )
 
+        # Keep two representations after canonical registration:
+        # - document_preview: enhanced for visual document-scan inspection
+        # - corrected: the conservative canonical image used by the frozen
+        #   recognition pipeline. This avoids changing bubble intensities.
+        (
+            document_preview,
+            _recognition_image,
+            document_mode_debug,
+        ) = prepare_omr_document_mode(
+            corrected,
+            debug_dir=local_debug_dir,
+        )
+
+        alignment_debug[
+            "document_mode"
+        ] = document_mode_debug
+
         expected_width = int(
             template["sheet_width"]
         )
@@ -4341,23 +4362,6 @@ def process_omr(
                 f"Expected {expected_width}x{expected_height}, "
                 f"got {corrected.shape[1]}x{corrected.shape[0]}."
             )
-
-        # Keep two representations after canonical registration:
-        # - document_preview: enhanced for visual document-scan inspection
-        # - corrected: the conservative canonical image used by the frozen
-        #   recognition pipeline. This avoids changing bubble intensities.
-        (
-            document_preview,
-            _recognition_image,
-            document_mode_debug,
-        ) = prepare_omr_document_mode(
-            corrected,
-            debug_dir=local_debug_dir,
-        )
-
-        alignment_debug[
-            "document_mode"
-        ] = document_mode_debug
 
         gray = normalize_grayscale(
             corrected

@@ -97,7 +97,7 @@ def _binary_dark(gray: np.ndarray) -> np.ndarray:
         9,
     )
 
-    mask = cv2.bitwise_or(otsu, adaptive)
+    mask = cv2.bitwise_and(otsu, adaptive)
 
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
@@ -152,27 +152,27 @@ def _candidate_black_blocks(
         area = float(cv2.contourArea(contour))
 
         # Registration blocks are visually large but still small relative to frame.
-        if area < image_area * 0.00008:
+        if area < image_area * 0.00015:
             continue
 
-        if area > image_area * 0.045:
+        if area > image_area * 0.035:
             continue
 
         x, y, bw, bh = cv2.boundingRect(contour)
 
-        if bw < 8 or bh < 8:
+        if bw < 10 or bh < 10:
             continue
 
         aspect = bw / float(bh)
 
         # Bottom marks can merge slightly with page rules, so allow some elongation.
-        if not 0.38 <= aspect <= 2.6:
+        if not 0.45 <= aspect <= 2.2:
             continue
 
         rect_area = float(bw * bh)
         fill = area / max(rect_area, 1.0)
 
-        if fill < 0.40:
+        if fill < 0.52:
             continue
 
         perimeter = cv2.arcLength(contour, True)
@@ -272,25 +272,8 @@ def _pick_corner_candidate(
     height: int,
 ) -> Optional[Dict[str, Any]]:
     """
-    Search a generous corner quadrant with adaptive target distance relative to sheet bounds.
+    Search a generous corner quadrant but reject centre-page content.
     """
-    if not candidates:
-        return None
-
-    # Compute outer extent of candidate blocks to dynamically target sheet corners:
-    xs = [c["center"][0] for c in candidates]
-    ys = [c["center"][1] for c in candidates]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-
-    target_map = {
-        "TL": (min_x, min_y),
-        "TR": (max_x, min_y),
-        "BR": (max_x, max_y),
-        "BL": (min_x, max_y),
-    }
-    tx, ty = target_map[corner]
-
     chosen = []
 
     for candidate in candidates:
@@ -299,29 +282,23 @@ def _pick_corner_candidate(
         ny = cy / float(height)
 
         if corner == "TL":
-            inside = nx < 0.52 and ny < 0.52
+            inside = nx < 0.48 and ny < 0.35
         elif corner == "TR":
-            inside = nx > 0.48 and ny < 0.52
+            inside = nx > 0.52 and ny < 0.35
         elif corner == "BR":
-            inside = nx > 0.48 and ny > 0.48
+            inside = nx > 0.52 and ny > 0.70
         else:
-            inside = nx < 0.52 and ny > 0.48
+            inside = nx < 0.48 and ny > 0.70
 
         if not inside:
             continue
 
-        dist = np.hypot(cx - tx, cy - ty) / max(float(max(width, height)), 1.0)
-        square_score = max(
-            0.0,
-            1.0 - abs(
-                np.log(
-                    max(candidate["aspect"], 1e-6)
-                )
-            ),
+        score = _corner_region_score(
+            candidate,
+            corner,
+            width,
+            height,
         )
-        fill_score = candidate["fill"]
-
-        score = -dist * 5.0 + square_score * 3.0 + fill_score * 2.0
 
         chosen.append(
             (
@@ -353,7 +330,7 @@ def _validate_marker_geometry(
     left = np.linalg.norm(bl - tl)
     right = np.linalg.norm(br - tr)
 
-    if min(top, bottom, left, right) < min(width, height) * 0.05:
+    if min(top, bottom, left, right) < min(width, height) * 0.32:
         raise ValueError(
             "Registration markers are too close together. "
             "A wrong black object was probably selected."
@@ -367,18 +344,18 @@ def _validate_marker_geometry(
     area = abs(float(cv2.contourArea(polygon)))
     coverage = area / float(width * height)
 
-    if coverage < 0.05:
+    if coverage < 0.35:
         raise ValueError(
             "Registration-marker quadrilateral is too small."
         )
 
     # Opposite sides should not differ absurdly.
-    if max(top, bottom) / max(min(top, bottom), 1.0) > 2.5:
+    if max(top, bottom) / max(min(top, bottom), 1.0) > 1.8:
         raise ValueError(
             "Top/bottom registration geometry is inconsistent."
         )
 
-    if max(left, right) / max(min(left, right), 1.0) > 2.5:
+    if max(left, right) / max(min(left, right), 1.0) > 1.8:
         raise ValueError(
             "Left/right registration geometry is inconsistent."
         )
@@ -395,6 +372,33 @@ def _detect_registration_blocks_internal(
         cand = _pick_corner_candidate(candidates, corner, w, h)
         if cand is not None:
             picked_dict[corner] = cand["center"]
+
+    # Fallback recovery for missing corner blocks
+    if "TL" in picked_dict and "TR" in picked_dict:
+        tl = picked_dict["TL"]
+        tr = picked_dict["TR"]
+        dx = tr[0] - tl[0]
+        dy = tr[1] - tl[1]
+        perp_x = -dy * 1.375
+        perp_y = dx * 1.375
+
+        if "BL" not in picked_dict:
+            est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
+            sub_cands = [c for c in candidates if c["center"][0] < w * 0.48 and c["center"][1] > h * 0.60]
+            if sub_cands:
+                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_bl))
+                picked_dict["BL"] = best_cand["center"]
+            else:
+                picked_dict["BL"] = est_bl
+
+        if "BR" not in picked_dict:
+            est_br = np.array([tr[0] + perp_x, tr[1] + perp_y], dtype=np.float32)
+            sub_cands = [c for c in candidates if c["center"][0] > w * 0.52 and c["center"][1] > h * 0.60]
+            if sub_cands:
+                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_br))
+                picked_dict["BR"] = best_cand["center"]
+            else:
+                picked_dict["BR"] = est_br
 
     return picked_dict, candidates
 
@@ -1552,38 +1556,80 @@ def ensure_canonical_orientation(
     height: int,
 ) -> tuple[np.ndarray, dict]:
     """
-    Ensure the Manchester header is at the TOP (upright portrait orientation).
-    If the image is upside down (180°), rotate 180° to bring header to the top.
+    Force the Manchester header to the TOP.
+
+    Evaluates 0°, 90°, 180°, and 270° rotations against the canonical reference header
+    to guarantee proper upright orientation regardless of photo capture orientation.
     """
-    h, w = image.shape[:2]
-    if (w, h) != (width, height):
-        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
 
-    top_region = image[50:350, 100:1500]
-    bottom_region = cv2.rotate(image, cv2.ROTATE_180)[50:350, 100:1500]
-    ref_top = reference[50:350, 100:1500]
+    candidates = {
+        0:
+            _rotate_to_candidate(
+                image,
+                0,
+                width,
+                height,
+            ),
+        90:
+            _rotate_to_candidate(
+                image,
+                90,
+                width,
+                height,
+            ),
+        180:
+            _rotate_to_candidate(
+                image,
+                180,
+                width,
+                height,
+            ),
+        270:
+            _rotate_to_candidate(
+                image,
+                270,
+                width,
+                height,
+            ),
+    }
 
-    g_top = cv2.cvtColor(top_region, cv2.COLOR_BGR2GRAY) if top_region.ndim == 3 else top_region
-    g_bot = cv2.cvtColor(bottom_region, cv2.COLOR_BGR2GRAY) if bottom_region.ndim == 3 else bottom_region
-    g_ref = cv2.cvtColor(ref_top, cv2.COLOR_BGR2GRAY) if ref_top.ndim == 3 else ref_top
+    scores = {
+        rotation:
+            _header_structure_score(
+                candidate,
+                reference,
+            )
+        for rotation, candidate
+        in candidates.items()
+    }
 
-    diff_0 = float(np.mean(np.abs(g_top.astype(float) - g_ref.astype(float))))
-    diff_180 = float(np.mean(np.abs(g_bot.astype(float) - g_ref.astype(float))))
+    best_rotation = max(
+        scores,
+        key=scores.get,
+    )
 
-    if diff_180 < diff_0 * 0.85:
-        oriented = cv2.rotate(image, cv2.ROTATE_180)
-        selected_rotation = 180
-    else:
-        oriented = image.copy()
-        selected_rotation = 0
+    oriented = candidates[
+        best_rotation
+    ]
 
     return oriented, {
-        "selected_rotation": selected_rotation,
+        "selected_rotation":
+            int(
+                best_rotation
+            ),
+
         "orientation_scores": {
-            "0": round(diff_0, 2),
-            "180": round(diff_180, 2),
+            str(rotation):
+                round(
+                    float(score),
+                    3,
+                )
+            for rotation, score
+            in scores.items()
         },
-        "orientation_method": "header_structure_matching",
+
+        "orientation_method":
+            "header_structural_matching_0_90_180_270",
     }
 
 

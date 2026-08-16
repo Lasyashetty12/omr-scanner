@@ -178,10 +178,6 @@ def save_debug_images(
     if corrected is not None:
         _fast_write(os.path.join(RESULT_DIR, f"{scan_id}_corrected.jpg"), corrected)
 
-    debug_img = processing.get("debug")
-    if debug_img is not None:
-        _fast_write(os.path.join(RESULT_DIR, f"{scan_id}_bubble_debug.jpg"), debug_img)
-
 
 # ============================================================
 # HOME
@@ -1029,7 +1025,6 @@ async def scan_omr(
 
 
     result["corrected_image_url"] = f"/results/{scan_id}_corrected.jpg"
-    result["bubble_debug_image_url"] = f"/results/{scan_id}_bubble_debug.jpg"
 
     return result
 

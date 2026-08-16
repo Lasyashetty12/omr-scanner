@@ -22,11 +22,24 @@ def test_exif_load_image_preserves_array(tmp_path):
 
 
 def test_ensure_canonical_orientation_4_way():
+    # Build a simple synthetic reference header image
     height, width = 2200, 1600
     ref = np.full((height, width, 3), 255, dtype=np.uint8)
-    oriented, debug = ensure_canonical_orientation(ref, ref, width, height)
-    assert debug["selected_rotation"] == 0
-    assert oriented.shape[:2] == (height, width)
+    # Draw asymmetrical header feature near the top
+    cv2.rectangle(ref, (100, 50), (1500, 300), (0, 0, 0), -1)
+    cv2.putText(ref, "HEADER TOP", (300, 200), cv2.FONT_HERSHEY_SIMPLEX, 3.0, (255, 255, 255), 5)
+
+    # Test 180° rotated input image
+    rotated_180 = cv2.rotate(ref, cv2.ROTATE_180)
+    oriented_180, debug_180 = ensure_canonical_orientation(rotated_180, ref, width, height)
+    assert debug_180["selected_rotation"] == 180
+    assert oriented_180.shape[:2] == (height, width)
+
+    # Test 90° CW rotated input image
+    rotated_90 = cv2.rotate(ref, cv2.ROTATE_90_CLOCKWISE)
+    oriented_90, debug_90 = ensure_canonical_orientation(rotated_90, ref, width, height)
+    assert debug_90["selected_rotation"] in (90, 270)
+    assert oriented_90.shape[:2] == (height, width)
 
 
 def test_landscape_registration_detection():

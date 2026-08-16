@@ -101,21 +101,6 @@ const resultSection =
         "resultSection"
     );
 
-const bubbleDebugContainer =
-    document.getElementById(
-        "bubbleDebugContainer"
-    );
-
-const bubbleDebugImage =
-    document.getElementById(
-        "bubbleDebugImage"
-    );
-
-const toggleDebugImgBtn =
-    document.getElementById(
-        "toggleDebugImgBtn"
-    );
-
 
 const resultExam =
     document.getElementById(
@@ -1649,34 +1634,21 @@ function displayResult(
     }
 
 
-    const debugUrl =
-        result.bubble_debug_image_url
-        ||
-        data.bubble_debug_image_url
-        ||
+    const correctedUrl =
         result.corrected_image_url
         ||
         data.corrected_image_url;
 
     if (
-        debugUrl
+        correctedUrl
         &&
-        bubbleDebugImage
+        capturedPreview
     ) {
-        bubbleDebugImage.src =
-            debugUrl
+        capturedPreview.src =
+            correctedUrl
             + "?t="
             + Date.now();
 
-        if (bubbleDebugContainer) {
-            bubbleDebugContainer.classList.remove("hidden");
-        }
-    }
-
-    /* Preserve original captured/uploaded photo in capturedPreview without overwriting */
-    if (
-        capturedPreview
-    ) {
         capturedPreview.hidden =
             false;
     }
@@ -2047,20 +2019,5 @@ window.addEventListener(
 
         scanButton.disabled =
             true;
-    }
-
-
-    if (
-        toggleDebugImgBtn && bubbleDebugWrapper
-    ) {
-        toggleDebugImgBtn.addEventListener("click", function () {
-            if (bubbleDebugWrapper.classList.contains("hidden")) {
-                bubbleDebugWrapper.classList.remove("hidden");
-                toggleDebugImgBtn.textContent = "Hide Overlay";
-            } else {
-                bubbleDebugWrapper.classList.add("hidden");
-                toggleDebugImgBtn.textContent = "Show Overlay";
-            }
-        });
     }
 })();
