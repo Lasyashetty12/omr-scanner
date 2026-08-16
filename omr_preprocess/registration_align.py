@@ -28,6 +28,11 @@ import numpy as np
 DEFAULT_WIDTH = 1600
 DEFAULT_HEIGHT = 2200
 
+# Registration-block centres are the template's geometry authority.  Feature
+# refinement may only correct very small residual error after that mapping;
+# a larger warp would move valid bubble coordinates away from their bubbles.
+MAX_FINE_ALIGNMENT_CORNER_ERROR = 24.0
+
 # Canonical registration-mark centres in the user's clean NEET reference.
 CANONICAL_MARKERS_1600_2200 = np.array(
     [
@@ -888,8 +893,10 @@ def _orb_refine(
         "orb_corner_error"
     ] = corner_error
 
-    # This is only a fine registration. Reject aggressive warps.
-    if corner_error > 90.0:
+    # This is only a fine registration. Reject aggressive warps: the four
+    # registration blocks have already established the complete sheet frame.
+    if corner_error > MAX_FINE_ALIGNMENT_CORNER_ERROR:
+        debug["orb_rejected_reason"] = "fine_alignment_exceeds_geometry_limit"
         return moving, debug
 
     refined = cv2.warpPerspective(
@@ -1112,6 +1119,20 @@ def _ecc_refine(
             :
         ]
     )
+
+    corners = np.float32(
+        [[0, 0], [full_w - 1, 0], [full_w - 1, full_h - 1], [0, full_h - 1]]
+    ).reshape(-1, 1, 2)
+    transformed_corners = cv2.transform(corners, full_affine).reshape(4, 2)
+    affine_corner_error = float(
+        np.mean(
+            np.linalg.norm(transformed_corners - corners.reshape(4, 2), axis=1)
+        )
+    )
+    debug["ecc_corner_error"] = affine_corner_error
+    if affine_corner_error > MAX_FINE_ALIGNMENT_CORNER_ERROR:
+        debug["ecc_rejected_reason"] = "fine_alignment_exceeds_geometry_limit"
+        return moving, debug
 
     refined = cv2.warpAffine(
         moving,
@@ -1714,21 +1735,19 @@ def canonicalize_omr(
         )
     )
 
-    # --------------------------------------------------------
-    # Force the exact same visual orientation as the clean reference.
-    # This prevents upside-down / sideways canonical output.
-    # --------------------------------------------------------
+    # The registration-block homography maps the complete source sheet
+    # directly to the template rectangle.  Applying a second cardinal
+    # rotation here (then resizing it back) changes the coordinate system and
+    # is the source of shifted bubble-debug overlays.  Input orientation is
+    # resolved by EXIF normalization and the ordered source markers.
+    oriented = coarse
+    orientation_debug = {
+        "selected_rotation": 0,
+        "orientation_method": "registration_block_homography",
+        "orientation_correction_applied": False,
+    }
 
-    oriented, orientation_debug = (
-        ensure_canonical_orientation(
-            coarse,
-            reference,
-            width,
-            height,
-        )
-    )
-
-    result = oriented
+    result = coarse
 
     debug: Dict[
         str,

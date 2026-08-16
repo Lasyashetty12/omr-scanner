@@ -58,3 +58,28 @@ def test_landscape_registration_detection():
     # detect_registration_blocks should succeed on landscape input
     markers, debug = detect_registration_blocks(sheet_land)
     assert len(markers) == 4
+
+
+def test_canonical_registration_does_not_rotate_after_marker_warp(tmp_path):
+    """Marker homography is the sole production geometry transform."""
+    height, width = 2200, 1600
+    sheet = np.full((height, width, 3), 245, dtype=np.uint8)
+    for x, y in ((81, 78), (1522, 78), (1523, 2124), (80, 2120)):
+        cv2.rectangle(sheet, (x - 20, y - 20), (x + 20, y + 20), (0, 0, 0), -1)
+    # An asymmetric feature makes a cardinal post-warp rotation observable.
+    cv2.rectangle(sheet, (220, 320), (230, 330), (0, 0, 255), -1)
+
+    reference_path = tmp_path / "reference.png"
+    cv2.imwrite(str(reference_path), sheet)
+    corrected, debug = canonicalize_omr(
+        sheet,
+        reference_path,
+        output_size=(width, height),
+        use_orb=False,
+        use_ecc=False,
+    )
+
+    assert corrected.shape[:2] == (height, width)
+    assert debug["orientation"]["selected_rotation"] == 0
+    # Red remains in the canonical top-left content region.
+    assert corrected[325, 225, 2] > corrected[325, 225, 0]
