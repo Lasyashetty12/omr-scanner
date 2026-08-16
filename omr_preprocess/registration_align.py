@@ -1730,6 +1730,8 @@ def canonicalize_omr(
 
         "coarse_homography":
             homography.tolist(),
+        "homography":
+            homography,
     }
 
     debug[
