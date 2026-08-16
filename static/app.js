@@ -1043,14 +1043,8 @@ function captureCameraImage(
         return;
     }
 
-    const crop =
-        cropFromDetectedDocument(
-            videoWidth,
-            videoHeight
-        );
-
-    captureCanvas.width = CAMERA_OUTPUT_WIDTH;
-    captureCanvas.height = CAMERA_OUTPUT_HEIGHT;
+    captureCanvas.width = videoWidth;
+    captureCanvas.height = videoHeight;
 
     const context =
         captureCanvas.getContext(
@@ -1078,24 +1072,24 @@ function captureCameraImage(
     context.fillRect(
         0,
         0,
-        CAMERA_OUTPUT_WIDTH,
-        CAMERA_OUTPUT_HEIGHT
+        videoWidth,
+        videoHeight
     );
 
     context.drawImage(
 
         camera,
 
-        crop.x,
-        crop.y,
-        crop.width,
-        crop.height,
+        0,
+        0,
+        videoWidth,
+        videoHeight,
 
         0,
         0,
 
-        CAMERA_OUTPUT_WIDTH,
-        CAMERA_OUTPUT_HEIGHT
+        videoWidth,
+        videoHeight
     );
 
 
