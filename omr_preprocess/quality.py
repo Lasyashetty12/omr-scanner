@@ -117,28 +117,16 @@ def assess_document_quality(
 
     if tiny_image or no_usable_detail:
         classification = "REJECT"
-        warnings.append("Image resolution or detail is too low to evaluate with 100% accuracy.")
+        warnings.append("Image resolution is too low. Please capture a clearer view of the sheet.")
     elif not document_detected:
         classification = "REJECT"
-        warnings.append("Could not confidently detect all four corner registration blocks. Ensure the complete sheet is visible and uncovered.")
-    elif perspective_quality < 48.0:
+        warnings.append("Full OMR sheet is not captured. Please ensure all four corner registration blocks are visible inside the frame.")
+    elif perspective_quality < 35.0:
         classification = "REJECT"
-        warnings.append("Camera angle is strongly tilted. Hold your device directly above the sheet.")
-    elif severe_lighting:
-        classification = "REJECT"
-        warnings.append("Uneven shadow or heavy glare is present on the OMR sheet. Move to balanced lighting.")
-    elif sharpness < 110.0:
-        classification = "REJECT"
-        warnings.append("Image focus is blurry. Hold camera steady and tap to focus.")
-    elif brightness < 45.0:
-        classification = "REJECT"
-        warnings.append("Lighting is too dark. Turn on torch/flashlight or scan under bright light.")
-    elif brightness > 252.0:
-        classification = "REJECT"
-        warnings.append("Image is overexposed with heavy flash glare. Tilt away from direct bulb reflections.")
+        warnings.append("OMR sheet is tilted in large amount. Please hold camera directly above the sheet.")
     elif (
         sharpness < 150.0
-        or brightness < 70.0
+        or brightness < 50.0
         or brightness > 248.0
         or contrast < 15.0
         or not resolution_ok
@@ -146,7 +134,7 @@ def assess_document_quality(
     ):
         classification = "POOR"
         warnings.append(
-            "Image quality is below optimal. For 100% accuracy, ensure the sheet is flat and well-lit."
+            "Lighting or sharpness is non-ideal; preprocessing is normalizing contrast and illumination automatically."
         )
     elif sharpness < 600.0 or brightness < 105.0 or brightness > 245.0 or contrast < 20.0:
         classification = "ACCEPTABLE"
@@ -154,15 +142,6 @@ def assess_document_quality(
         classification = "GOOD"
     else:
         classification = "ACCEPTABLE"
-
-    if sharpness < 600.0 and classification != "REJECT":
-        warnings.append(
-            f"Sharpness is moderate ({sharpness:.2f})."
-        )
-    if brightness < 70.0 and classification != "REJECT":
-        warnings.append(f"Document is slightly underexposed ({brightness:.2f}).")
-    elif brightness > 248.0 and classification != "REJECT":
-        warnings.append(f"Document is slightly overexposed ({brightness:.2f}).")
 
     can_scan = classification != "REJECT"
 
