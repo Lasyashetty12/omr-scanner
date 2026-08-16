@@ -1873,6 +1873,20 @@ def fit_response_grid(
                                 split_repaired_y,
                             )
 
+        # Force exact horizontal row Y consistency per question:
+        # All 4 options (A, B, C, D) for a question must share the median Y of the pinned options.
+        for question_num in column_questions:
+            if question_num in fitted:
+                option_map = fitted[question_num]
+                pinned_ys = [
+                    pt[1] for opt_name, pt in option_map.items()
+                    if (int(question_num), str(opt_name)) in direct_match
+                ]
+                if pinned_ys:
+                    common_row_y = float(np.median(pinned_ys))
+                    for opt_name in option_map:
+                        fitted[question_num][opt_name] = (option_map[opt_name][0], common_row_y)
+
         inlier_count = (
             int(
                 inliers.sum()
