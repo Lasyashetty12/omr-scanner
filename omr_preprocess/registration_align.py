@@ -172,7 +172,7 @@ def _candidate_black_blocks(
         rect_area = float(bw * bh)
         fill = area / max(rect_area, 1.0)
 
-        if fill < 0.40:
+        if fill < 0.52:
             continue
 
         perimeter = cv2.arcLength(contour, True)
@@ -282,13 +282,13 @@ def _pick_corner_candidate(
         ny = cy / float(height)
 
         if corner == "TL":
-            inside = nx < 0.48 and ny < 0.40
+            inside = nx < 0.48 and ny < 0.35
         elif corner == "TR":
-            inside = nx > 0.52 and ny < 0.40
+            inside = nx > 0.52 and ny < 0.35
         elif corner == "BR":
-            inside = nx > 0.48 and ny > 0.60
+            inside = nx > 0.52 and ny > 0.70
         else:
-            inside = nx < 0.52 and ny > 0.60
+            inside = nx < 0.48 and ny > 0.70
 
         if not inside:
             continue
@@ -379,10 +379,8 @@ def _detect_registration_blocks_internal(
         tr = picked_dict["TR"]
         dx = tr[0] - tl[0]
         dy = tr[1] - tl[1]
-        # Canonical registration block aspect ratio: 2042.1 / 1440.8 = 1.4173376
-        aspect_scale = 1.4173376
-        perp_x = -dy * aspect_scale
-        perp_y = dx * aspect_scale
+        perp_x = -dy * 1.375
+        perp_y = dx * 1.375
 
         if "BL" not in picked_dict:
             est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
@@ -1576,33 +1574,73 @@ def ensure_canonical_orientation(
     """
 
     candidates = {
-        0: image.copy(),
-        180: cv2.rotate(image, cv2.ROTATE_180),
+        0:
+            _rotate_to_candidate(
+                image,
+                0,
+                width,
+                height,
+            ),
+        90:
+            _rotate_to_candidate(
+                image,
+                90,
+                width,
+                height,
+            ),
+        180:
+            _rotate_to_candidate(
+                image,
+                180,
+                width,
+                height,
+            ),
+        270:
+            _rotate_to_candidate(
+                image,
+                270,
+                width,
+                height,
+            ),
     }
 
     scores = {
-        rotation: _header_structure_score(
-            candidate,
-            reference,
-        )
-        for rotation, candidate in candidates.items()
+        rotation:
+            _header_structure_score(
+                candidate,
+                reference,
+            )
+        for rotation, candidate
+        in candidates.items()
     }
 
-    # Default to 0° upright orientation from 4-corner registration alignment.
-    # Only flip 180° if 180° score is significantly higher.
-    best_rotation = 0
-    if scores[180] > scores[0] + 150.0:
-        best_rotation = 180
+    best_rotation = max(
+        scores,
+        key=scores.get,
+    )
 
-    oriented = candidates[best_rotation]
+    oriented = candidates[
+        best_rotation
+    ]
 
     return oriented, {
-        "selected_rotation": int(best_rotation),
+        "selected_rotation":
+            int(
+                best_rotation
+            ),
+
         "orientation_scores": {
-            str(rotation): round(float(score), 3)
-            for rotation, score in scores.items()
+            str(rotation):
+                round(
+                    float(score),
+                    3,
+                )
+            for rotation, score
+            in scores.items()
         },
-        "orientation_method": "registration_aligned_0_180_check",
+
+        "orientation_method":
+            "header_structural_matching_0_90_180_270",
     }
 
 
@@ -1730,8 +1768,6 @@ def canonicalize_omr(
 
         "coarse_homography":
             homography.tolist(),
-        "homography":
-            homography,
     }
 
     debug[

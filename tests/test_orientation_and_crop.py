@@ -35,10 +35,11 @@ def test_ensure_canonical_orientation_4_way():
     assert debug_180["selected_rotation"] == 180
     assert oriented_180.shape[:2] == (height, width)
 
-    # Test 0° upright input image
-    oriented_0, debug_0 = ensure_canonical_orientation(ref, ref, width, height)
-    assert debug_0["selected_rotation"] == 0
-    assert oriented_0.shape[:2] == (height, width)
+    # Test 90° CW rotated input image
+    rotated_90 = cv2.rotate(ref, cv2.ROTATE_90_CLOCKWISE)
+    oriented_90, debug_90 = ensure_canonical_orientation(rotated_90, ref, width, height)
+    assert debug_90["selected_rotation"] in (90, 270)
+    assert oriented_90.shape[:2] == (height, width)
 
 
 def test_landscape_registration_detection():

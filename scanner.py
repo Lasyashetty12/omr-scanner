@@ -2960,46 +2960,34 @@ def draw_answer_analysis(
     corrected_image,
     template,
     answers,
-    original_image=None,
-    homography=None,
 ):
     """
     Clean debug overlay using the exact centers used by the reader.
-    Projects canonical coordinates back onto original_image when provided.
+
+    Fixes:
+    - no extra row below the response grid
+    - smaller circles so adjacent rows/options do not overlap
+    - only valid NEET/KCET questions are drawn
+    - centers outside the configured response area are ignored
     """
 
-    inv_homography = None
-    if original_image is not None and homography is not None:
-        try:
-            inv_homography = np.linalg.inv(homography)
-            debug_image = original_image.copy()
-            scale_ratio = max(original_image.shape[:2]) / 1600.0
-        except Exception:
-            inv_homography = None
-            debug_image = corrected_image.copy()
-            scale_ratio = 1.0
-    else:
-        debug_image = corrected_image.copy()
-        scale_ratio = 1.0
+    debug_image = corrected_image.copy()
 
+    # Keep the debug ring slightly INSIDE the printed bubble.
+    # This avoids overlap with neighbouring bubbles.
     bubble_radius = max(
         7,
         int(
             round(
-                (
-                    template.get(
-                        "bubble_radius",
-                        11,
-                    )
-                    - 2
+                template.get(
+                    "bubble_radius",
+                    11,
                 )
-                * scale_ratio
+                -
+                2
             )
         ),
     )
-    dot_radius = max(2, int(round(2 * scale_ratio)))
-    line_thick = max(1, int(round(1 * scale_ratio)))
-    ring_thick = max(2, int(round(2 * scale_ratio)))
 
     option_order = list(
         template.get(
@@ -3124,19 +3112,10 @@ def draw_answer_analysis(
         ):
             return None
 
-        def transform_pt(x_c, y_c):
-            if inv_homography is None:
-                return (x_c, y_c)
-            pt = np.array([x_c, y_c, 1.0], dtype=np.float64)
-            opt = inv_homography @ pt
-            if opt[2] != 0:
-                return (
-                    int(round(opt[0] / opt[2])),
-                    int(round(opt[1] / opt[2])),
-                )
-            return (int(round(opt[0])), int(round(opt[1])))
-
-        return transform_pt(cx, cy)
+        return (
+            cx,
+            cy,
+        )
 
     for question_no, answer_record in answers.items():
 
@@ -3198,8 +3177,11 @@ def draw_answer_analysis(
             # Exact detected center.
             cv2.circle(
                 debug_image,
-                center,
-                dot_radius,
+                (
+                    cx,
+                    cy,
+                ),
+                2,
                 (
                     0,
                     165,
@@ -3212,14 +3194,17 @@ def draw_answer_analysis(
             # Smaller neutral circle; no overlap.
             cv2.circle(
                 debug_image,
-                center,
+                (
+                    cx,
+                    cy,
+                ),
                 bubble_radius,
                 (
                     180,
                     180,
                     180,
                 ),
-                line_thick,
+                1,
                 lineType=cv2.LINE_AA,
             )
 
@@ -3251,7 +3236,7 @@ def draw_answer_analysis(
                         0,
                         255,
                     ),
-                    ring_thick,
+                    2,
                     lineType=cv2.LINE_AA,
                 )
 
@@ -3274,7 +3259,7 @@ def draw_answer_analysis(
                         255,
                         0,
                     ),
-                    ring_thick,
+                    2,
                     lineType=cv2.LINE_AA,
                 )
 
@@ -3307,7 +3292,7 @@ def draw_answer_analysis(
                         255,
                         255,
                     ),
-                    ring_thick,
+                    2,
                     lineType=cv2.LINE_AA,
                 )
 
@@ -4235,12 +4220,10 @@ def create_debug_image(
     corrected_image,
     answers,
     template,
-    original_image=None,
-    homography=None,
 ):
 
     debug = (
-        original_image.copy() if original_image is not None else corrected_image.copy()
+        corrected_image.copy()
     )
 
     exam_name = (
@@ -4262,8 +4245,6 @@ def create_debug_image(
             corrected_image,
             template,
             answers,
-            original_image=original_image,
-            homography=homography,
         )
 
     elif exam_name == "JEE":
@@ -4738,15 +4719,11 @@ def process_omr(
     # Debug image
     # --------------------------------
 
-    homography = alignment_debug.get("homography")
-
     debug = (
         create_debug_image(
             corrected,
             answers,
             template,
-            original_image=image,
-            homography=homography,
         )
     )
 
@@ -4780,8 +4757,6 @@ def process_omr(
                     corrected,
                     template,
                     answers,
-                    original_image=image,
-                    homography=homography,
                 )
             )
 
