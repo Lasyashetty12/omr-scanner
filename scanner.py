@@ -2982,24 +2982,15 @@ def draw_answer_analysis(
         debug_image = corrected_image.copy()
         scale_ratio = 1.0
 
+    # Reduced bubble and pin point radius for subtle, compact indicators
+    base_radius = max(3.0, float(template.get("bubble_radius", 11)) - 6.0)
     bubble_radius = max(
-        7,
-        int(
-            round(
-                (
-                    template.get(
-                        "bubble_radius",
-                        11,
-                    )
-                    - 2
-                )
-                * scale_ratio
-            )
-        ),
+        3,
+        int(round(base_radius * scale_ratio)),
     )
-    dot_radius = max(2, int(round(2 * scale_ratio)))
-    line_thick = max(1, int(round(1 * scale_ratio)))
-    ring_thick = max(2, int(round(2 * scale_ratio)))
+    dot_radius = max(1, int(round(1.0 * scale_ratio)))
+    line_thick = 1
+    ring_thick = max(1, int(round(1.2 * scale_ratio)))
 
     option_order = list(
         template.get(
