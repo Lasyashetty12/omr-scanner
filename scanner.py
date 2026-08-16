@@ -3183,46 +3183,6 @@ def draw_answer_analysis(
             )
         ).lower()
 
-        # Draw a small neutral ring and exact pin dot for all A/B/C/D.
-        for option_label in option_order:
-            center = center_for(
-                answer_record,
-                option_label,
-            )
-
-            if center is None:
-                continue
-
-            cx, cy = center
-
-            # Exact detected center.
-            cv2.circle(
-                debug_image,
-                center,
-                dot_radius,
-                (
-                    0,
-                    165,
-                    255,
-                ),
-                -1,
-                lineType=cv2.LINE_AA,
-            )
-
-            # Smaller neutral circle; no overlap.
-            cv2.circle(
-                debug_image,
-                center,
-                bubble_radius,
-                (
-                    180,
-                    180,
-                    180,
-                ),
-                line_thick,
-                lineType=cv2.LINE_AA,
-            )
-
         # MULTIPLE
         if (
             detected_answer == "MULTIPLE"

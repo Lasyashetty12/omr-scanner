@@ -1,6 +1,6 @@
 {
-    "template_name": "neet",
-    "exam_name": "NEET",
+    "template_name": "kcet",
+    "exam_name": "KCET",
     "version": 6,
     "sheet_width": 1600,
     "sheet_height": 2200,
@@ -13,34 +13,38 @@
         "D"
     ],
     "bubble_radius": 11,
+    "ml_crop_radius": 12,
+    "grid_max_initial_match_distance": 12,
+    "grid_max_direct_pin_dy": 6,
+    "grid_max_final_dy_from_input": 6,
     "dark_pixel_threshold": 120,
     "blank_threshold": 0.18,
     "filled_threshold": 0.42,
     "multiple_threshold": 0.42,
     "columns": [
         {
-            "A": 228,
-            "B": 259,
-            "C": 289,
-            "D": 317
+            "A": 235,
+            "B": 264,
+            "C": 293,
+            "D": 323
         },
         {
-            "A": 594,
-            "B": 623,
-            "C": 652,
-            "D": 681
+            "A": 593,
+            "B": 621,
+            "C": 650,
+            "D": 684
         },
         {
-            "A": 957,
-            "B": 988,
-            "C": 1016,
-            "D": 1047
+            "A": 953,
+            "B": 981,
+            "C": 1009,
+            "D": 1039
         },
         {
-            "A": 1324,
-            "B": 1353,
-            "C": 1382,
-            "D": 1412
+            "A": 1315,
+            "B": 1346,
+            "C": 1374,
+            "D": 1404
         }
     ],
     "question_y_positions": [
