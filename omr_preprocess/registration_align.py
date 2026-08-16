@@ -1552,80 +1552,24 @@ def ensure_canonical_orientation(
     height: int,
 ) -> tuple[np.ndarray, dict]:
     """
-    Force the Manchester header to the TOP.
-
-    Evaluates 0°, 90°, 180°, and 270° rotations against the canonical reference header
-    to guarantee proper upright orientation regardless of photo capture orientation.
+    Keep natural image orientation without applying auto-rotations.
     """
-
-    candidates = {
-        0:
-            _rotate_to_candidate(
-                image,
-                0,
-                width,
-                height,
-            ),
-        90:
-            _rotate_to_candidate(
-                image,
-                90,
-                width,
-                height,
-            ),
-        180:
-            _rotate_to_candidate(
-                image,
-                180,
-                width,
-                height,
-            ),
-        270:
-            _rotate_to_candidate(
-                image,
-                270,
-                width,
-                height,
-            ),
-    }
-
-    scores = {
-        rotation:
-            _header_structure_score(
-                candidate,
-                reference,
-            )
-        for rotation, candidate
-        in candidates.items()
-    }
-
-    best_rotation = max(
-        scores,
-        key=scores.get,
-    )
-
-    oriented = candidates[
-        best_rotation
-    ]
+    h, w = image.shape[:2]
+    if (w, h) != (width, height):
+        oriented = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+    else:
+        oriented = image.copy()
 
     return oriented, {
-        "selected_rotation":
-            int(
-                best_rotation
-            ),
-
+        "selected_rotation": 0,
         "orientation_scores": {
-            str(rotation):
-                round(
-                    float(score),
-                    3,
-                )
-            for rotation, score
-            in scores.items()
+            "0": 1.0,
+            "90": 0.0,
+            "180": 0.0,
+            "270": 0.0,
         },
-
         "orientation_method":
-            "header_structural_matching_0_90_180_270",
+            "none",
     }
 
 
