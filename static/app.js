@@ -971,17 +971,32 @@ function calculateA4Crop(
     videoHeight
 ) {
 
-    // Return the full camera stream area without aggressive top/bottom truncation
-    // so the server's OpenCV pipeline receives all four corner registration blocks.
+    const sourceRatio =
+        videoWidth
+        / videoHeight;
+
+    let cropWidth, cropHeight, cropX, cropY;
+
+    if (
+        sourceRatio
+        > A4_RATIO
+    ) {
+        cropHeight = videoHeight;
+        cropWidth = cropHeight * A4_RATIO;
+        cropX = (videoWidth - cropWidth) / 2;
+        cropY = 0;
+    } else {
+        cropWidth = videoWidth;
+        cropHeight = cropWidth / A4_RATIO;
+        cropX = 0;
+        cropY = (videoHeight - cropHeight) / 2;
+    }
+
     return {
-
-        x: 0,
-
-        y: 0,
-
-        width: videoWidth,
-
-        height: videoHeight
+        x: cropX,
+        y: cropY,
+        width: cropWidth,
+        height: cropHeight
     };
 }
 
@@ -998,7 +1013,6 @@ function captureCameraImage(
 
     hideResult();
 
-
     if (
         !cameraStream
     ) {
@@ -1010,14 +1024,11 @@ function captureCameraImage(
         return;
     }
 
-
     const videoWidth =
         camera.videoWidth;
 
-
     const videoHeight =
         camera.videoHeight;
-
 
     if (
         !videoWidth
@@ -1032,18 +1043,14 @@ function captureCameraImage(
         return;
     }
 
-
     const crop =
         cropFromDetectedDocument(
             videoWidth,
             videoHeight
         );
 
-    const outWidth = CAMERA_OUTPUT_WIDTH;
-    const outHeight = Math.round(outWidth * (crop.height / Math.max(1, crop.width)));
-
-    captureCanvas.width = outWidth;
-    captureCanvas.height = outHeight;
+    captureCanvas.width = CAMERA_OUTPUT_WIDTH;
+    captureCanvas.height = CAMERA_OUTPUT_HEIGHT;
 
     const context =
         captureCanvas.getContext(
@@ -1071,8 +1078,8 @@ function captureCameraImage(
     context.fillRect(
         0,
         0,
-        outWidth,
-        outHeight
+        CAMERA_OUTPUT_WIDTH,
+        CAMERA_OUTPUT_HEIGHT
     );
 
     context.drawImage(
@@ -1087,8 +1094,8 @@ function captureCameraImage(
         0,
         0,
 
-        outWidth,
-        outHeight
+        CAMERA_OUTPUT_WIDTH,
+        CAMERA_OUTPUT_HEIGHT
     );
 
 
