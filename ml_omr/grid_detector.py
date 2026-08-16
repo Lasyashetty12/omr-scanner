@@ -37,7 +37,7 @@ LAST_ROW_FINAL_DY_FROM_INPUT = 6.0
 LAST_ROW_RESCUE_DY = 10.0
 LAST_ROW_RESCUE_MIN_PINS = 3
 LAST_ROW_RESCUE_MAX_SPREAD = 4.0
-MIN_MATCHES_FOR_GRID = 28
+MIN_MATCHES_FOR_GRID = 12
 
 # Residual correction is limited so a false contour cannot bend the grid badly.
 MAX_ROW_RESIDUAL_X = 7.0
