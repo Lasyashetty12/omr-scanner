@@ -603,7 +603,8 @@ function drawDocumentBoundary(points, detected) {
 
     context.lineWidth = 3;
 
-    context.strokeStyle = detected ? "#31d57a" : "#ffd85a";
+    // Only actual marker detections are drawn; there is no fixed guide box.
+    context.strokeStyle = "#31d57a";
 
     context.shadowColor = "rgba(0, 0, 0, 0.75)";
 
@@ -611,9 +612,7 @@ function drawDocumentBoundary(points, detected) {
 
     context.stroke();
 
-    context.fillStyle = detected
-        ? "rgba(49, 213, 122, 0.10)"
-        : "rgba(255, 216, 90, 0.06)";
+    context.fillStyle = "rgba(49, 213, 122, 0.10)";
 
     context.fill();
 
@@ -622,7 +621,7 @@ function drawDocumentBoundary(points, detected) {
     points.forEach((point) => {
         context.beginPath();
         context.arc(point.x, point.y, 5, 0, Math.PI * 2);
-        context.fillStyle = detected ? "#31d57a" : "#ffd85a";
+        context.fillStyle = "#31d57a";
         context.fill();
     });
 }

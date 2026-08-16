@@ -70,8 +70,7 @@ def test_canonical_registration_does_not_rotate_after_marker_warp(tmp_path):
     cv2.rectangle(sheet, (220, 320), (230, 330), (0, 0, 255), -1)
 
     # Embed the full sheet in a camera-like frame with perspective and
-    # background so the outer-page detector, rather than content bounds, is
-    # exercised.
+    # background so registration blocks establish the full-sheet transform.
     frame_height, frame_width = 2500, 2000
     camera = np.full((frame_height, frame_width, 3), 55, dtype=np.uint8)
     page_quad = np.float32([[250, 150], [1760, 250], [1680, 2380], [310, 2280]])
@@ -97,6 +96,6 @@ def test_canonical_registration_does_not_rotate_after_marker_warp(tmp_path):
 
     assert corrected.shape[:2] == (height, width)
     assert debug["orientation"]["selected_rotation"] == 0
-    assert debug["page_detection"]["page_area_ratio"] > 0.5
+    assert debug["page_detection"]["method"] == "four_omr_registration_blocks"
     # Red remains in the canonical top-left content region.
     assert corrected[325, 225, 2] > corrected[325, 225, 0]

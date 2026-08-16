@@ -329,30 +329,6 @@ video#camera {
   box-shadow: 0 0 16px rgba(241, 214, 117, 0.8);
 }
 
-.omr-detection-guide {
-  position: absolute;
-  top: 6%;
-  left: 6%;
-  width: 88%;
-  height: 88%;
-  border: 2px dashed rgba(255, 255, 255, 0.4);
-  pointer-events: none;
-  border-radius: 10px;
-  box-sizing: border-box;
-}
-
-.c-box {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  border: 3px solid var(--gold);
-}
-
-.c-box.tl { top: -2px; left: -2px; border-right: none; border-bottom: none; border-top-left-radius: 6px; }
-.c-box.tr { top: -2px; right: -2px; border-left: none; border-bottom: none; border-top-right-radius: 6px; }
-.c-box.bl { bottom: -2px; left: -2px; border-right: none; border-top: none; border-bottom-left-radius: 6px; }
-.c-box.br { bottom: -2px; right: -2px; border-left: none; border-top: none; border-bottom-right-radius: 6px; }
-
 .detection-status-badge {
   position: absolute;
   bottom: 12px;

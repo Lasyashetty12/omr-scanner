@@ -24,7 +24,6 @@ from typing import Optional, Tuple, Dict, Any
 import cv2
 import numpy as np
 
-from .canonical import detect_document_quad, warp_document_quad
 
 
 DEFAULT_WIDTH = 1600
@@ -146,7 +145,9 @@ def _candidate_black_blocks(
 
     contours, _ = cv2.findContours(
         mask,
-        cv2.RETR_EXTERNAL,
+        # A dark desk/background can surround the bright page and otherwise
+        # hide the inset black registration blocks from EXTERNAL retrieval.
+        cv2.RETR_LIST,
         cv2.CHAIN_APPROX_SIMPLE,
     )
 
@@ -289,13 +290,13 @@ def _pick_corner_candidate(
         ny = cy / float(height)
 
         if corner == "TL":
-            inside = nx < 0.48 and ny < 0.35
+            inside = nx < 0.48 and ny < 0.50
         elif corner == "TR":
-            inside = nx > 0.52 and ny < 0.35
+            inside = nx > 0.52 and ny < 0.50
         elif corner == "BR":
-            inside = nx > 0.52 and ny > 0.70
+            inside = nx > 0.52 and ny > 0.50
         else:
-            inside = nx < 0.48 and ny > 0.70
+            inside = nx < 0.48 and ny > 0.50
 
         if not inside:
             continue
@@ -1753,21 +1754,13 @@ def canonicalize_omr(
         interpolation=cv2.INTER_AREA,
     )
 
-    # Establish geometry from the complete physical page.  Registration
-    # blocks are intentionally detected only *after* this rectification so
-    # their inset centres cannot become crop/page boundaries.
-    page_quad, page_debug = detect_document_quad(
+    # The printed corner blocks are the reliable OMR geometry signal.  Their
+    # destination coordinates are inset from the template edges, so this
+    # single homography preserves the full page margins rather than cropping
+    # block-to-block or treating blocks as page corners.
+    markers, marker_debug = detect_registration_blocks(image)
+    coarse, homography = warp_from_registration_blocks(
         image,
-        expected_ratio=width / float(height),
-        return_debug=True,
-    )
-    coarse = warp_document_quad(image, page_quad, width, height)
-    homography = cv2.getPerspectiveTransform(
-        page_quad,
-        np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype=np.float32),
-    )
-    markers, marker_debug = detect_registration_blocks(coarse)
-    marker_debug["canonical_position_validation"] = _validate_canonical_marker_positions(
         markers,
         width,
         height,
@@ -1803,13 +1796,17 @@ def canonicalize_omr(
                 ]
                 for name, point in zip(
                     ("top_left", "top_right", "bottom_right", "bottom_left"),
-                    page_quad,
+                    markers,
                 )
             },
             "perspective_correction_applied": True,
         },
 
-        "page_detection": page_debug,
+        "page_detection": {
+            "method": "four_omr_registration_blocks",
+            "candidate_count": marker_debug["candidate_count"],
+            "selected_candidate": 1,
+        },
 
         "output_size": {
             "width":
@@ -1903,10 +1900,10 @@ def canonicalize_omr(
     debug["registration"]["final_canonical_position_validation"] = final_validation
 
     if debug_dir is not None:
-        page_debug_image = image.copy()
+        page_debug_image = _draw_marker_debug(image, markers)
         cv2.polylines(
             page_debug_image,
-            [page_quad.astype(np.int32).reshape(-1, 1, 2)],
+            [markers.astype(np.int32).reshape(-1, 1, 2)],
             True,
             (0, 0, 255),
             4,
