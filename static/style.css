@@ -597,11 +597,3 @@ video#camera {
 }
 
 .hidden { display: none !important; }
-
-@media (max-width: 600px) {
-  .page-container { padding: 16px 12px 36px; }
-  .main-card { padding: 20px 16px; }
-  .summary-tiles-row { grid-template-columns: 1fr 1fr; }
-  .metrics-tiles-row { grid-template-columns: repeat(3, 1fr); }
-  .actions-group { grid-template-columns: 1fr; }
-}
