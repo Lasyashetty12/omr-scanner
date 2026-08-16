@@ -4317,14 +4317,12 @@ def process_omr(
         #   recognition pipeline. This avoids changing bubble intensities.
         (
             document_preview,
-            recognition_image,
+            _recognition_image,
             document_mode_debug,
         ) = prepare_omr_document_mode(
             corrected,
             debug_dir=local_debug_dir,
         )
-
-        corrected = recognition_image
 
         alignment_debug[
             "document_mode"
