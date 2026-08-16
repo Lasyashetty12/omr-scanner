@@ -83,8 +83,8 @@ def _quad_geometry_score(
     )
 
 
-def _candidate_quads_from_contour(contour: np.ndarray) -> list[np.ndarray]:
-    candidates: list[np.ndarray] = []
+def _candidate_quads_from_contour(contour: np.ndarray) -> list[tuple[np.ndarray, str]]:
+    candidates: list[tuple[np.ndarray, str]] = []
 
     hull = cv2.convexHull(contour)
     perimeter = cv2.arcLength(hull, True)
@@ -97,14 +97,12 @@ def _candidate_quads_from_contour(contour: np.ndarray) -> list[np.ndarray]:
                 True,
             )
             if len(approx) == 4:
-                candidates.append(
-                    approx.reshape(4, 2).astype(np.float32)
-                )
+                candidates.append((approx.reshape(4, 2).astype(np.float32), "contour_quad"))
 
     # Safe fallback for sheets whose edge merges with another sheet/background.
     rect = cv2.minAreaRect(hull)
     box = cv2.boxPoints(rect).astype(np.float32)
-    candidates.append(box)
+    candidates.append((box, "min_area_rect"))
 
     return candidates
 
@@ -112,7 +110,8 @@ def _candidate_quads_from_contour(contour: np.ndarray) -> list[np.ndarray]:
 def detect_document_quad(
     image: np.ndarray,
     expected_ratio: float = DEFAULT_WIDTH / DEFAULT_HEIGHT,
-) -> np.ndarray:
+    return_debug: bool = False,
+) -> np.ndarray | tuple[np.ndarray, Dict[str, Any]]:
     """
     Find the four OUTER paper corners.
 
@@ -171,6 +170,8 @@ def detect_document_quad(
 
     best_quad = None
     best_score = -1e9
+    candidate_count = 0
+    valid_candidate_count = 0
 
     for mask in (edges, white):
         contours, _ = cv2.findContours(
@@ -190,7 +191,8 @@ def detect_document_quad(
             if area < sh * sw * 0.18:
                 continue
 
-            for quad_small in _candidate_quads_from_contour(contour):
+            for quad_small, candidate_source in _candidate_quads_from_contour(contour):
+                candidate_count += 1
                 quad_full = quad_small / scale
 
                 score = _quad_geometry_score(
@@ -199,6 +201,14 @@ def detect_document_quad(
                     expected_ratio,
                 )
 
+                # A real four-corner contour preserves page edges better than
+                # minAreaRect's enclosing approximation.  Keep the latter as
+                # a fallback for weak/occluded edges, never as a blind winner.
+                if score is not None and candidate_source == "min_area_rect":
+                    score -= 0.15
+
+                if score is not None:
+                    valid_candidate_count += 1
                 if score is not None and score > best_score:
                     best_score = score
                     best_quad = order_points(quad_full)
@@ -209,10 +219,27 @@ def detect_document_quad(
             "Please place the complete sheet inside the camera frame and scan again."
         )
 
-    return best_quad.astype(np.float32)
+    best_quad = best_quad.astype(np.float32)
+    if not return_debug:
+        return best_quad
+
+    tl, tr, br, bl = best_quad
+    top = float(np.linalg.norm(tr - tl))
+    bottom = float(np.linalg.norm(br - bl))
+    left = float(np.linalg.norm(bl - tl))
+    right = float(np.linalg.norm(br - tr))
+    detected_ratio = ((top + bottom) / 2.0) / max((left + right) / 2.0, 1.0)
+    area_ratio = abs(float(cv2.contourArea(best_quad.reshape(-1, 1, 2)))) / float(h * w)
+    return best_quad, {
+        "candidate_count": candidate_count,
+        "valid_candidate_count": valid_candidate_count,
+        "selected_score": round(float(best_score), 4),
+        "a4_ratio_error": round(abs(detected_ratio - expected_ratio) / expected_ratio, 4),
+        "page_area_ratio": round(area_ratio, 4),
+    }
 
 
-def _warp_page(
+def warp_document_quad(
     image: np.ndarray,
     quad: np.ndarray,
     width: int,
@@ -240,6 +267,10 @@ def _warp_page(
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=(255, 255, 255),
     )
+
+
+# Backwards-compatible private alias for the standalone canonical pipeline.
+_warp_page = warp_document_quad
 
 
 def _prepare_feature_image(image: np.ndarray) -> np.ndarray:

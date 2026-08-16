@@ -24,6 +24,8 @@ from typing import Optional, Tuple, Dict, Any
 import cv2
 import numpy as np
 
+from .canonical import detect_document_quad, warp_document_quad
+
 
 DEFAULT_WIDTH = 1600
 DEFAULT_HEIGHT = 2200
@@ -527,6 +529,37 @@ def _canonical_marker_positions(
     return markers.astype(
         np.float32
     )
+
+
+def _validate_canonical_marker_positions(
+    markers: np.ndarray,
+    width: int,
+    height: int,
+) -> Dict[str, Any]:
+    """Reject an A4 warp whose internal registration blocks are implausible.
+
+    Page corners establish the coordinate system.  These blocks are a
+    validation signal only; they are deliberately not used for another crop
+    or page-boundary warp.
+    """
+    expected = _canonical_marker_positions(width, height)
+    distances = np.linalg.norm(markers - expected, axis=1)
+    mean_error = float(np.mean(distances))
+    max_error = float(np.max(distances))
+    valid = mean_error <= 85.0 and max_error <= 130.0
+    debug = {
+        "detected": True,
+        "expected_markers": [[round(float(x), 2), round(float(y), 2)] for x, y in expected],
+        "mean_position_error": round(mean_error, 2),
+        "max_position_error": round(max_error, 2),
+        "valid": valid,
+    }
+    if not valid:
+        raise ValueError(
+            "Unable to align the complete OMR sheet. Please place the entire "
+            "A4 OMR inside the camera frame with all four corners visible and capture again."
+        )
+    return debug
 
 
 def warp_from_registration_blocks(
@@ -1720,19 +1753,24 @@ def canonicalize_omr(
         interpolation=cv2.INTER_AREA,
     )
 
-    markers, marker_debug = (
-        detect_registration_blocks(
-            image
-        )
+    # Establish geometry from the complete physical page.  Registration
+    # blocks are intentionally detected only *after* this rectification so
+    # their inset centres cannot become crop/page boundaries.
+    page_quad, page_debug = detect_document_quad(
+        image,
+        expected_ratio=width / float(height),
+        return_debug=True,
     )
-
-    coarse, homography = (
-        warp_from_registration_blocks(
-            image,
-            markers,
-            width,
-            height,
-        )
+    coarse = warp_document_quad(image, page_quad, width, height)
+    homography = cv2.getPerspectiveTransform(
+        page_quad,
+        np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype=np.float32),
+    )
+    markers, marker_debug = detect_registration_blocks(coarse)
+    marker_debug["canonical_position_validation"] = _validate_canonical_marker_positions(
+        markers,
+        width,
+        height,
     )
 
     # The registration-block homography maps the complete source sheet
@@ -1765,11 +1803,13 @@ def canonicalize_omr(
                 ]
                 for name, point in zip(
                     ("top_left", "top_right", "bottom_right", "bottom_left"),
-                    markers,
+                    page_quad,
                 )
             },
             "perspective_correction_applied": True,
         },
+
+        "page_detection": page_debug,
 
         "output_size": {
             "width":
@@ -1850,6 +1890,40 @@ def canonicalize_omr(
             exist_ok=True,
         )
 
+    # Fine alignment is optional, but it must not invalidate the complete
+    # page geometry established above.  Validate the final recognition image,
+    # not merely the pre-refinement warp.
+    final_markers, final_marker_debug = detect_registration_blocks(result)
+    final_validation = _validate_canonical_marker_positions(
+        final_markers,
+        width,
+        height,
+    )
+    debug["registration"]["final_markers"] = final_marker_debug["markers"]
+    debug["registration"]["final_canonical_position_validation"] = final_validation
+
+    if debug_dir is not None:
+        page_debug_image = image.copy()
+        cv2.polylines(
+            page_debug_image,
+            [page_quad.astype(np.int32).reshape(-1, 1, 2)],
+            True,
+            (0, 0, 255),
+            4,
+        )
+        # Full-page geometry trace.  The selected quadrilateral is repeated
+        # in candidates/selected views because detection metadata records the
+        # candidate count and score without altering the source image.
+        cv2.imwrite(str(debug_dir / "01_raw_camera.jpg"), image)
+        cv2.imwrite(str(debug_dir / "02_page_candidates.jpg"), page_debug_image)
+        cv2.imwrite(str(debug_dir / "03_selected_a4_page.jpg"), page_debug_image)
+        cv2.imwrite(str(debug_dir / "04_a4_perspective_corrected.jpg"), coarse)
+        cv2.imwrite(str(debug_dir / "05_canonical_omr.jpg"), result)
+        cv2.imwrite(
+            str(debug_dir / "06_corner_block_validation.jpg"),
+            _draw_marker_debug(result, final_markers),
+        )
+
         cv2.imwrite(
             str(
                 debug_dir
@@ -1857,10 +1931,12 @@ def canonicalize_omr(
                 "00_registration_detection.jpg"
             ),
             _draw_marker_debug(
-                image,
+                coarse,
                 markers,
             ),
         )
+
+        cv2.imwrite(str(debug_dir / "00_a4_page_quad.jpg"), page_debug_image)
 
         cv2.imwrite(
             str(
