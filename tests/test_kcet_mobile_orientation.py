@@ -36,3 +36,24 @@ def test_4_way_rotation_registration_detection():
     sheet_270 = cv2.rotate(sheet, cv2.ROTATE_90_COUNTERCLOCKWISE)
     markers_270, _ = detect_registration_blocks(sheet_270)
     assert len(markers_270) == 4
+
+
+def test_missing_bl_corner_fallback_ratio():
+    """Verify fallback BL estimation uses exact 1.4173 ratio matching canonical sheet height."""
+    h_port, w_port = 1400, 1000
+    sheet = np.full((h_port, w_port, 3), 245, dtype=np.uint8)
+    
+    # Place only TL and TR blocks (simulate missing bottom-left and bottom-right blocks)
+    cv2.rectangle(sheet, (80, 80), (160, 160), (10, 10, 10), -1)    # TL
+    cv2.rectangle(sheet, (840, 80), (920, 160), (10, 10, 10), -1)   # TR
+
+    markers, _ = detect_registration_blocks(sheet)
+    assert len(markers) == 4
+
+    # Calculated height (BL y - TL y) / width (TR x - TL x) must equal ~1.4173
+    tl, tr, br, bl = markers
+    w_calc = tr[0] - tl[0]
+    h_calc = bl[1] - tl[1]
+    ratio = h_calc / w_calc
+    assert abs(ratio - 1.4173) < 0.02
+

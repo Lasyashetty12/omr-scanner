@@ -172,7 +172,7 @@ def _candidate_black_blocks(
         rect_area = float(bw * bh)
         fill = area / max(rect_area, 1.0)
 
-        if fill < 0.52:
+        if fill < 0.40:
             continue
 
         perimeter = cv2.arcLength(contour, True)
@@ -282,13 +282,13 @@ def _pick_corner_candidate(
         ny = cy / float(height)
 
         if corner == "TL":
-            inside = nx < 0.48 and ny < 0.35
+            inside = nx < 0.48 and ny < 0.40
         elif corner == "TR":
-            inside = nx > 0.52 and ny < 0.35
+            inside = nx > 0.52 and ny < 0.40
         elif corner == "BR":
-            inside = nx > 0.52 and ny > 0.70
+            inside = nx > 0.48 and ny > 0.60
         else:
-            inside = nx < 0.48 and ny > 0.70
+            inside = nx < 0.52 and ny > 0.60
 
         if not inside:
             continue
@@ -379,8 +379,10 @@ def _detect_registration_blocks_internal(
         tr = picked_dict["TR"]
         dx = tr[0] - tl[0]
         dy = tr[1] - tl[1]
-        perp_x = -dy * 1.375
-        perp_y = dx * 1.375
+        # Canonical registration block aspect ratio: 2042.1 / 1440.8 = 1.4173376
+        aspect_scale = 1.4173376
+        perp_x = -dy * aspect_scale
+        perp_y = dx * aspect_scale
 
         if "BL" not in picked_dict:
             est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
