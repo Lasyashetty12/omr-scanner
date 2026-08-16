@@ -272,8 +272,25 @@ def _pick_corner_candidate(
     height: int,
 ) -> Optional[Dict[str, Any]]:
     """
-    Search a generous corner quadrant but reject centre-page content.
+    Search a generous corner quadrant with adaptive target distance relative to sheet bounds.
     """
+    if not candidates:
+        return None
+
+    # Compute outer extent of candidate blocks to dynamically target sheet corners:
+    xs = [c["center"][0] for c in candidates]
+    ys = [c["center"][1] for c in candidates]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    target_map = {
+        "TL": (min_x, min_y),
+        "TR": (max_x, min_y),
+        "BR": (max_x, max_y),
+        "BL": (min_x, max_y),
+    }
+    tx, ty = target_map[corner]
+
     chosen = []
 
     for candidate in candidates:
@@ -282,23 +299,29 @@ def _pick_corner_candidate(
         ny = cy / float(height)
 
         if corner == "TL":
-            inside = nx < 0.48 and ny < 0.35
+            inside = nx < 0.52 and ny < 0.52
         elif corner == "TR":
-            inside = nx > 0.52 and ny < 0.35
+            inside = nx > 0.48 and ny < 0.52
         elif corner == "BR":
-            inside = nx > 0.52 and ny > 0.70
+            inside = nx > 0.48 and ny > 0.48
         else:
-            inside = nx < 0.48 and ny > 0.70
+            inside = nx < 0.52 and ny > 0.48
 
         if not inside:
             continue
 
-        score = _corner_region_score(
-            candidate,
-            corner,
-            width,
-            height,
+        dist = np.hypot(cx - tx, cy - ty) / max(float(max(width, height)), 1.0)
+        square_score = max(
+            0.0,
+            1.0 - abs(
+                np.log(
+                    max(candidate["aspect"], 1e-6)
+                )
+            ),
         )
+        fill_score = candidate["fill"]
+
+        score = -dist * 5.0 + square_score * 3.0 + fill_score * 2.0
 
         chosen.append(
             (
