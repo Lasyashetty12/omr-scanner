@@ -168,11 +168,7 @@ def save_debug_images(
     def _fast_write(path, img):
         if img is None:
             return
-        h, w = img.shape[:2]
-        if w > 1200:
-            scale = 1200.0 / w
-            img = cv2.resize(img, (1200, int(h * scale)), interpolation=cv2.INTER_AREA)
-        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
 
     corrected = processing.get("corrected")
     if corrected is not None:
