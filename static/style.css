@@ -558,6 +558,56 @@ video#camera {
   line-height: 1.5;
 }
 
+/* BUBBLE ANALYSIS DEBUG OVERLAY */
+.debug-box {
+  margin-top: 14px;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.debug-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.toggle-debug-btn {
+  background: rgba(201, 162, 39, 0.15);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.toggle-debug-btn:hover {
+  background: rgba(201, 162, 39, 0.3);
+}
+
+.bubble-debug-wrapper {
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.debug-analysis-img {
+  width: 100%;
+  height: auto;
+  max-height: 80vh;
+  display: block;
+  object-fit: contain;
+}
+
 .hidden { display: none !important; }
 
 @media (max-width: 600px) {
