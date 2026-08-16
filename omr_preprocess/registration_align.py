@@ -97,7 +97,7 @@ def _binary_dark(gray: np.ndarray) -> np.ndarray:
         9,
     )
 
-    mask = cv2.bitwise_and(otsu, adaptive)
+    mask = cv2.bitwise_or(otsu, adaptive)
 
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
