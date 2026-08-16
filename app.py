@@ -1024,10 +1024,45 @@ async def scan_omr(
         )
 
 
-    result["corrected_image_url"] = f"/results/{scan_id}_corrected.jpg"
+    result["original_image_url"] = f"/uploads/{upload_filename}"
+    result["corrected_image_url"] = f"/uploads/{upload_filename}"
     result["bubble_debug_image_url"] = f"/results/{scan_id}_bubble_debug.jpg"
 
     return result
+
+
+# ============================================================
+# GET UPLOADED IMAGE (AS CLICKED)
+# ============================================================
+
+@app.get(
+    "/uploads/{filename}"
+)
+def get_upload_image(
+    filename: str,
+):
+
+    filename = safe_filename(
+        filename
+    )
+
+    image_path = os.path.join(
+        UPLOAD_DIR,
+        filename,
+    )
+
+    if not os.path.exists(
+        image_path
+    ):
+
+        raise HTTPException(
+            status_code=404,
+            detail="Uploaded image not found.",
+        )
+
+    return FileResponse(
+        image_path,
+    )
 
 
 # ============================================================
