@@ -4352,6 +4352,37 @@ def create_debug_image(
 # MAIN PROCESSOR
 # ============================================================
 
+def _last_row_geometry_debug(corrected_image, template):
+    """Capture the final-row-to-bottom-edge margin without changing any bubble geometry."""
+    question_y_positions = template.get("question_y_positions") or []
+    if not question_y_positions:
+        return {
+            "last_row_y": None,
+            "last_row_bubble_center_plus_radius": None,
+            "full_image_height": int(corrected_image.shape[0]),
+            "distance_from_last_row_to_bottom": None,
+            "bottom_margin_pixels": None,
+            "bottom_row_vertical_spacing_px": None,
+        }
+
+    last_row_y = float(question_y_positions[-1])
+    bubble_radius = float(template.get("bubble_radius", 11.0))
+    last_row_bottom = last_row_y + bubble_radius
+    distance_to_bottom = float(corrected_image.shape[0] - last_row_bottom)
+    row_spacing = 0.0
+    if len(question_y_positions) > 1:
+        row_spacing = float(question_y_positions[-1] - question_y_positions[-2])
+
+    return {
+        "last_row_y": int(round(last_row_y)),
+        "last_row_bubble_center_plus_radius": int(round(last_row_bottom)),
+        "full_image_height": int(corrected_image.shape[0]),
+        "distance_from_last_row_to_bottom": round(distance_to_bottom, 2),
+        "bottom_margin_pixels": round(distance_to_bottom, 2),
+        "bottom_row_vertical_spacing_px": round(row_spacing, 2),
+    }
+
+
 def process_omr(
     image_path,
     template_path,
@@ -4660,6 +4691,14 @@ def process_omr(
         cv2.imwrite(os.path.join(diagnostic_dir, "05_canonical_registered.jpg"), corrected)
         cv2.imwrite(os.path.join(diagnostic_dir, "06_existing_recognition_input.jpg"), corrected)
 
+    if not os.environ.get("VERCEL"):
+        cv2.imwrite(os.path.join(os.getcwd(), "preprocessed_full_omr.png"), corrected)
+
+    last_row_debug = _last_row_geometry_debug(corrected, template)
+    if debug_input_enabled and diagnostic_dir:
+        with open(os.path.join(diagnostic_dir, "bottom_row_geometry.json"), "w", encoding="utf-8") as bottom_file:
+            json.dump(last_row_debug, bottom_file, indent=2)
+
     # --------------------------------
     # Grayscale is already prepared by canonical preprocessing.
     # --------------------------------
@@ -4918,6 +4957,8 @@ def process_omr(
                 "aspect_ratio": round(corrected.shape[1] / float(corrected.shape[0]), 6),
                 "stage": "immediately_before_bubble_recognition",
             },
+            "bottom_row_geometry": last_row_debug,
+            "preprocessed_full_omr_path": os.path.join(os.getcwd(), "preprocessed_full_omr.png"),
         }
         with open(os.path.join(diagnostic_dir, "diagnostics.json"), "w", encoding="utf-8") as diagnostic_file:
             json.dump(diagnostic_json, diagnostic_file, indent=2, default=str)
