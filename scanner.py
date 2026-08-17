@@ -213,14 +213,31 @@ def load_image(image_source, *, filename=None, mime_type=None, return_debug=Fals
     normalized = normalize_image_resolution(decoded_bgr)
     normalized_height, normalized_width = normalized.shape[:2]
     debug = {
+        "source": "uploaded_bytes",
         "original_filename": os.path.basename(source_name),
         "mime_type": mime_type or "",
         "original_width": int(original_width),
         "original_height": int(original_height),
+        "original_aspect_ratio": round(original_width / float(original_height), 6),
+        "image_width": int(original_width),
+        "image_height": int(original_height),
+        "aspect_ratio": round(original_width / float(original_height), 6),
+        "orientation": orientation,
         "orientation_normalized_width": int(oriented_width),
         "orientation_normalized_height": int(oriented_height),
+        "orientation_normalized_aspect_ratio": round(
+            oriented_width / float(oriented_height), 6
+        ),
         "normalized_width": int(normalized_width),
         "normalized_height": int(normalized_height),
+        "normalized_aspect_ratio": round(
+            normalized_width / float(normalized_height), 6
+        ),
+        "preprocessed_width": int(normalized_width),
+        "preprocessed_height": int(normalized_height),
+        "preprocessed_aspect_ratio": round(
+            normalized_width / float(normalized_height), 6
+        ),
         "exif_orientation": orientation,
         "orientation_applied": orientation_applied,
         "decoder": decoder,
@@ -4375,6 +4392,24 @@ def process_omr(
         # independent crop operation before registration.
         cv2.imwrite(os.path.join(diagnostic_dir, "04_document_crop.jpg"), image)
 
+    logger.info(
+        "OMR input geometry | source=%s | decoded=%dx%d (%.6f) | "
+        "orientation_normalized=%dx%d (%.6f) | registration_input=%dx%d (%.6f) | "
+        "EXIF orientation=%s | orientation_applied=%s",
+        input_debug["original_filename"],
+        input_debug["original_width"],
+        input_debug["original_height"],
+        input_debug["original_aspect_ratio"],
+        input_debug["orientation_normalized_width"],
+        input_debug["orientation_normalized_height"],
+        input_debug["orientation_normalized_aspect_ratio"],
+        input_debug["normalized_width"],
+        input_debug["normalized_height"],
+        input_debug["normalized_aspect_ratio"],
+        input_debug["exif_orientation"],
+        input_debug["orientation_applied"],
+    )
+
     # --------------------------------
     # Quality validation
     # --------------------------------
@@ -4866,6 +4901,7 @@ def process_omr(
             "resolution": {
                 "width": input_debug["normalized_width"],
                 "height": input_debug["normalized_height"],
+                "aspect_ratio": input_debug["normalized_aspect_ratio"],
                 "normalized": input_debug["resolution_normalized"],
             },
             "registration": {
@@ -4876,7 +4912,12 @@ def process_omr(
                 "ecc_applied": alignment_debug.get("ecc_applied", False),
                 "ecc_score": alignment_debug.get("ecc_score"),
             },
-            "final_geometry": {"width": int(corrected.shape[1]), "height": int(corrected.shape[0])},
+            "final_geometry": {
+                "width": int(corrected.shape[1]),
+                "height": int(corrected.shape[0]),
+                "aspect_ratio": round(corrected.shape[1] / float(corrected.shape[0]), 6),
+                "stage": "immediately_before_bubble_recognition",
+            },
         }
         with open(os.path.join(diagnostic_dir, "diagnostics.json"), "w", encoding="utf-8") as diagnostic_file:
             json.dump(diagnostic_json, diagnostic_file, indent=2, default=str)
@@ -4895,9 +4936,26 @@ def process_omr(
         num_uncertain = sum(1 for v in answers.values() if v == "UNCERTAIN")
         num_evaluated = len(answers) * len(template.get("options", ["A", "B", "C", "D"])) if answers else 0
 
+        source = input_debug.get("source", "uploaded_bytes")
+        image_width = int(input_debug.get("image_width", orig_w))
+        image_height = int(input_debug.get("image_height", orig_h))
+        aspect_ratio = float(input_debug.get("aspect_ratio", image_width / float(image_height) if image_height else 0.0))
+        orientation = input_debug.get("orientation")
+        pre_w = int(input_debug.get("preprocessed_width", corr_w))
+        pre_h = int(input_debug.get("preprocessed_height", corr_h))
+        pre_ratio = float(input_debug.get("preprocessed_aspect_ratio", pre_w / float(pre_h) if pre_h else 0.0))
+
         logger.info(
-            "Scan Diagnostic Log | Original: %dx%d | Corrected: %dx%d | Corners: %s | Preprocessing: %s | Exam: %s | Template: %s | Evaluated Bubbles: %d | Blank: %d | Multiple: %d | Uncertain: %d",
-            orig_w, orig_h, corr_w, corr_h, doc_quad, stages, exam_name, template.get("template_name"), num_evaluated, num_blank, num_multiple, num_uncertain
+            "Scan Diagnostic Log | source=%s | image=%dx%d (%.6f) | orientation=%s | "
+            "preprocessed=%dx%d (%.6f) | registration_input=%dx%d (%.6f) | "
+            "Before bubble recognition: %dx%d (%.6f) | Corners: %s | "
+            "Preprocessing: %s | Exam: %s | Template: %s | Evaluated Bubbles: %d | "
+            "Blank: %d | Multiple: %d | Uncertain: %d",
+            source, image_width, image_height, aspect_ratio, orientation,
+            pre_w, pre_h, pre_ratio, orig_w, orig_h, orig_w / float(orig_h),
+            corr_w, corr_h, corr_w / float(corr_h), doc_quad, stages, exam_name,
+            template.get("template_name"), num_evaluated, num_blank,
+            num_multiple, num_uncertain
         )
     except Exception as log_err:
         logger.warning("Diagnostic logging error: %s", log_err)
@@ -4944,7 +5002,7 @@ def process_omr(
     }
 
 
-def compare_omr_inputs(laptop_image, mobile_image, template_path):
+def compare_omr_inputs(laptop_image, mobile_image, template_path, *, diagnostic_dir=None):
     """Run two files through the frozen OMR pipeline and report first-order differences.
 
     This is deliberately a helper rather than a second recognition path.  It
@@ -4969,9 +5027,23 @@ def compare_omr_inputs(laptop_image, mobile_image, template_path):
         for question in sorted(set(laptop_answers) | set(mobile_answers))
         if laptop_answers.get(question) != mobile_answers.get(question)
     }
-    return {
+    comparison = {
         "laptop": {"input": laptop["input_debug"], "registration": registration(laptop)},
         "mobile": {"input": mobile["input_debug"], "registration": registration(mobile)},
         "answer_differences": answer_differences,
         "recognition_same": not answer_differences,
     }
+
+    if diagnostic_dir is not None:
+        output_dir = Path(diagnostic_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_dir / "laptop_preprocessed.png"), laptop["corrected"])
+        cv2.imwrite(str(output_dir / "laptop_bubble_debug.png"), laptop["debug"])
+        cv2.imwrite(str(output_dir / "mobile_preprocessed.png"), mobile["corrected"])
+        cv2.imwrite(str(output_dir / "mobile_bubble_debug.png"), mobile["debug"])
+        (output_dir / "comparison.json").write_text(
+            json.dumps(comparison, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    return comparison

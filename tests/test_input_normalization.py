@@ -49,3 +49,25 @@ def test_equivalent_byte_and_path_inputs_have_same_working_pixels(tmp_path):
 
     assert from_bytes.shape == (800, 1600, 3)
     assert np.array_equal(from_bytes, from_path)
+
+
+def test_input_debug_reports_mobile_geometry_fields():
+    rgb = np.full((200, 150, 3), 200, dtype=np.uint8)
+    rgb[30:70, 20:60] = (255, 0, 0)
+    encoded = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))[1].tobytes()
+
+    image, debug, _raw, _oriented = load_image(
+        encoded,
+        filename="mobile.jpg",
+        mime_type="image/jpeg",
+        return_debug=True,
+    )
+
+    assert debug["source"] == "uploaded_bytes"
+    assert debug["image_width"] == 150
+    assert debug["image_height"] == 200
+    assert debug["aspect_ratio"] == 150 / 200
+    assert debug["orientation"] in (None, 1)
+    assert debug["preprocessed_width"] == image.shape[1]
+    assert debug["preprocessed_height"] == image.shape[0]
+    assert debug["preprocessed_aspect_ratio"] == image.shape[1] / float(image.shape[0])
