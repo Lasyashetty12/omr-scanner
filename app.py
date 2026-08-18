@@ -1129,8 +1129,35 @@ def get_result_image(
 
 
 # ============================================================
+# INDIVIDUAL RESULT HTML PAGE
+# ============================================================
+
+@app.get("/result.html")
+def get_result_html():
+
+    result_path = os.path.join(
+        STATIC_DIR,
+        "result.html",
+    )
+
+    if os.path.exists(
+        result_path
+    ):
+
+        return FileResponse(
+            result_path,
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Result page not found.",
+    )
+
+
+# ============================================================
 # TEACHER DASHBOARD API — LIST EVALUATED RESULTS
 # ============================================================
+
 
 @app.get("/api/omr-results")
 def list_omr_results(

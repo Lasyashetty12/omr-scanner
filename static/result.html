@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Individual OMR Evaluation Analysis — Manchester Technologies</title>
+    <meta name="description" content="Detailed Individual OMR Sheet Analysis and Question Breakdown">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=4.0">
+</head>
+
+<body>
+    <div class="page-container" style="max-width: 840px;">
+        <!-- BRAND HEADER -->
+        <header class="main-header">
+            <div class="brand-info">
+                <img src="/static/logo.jpg?v=3.5" alt="Manchester Technologies Logo" class="brand-logo-img">
+                <div>
+                    <h1>Manchester Technologies</h1>
+                    <p>Individual OMR Evaluation Report</p>
+                </div>
+            </div>
+            <div>
+                <a href="/" class="back-to-dashboard-btn" style="text-decoration: none; display: inline-block;">← Back to Dashboard</a>
+            </div>
+        </header>
+
+        <!-- MAIN CARD -->
+        <main class="main-card">
+            <!-- LOADING STATE -->
+            <div id="loading" class="loading-container">
+                <div class="loading-spinner"></div>
+                <span id="loadingText">Fetching Student OMR Evaluation...</span>
+            </div>
+
+            <!-- ERROR ALERT -->
+            <div id="error" class="error-banner hidden"></div>
+
+            <!-- EVALUATION RESULTS DISPLAY SECTION -->
+            <section id="resultSection" class="results-container hidden">
+                <div class="results-header">
+                    <h2>Individual OMR Sheet Analysis</h2>
+                </div>
+
+                <!-- STUDENT & EXAM INFORMATION -->
+                <div id="studentInfoCard" class="student-info-card">
+                    <div class="student-info-item">
+                        <span>STUDENT NAME</span>
+                        <strong id="resStudentName">Student Candidate</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>ROLL NUMBER</span>
+                        <strong id="resRollNumber">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>CLASS & SECTION</span>
+                        <strong id="resClassSection">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>EXAM DATE</span>
+                        <strong id="resExamDate">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>SESSION</span>
+                        <strong id="resSession">Morning</strong>
+                    </div>
+                </div>
+
+                <!-- SCORE & METRICS -->
+                <div class="summary-tiles-row">
+                    <div class="tile gold-tile">
+                        <span class="t-lbl">TOTAL SCORE</span>
+                        <strong id="score" class="t-val">-</strong>
+                    </div>
+                    <div class="tile">
+                        <span class="t-lbl">EXAM</span>
+                        <strong id="resultExam" class="t-val">-</strong>
+                    </div>
+                    <div class="tile">
+                        <span class="t-lbl">STREAM</span>
+                        <strong id="resultStream" class="t-val">PCMB</strong>
+                    </div>
+                    <div class="tile">
+                        <span class="t-lbl">PAPER / SERIES</span>
+                        <strong id="paperCode" class="t-val">-</strong>
+                    </div>
+                </div>
+
+                <div class="metrics-tiles-row">
+                    <div class="tile ok-tile">
+                        <span class="t-lbl">CORRECT</span>
+                        <strong id="correct" class="t-val">0</strong>
+                    </div>
+                    <div class="tile danger-tile">
+                        <span class="t-lbl">WRONG</span>
+                        <strong id="wrong" class="t-val">0</strong>
+                    </div>
+                    <div class="tile warn-tile">
+                        <span class="t-lbl">BLANK</span>
+                        <strong id="blank" class="t-val">0</strong>
+                    </div>
+                    <div class="tile info-tile">
+                        <span class="t-lbl">MULTIPLE</span>
+                        <strong id="multiple" class="t-val">0</strong>
+                    </div>
+                    <div class="tile muted-tile">
+                        <span class="t-lbl">UNCERTAIN</span>
+                        <strong id="uncertain" class="t-val">0</strong>
+                    </div>
+                </div>
+
+                <div id="quality" class="quality-info"></div>
+                <div id="message" class="message-info"></div>
+
+                <!-- QUESTION-WISE ANALYSIS DISPLAY CARD -->
+                <div id="questionAnalysisCard" class="question-analysis-card">
+                    <div class="card-title-bar">
+                        <h4>📋 Detailed Evaluation Break-down Per Question</h4>
+                        <p>Complete itemized response breakdown for this candidate.</p>
+                    </div>
+                    <div class="question-table-wrap">
+                        <table class="question-table">
+                            <thead>
+                                <tr>
+                                    <th>Question #</th>
+                                    <th>Student Answer</th>
+                                    <th>Correct Answer</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody">
+                                <tr>
+                                    <td colspan="4">No question details available.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- EVALUATED OMR BUBBLE ANALYSIS DISPLAY CARD -->
+                <div id="bubbleAnalysisCard" class="bubble-analysis-card hidden">
+                    <div class="bubble-analysis-title-bar">
+                        <h4>🔍 Evaluated OMR Sheet Visual Analysis (Tap image to zoom)</h4>
+                        <p>Visual overlay displaying all detected bubbles, answer keys, and grid alignment.</p>
+                    </div>
+                    <div class="bubble-analysis-img-wrapper" style="cursor: zoom-in;">
+                        <img id="bubbleDebugPreview" class="preview-img bubble-debug-img" alt="Evaluated OMR Bubble Analysis">
+                    </div>
+                </div>
+
+                <!-- DOWNLOAD OPTIONS CARD -->
+                <div id="downloadOptionsCard" class="download-options-card" style="margin-top: 16px; background: var(--card-bg2); border: 1px solid var(--border); border-radius: 12px; padding: 16px;">
+                    <div class="card-title-bar">
+                        <h4 style="color: var(--gold); font-size: 15px; font-weight: 800;">📥 Download Evaluation Report</h4>
+                        <p style="font-size: 12px; color: var(--muted); margin-top: 4px;">Export candidate evaluation breakdown.</p>
+                    </div>
+                    <div class="download-btn-group" style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
+                        <button id="downloadPdfBtn" type="button" class="action-view-btn" style="padding: 10px 16px;">
+                            📄 Download PDF
+                        </button>
+                        <button id="downloadExcelBtn" type="button" class="action-view-btn" style="padding: 10px 16px; background: linear-gradient(135deg, #10b981, #059669); color: #fff;">
+                            📊 Download Excel
+                        </button>
+                        <button id="downloadWordBtn" type="button" class="action-view-btn" style="padding: 10px 16px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff;">
+                            📝 Download Word
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- LIGHTBOX FULLSCREEN ZOOM MODAL -->
+    <div id="imageLightbox" class="lightbox-modal hidden">
+        <span class="lightbox-close" id="lightboxClose">&times;</span>
+        <div class="lightbox-content-wrapper">
+            <img id="lightboxImg" class="lightbox-img" alt="Full Resolution View">
+        </div>
+    </div>
+
+    <script src="/static/result.js?v=1.0"></script>
+</body>
+
+</html>

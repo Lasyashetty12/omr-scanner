@@ -583,33 +583,11 @@ async function fetchAndRenderDashboard() {
     }
 }
 
-async function openIndividualResult(resultId) {
+function openIndividualResult(resultId) {
     if (!resultId) return;
-
-    clearError();
-    showLoading("Loading student OMR evaluation...");
-    try {
-        const resp = await fetch(`/api/omr-results/${resultId}`);
-        if (!resp.ok) {
-            throw new Error(resp.status === 404 ? "Result not found." : "Failed to load result.");
-        }
-        const data = await resp.json();
-
-        displayResult(data);
-
-        hideDashboard();
-        if (resultSection) {
-            resultSection.hidden = false;
-            resultSection.classList.remove("hidden");
-            resultSection.scrollIntoView({ behavior: "smooth" });
-        }
-    } catch (err) {
-        console.error("Error opening result:", err);
-        showError(err.message || "Result not found.");
-    } finally {
-        hideLoading();
-    }
+    window.location.href = `/result.html?id=${resultId}`;
 }
+
 
 function openResultDashboard() {
     clearError();
