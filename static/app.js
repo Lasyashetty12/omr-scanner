@@ -1247,6 +1247,18 @@ function captureCameraImage(
     automatic = false
 ) {
 
+    if (capturedBlob && !automatic) {
+        return;
+    }
+
+    if (automatic && autoCaptureTriggered) {
+        return;
+    }
+
+    if (automatic) {
+        autoCaptureTriggered = true;
+    }
+
     clearError();
 
     hideResult();
