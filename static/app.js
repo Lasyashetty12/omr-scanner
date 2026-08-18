@@ -1251,10 +1251,6 @@ function captureCameraImage(
         return;
     }
 
-    if (automatic && autoCaptureTriggered) {
-        return;
-    }
-
     if (automatic) {
         autoCaptureTriggered = true;
     }
