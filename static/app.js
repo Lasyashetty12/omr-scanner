@@ -593,8 +593,8 @@ function isReadyForAutoCapture(
     videoHeight
 ) {
     /*
-        Check if corners are properly positioned.
-        Stability check is done in monitorCornerBlocks.
+        Only auto-capture when the sheet is actually a valid OMR-sized document,
+        positioned correctly and not moving excessively.
     */
 
     if (!detection || !detection.sourcePoints) {
@@ -611,7 +611,27 @@ function isReadyForAutoCapture(
         };
     }
 
-    /* All positioning checks passed */
+    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Registration-marker quadrilateral is too small"
+        };
+    }
+
+    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
+        return {
+            ready: false,
+            reason: "Sheet is too tilted"
+        };
+    }
+
+    if (previousDetection && hasExcessiveMovement(detection, previousDetection)) {
+        return {
+            ready: false,
+            reason: "Hold the sheet steady"
+        };
+    }
+
     return {
         ready: true,
         reason: "Positioned correctly"
@@ -895,7 +915,7 @@ function detectDocumentCorners() {
         )
     );
 
-    if (!measurements.every(({ coverage }) => coverage >= 0.005)) {
+    if (!measurements.every(({ coverage }) => coverage >= 0.02)) {
 
         return null;
     }
