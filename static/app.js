@@ -698,6 +698,10 @@ function cornerBlockMeasurement(
 
     let weightedY = 0;
 
+    /* Adaptive brightness threshold based on region lighting */
+    let brightnessSum = 0;
+    let pixelCount = 0;
+
     for (let y = startY; y < endY; y += 1) {
 
         for (let x = startX; x < endX; x += 1) {
@@ -709,7 +713,30 @@ function cornerBlockMeasurement(
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
-            if (brightness < 72) {
+            brightnessSum += brightness;
+            pixelCount += 1;
+
+            totalPixels += 1;
+        }
+    }
+
+    /* Calculate average brightness and use as adaptive threshold */
+    const avgBrightness = brightnessSum / Math.max(pixelCount, 1);
+    const threshold = Math.min(avgBrightness * 0.5, 80);
+
+    /* Second pass: find dark pixels using adaptive threshold */
+    for (let y = startY; y < endY; y += 1) {
+
+        for (let x = startX; x < endX; x += 1) {
+
+            const offset = (y * width + x) * 4;
+
+            const brightness =
+                pixels[offset] * 0.299
+                + pixels[offset + 1] * 0.587
+                + pixels[offset + 2] * 0.114;
+
+            if (brightness < threshold) {
 
                 darkPixels += 1;
 
@@ -717,8 +744,6 @@ function cornerBlockMeasurement(
 
                 weightedY += y;
             }
-
-            totalPixels += 1;
         }
     }
 
@@ -831,8 +856,8 @@ function detectDocumentCorners() {
         return null;
     }
 
-    /* Higher resolution for better accuracy (like QR scanner) */
-    const analysisWidth = 360;
+    /* Even higher resolution for pixel-perfect accuracy */
+    const analysisWidth = 480;
 
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
@@ -871,16 +896,17 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    /* Larger zones for better corner detection */
-    const zoneWidth = Math.round(analysisWidth * 0.22);
+    /* Optimized zones for better OMR corner detection */
+    const zoneWidth = Math.round(analysisWidth * 0.25);
 
-    const zoneHeight = Math.round(analysisHeight * 0.16);
+    const zoneHeight = Math.round(analysisHeight * 0.20);
 
+    /* Positions slightly inset from edges for better accuracy */
     const zones = [
-        [0, 0],
-        [analysisWidth - zoneWidth, 0],
-        [0, analysisHeight - zoneHeight],
-        [analysisWidth - zoneWidth, analysisHeight - zoneHeight],
+        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.02)],
+        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.02)],
+        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.78)],
+        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.78)],
     ];
 
     const measurements = zones.map(
@@ -890,12 +916,12 @@ function detectDocumentCorners() {
             analysisHeight,
             x,
             y,
-            x + zoneWidth,
-            y + zoneHeight
+            Math.min(x + zoneWidth, analysisWidth),
+            Math.min(y + zoneHeight, analysisHeight)
         )
     );
 
-    if (!measurements.every(({ coverage }) => coverage >= 0.008)) {
+    if (!measurements.every(({ coverage }) => coverage >= 0.005)) {
 
         return null;
     }
@@ -905,14 +931,34 @@ function detectDocumentCorners() {
     const displayHeight = cameraContainer.clientHeight;
 
     const displayPoints = measurements.map(({ x, y }) => ({
-        x: x / analysisWidth * displayWidth,
-        y: y / analysisHeight * displayHeight,
+        x: (x / analysisWidth) * displayWidth,
+        y: (y / analysisHeight) * displayHeight,
     }));
 
     const sourcePoints = measurements.map(({ x, y }) => ({
-        x: x / analysisWidth * videoWidth,
-        y: y / analysisHeight * videoHeight,
+        x: (x / analysisWidth) * videoWidth,
+        y: (y / analysisHeight) * videoHeight,
     }));
+
+    /* Validate that corners are roughly in expected positions */
+    const tl = sourcePoints[0];
+    const tr = sourcePoints[1];
+    const bl = sourcePoints[2];
+    const br = sourcePoints[3];
+
+    /* Check basic quad properties */
+    const topEdgeDist = Math.abs(tl.y - tr.y);
+    const bottomEdgeDist = Math.abs(bl.y - br.y);
+    const leftEdgeDist = Math.abs(tl.x - bl.x);
+    const rightEdgeDist = Math.abs(tr.x - br.x);
+
+    /* All edges should be relatively parallel */
+    if (Math.max(topEdgeDist, bottomEdgeDist) > videoHeight * 0.15) {
+        return null;
+    }
+    if (Math.max(leftEdgeDist, rightEdgeDist) > videoWidth * 0.15) {
+        return null;
+    }
 
     return {
         displayPoints,
