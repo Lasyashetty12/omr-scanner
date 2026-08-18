@@ -201,7 +201,49 @@ const scanLaserLine =
         "scanLaserLine"
     );
 
+const successState =
+    document.getElementById(
+        "successState"
+    );
+
+const viewResultButton =
+    document.getElementById(
+        "viewResultButton"
+    );
+
+const dashboardSection =
+    document.getElementById(
+        "dashboardSection"
+    );
+
+const classFilter =
+    document.getElementById(
+        "classFilter"
+    );
+
+const sectionFilter =
+    document.getElementById(
+        "sectionFilter"
+    );
+
+const examDashboardFilter =
+    document.getElementById(
+        "examDashboardFilter"
+    );
+
+const dashboardSummary =
+    document.getElementById(
+        "dashboardSummary"
+    );
+
+const dashboardTableBody =
+    document.getElementById(
+        "dashboardTableBody"
+    );
+
 let selectedStream = "pcmb";
+
+let dashboardRows = [];
 
 
 /* ==========================================================
@@ -319,6 +361,182 @@ function hideResult() {
     resultSection.classList.add("hidden");
 }
 
+function showSuccessState() {
+    if (!successState) return;
+    successState.hidden = false;
+    successState.classList.remove("hidden");
+}
+
+function hideSuccessState() {
+    if (!successState) return;
+    successState.hidden = true;
+    successState.classList.add("hidden");
+}
+
+function showDashboard() {
+    if (!dashboardSection) return;
+    dashboardSection.hidden = false;
+    dashboardSection.classList.remove("hidden");
+}
+
+function hideDashboard() {
+    if (!dashboardSection) return;
+    dashboardSection.hidden = true;
+    dashboardSection.classList.add("hidden");
+}
+
+function buildDashboardRows() {
+    const currentExam = (resultExam?.textContent || "").trim();
+    const currentScore = Number(score?.textContent || 0);
+    const currentPaper = (paperCode?.textContent || "").trim();
+
+    const seedData = [
+        {
+            student: "Aarav Sharma",
+            class: "12",
+            section: "A",
+            exam: "NEET",
+            score: 162,
+            correct: 41,
+            wrong: 8,
+            blank: 2,
+            status: "Pass"
+        },
+        {
+            student: "Meera Iyer",
+            class: "12",
+            section: "B",
+            exam: "KCET",
+            score: 148,
+            correct: 37,
+            wrong: 10,
+            blank: 3,
+            status: "Good"
+        },
+        {
+            student: "Rohan Kumar",
+            class: "11",
+            section: "C",
+            exam: "JEE",
+            score: 134,
+            correct: 34,
+            wrong: 13,
+            blank: 4,
+            status: "Watch"
+        },
+        {
+            student: "Ananya Nair",
+            class: "10",
+            section: "A",
+            exam: "KCET",
+            score: 122,
+            correct: 31,
+            wrong: 12,
+            blank: 6,
+            status: "Good"
+        }
+    ];
+
+    if (!currentExam || !currentPaper || Number.isNaN(currentScore) || currentScore <= 0) {
+        dashboardRows = seedData;
+        return seedData;
+    }
+
+    const scannedRow = {
+        student: "Current Candidate",
+        class: "12",
+        section: "A",
+        exam: currentExam,
+        score: currentScore,
+        correct: Number(correct?.textContent || 0),
+        wrong: Number(wrong?.textContent || 0),
+        blank: Number(blank?.textContent || 0),
+        status: currentScore >= 120 ? "Pass" : currentScore >= 90 ? "Good" : "Watch"
+    };
+
+    dashboardRows = [scannedRow, ...seedData];
+    return dashboardRows;
+}
+
+function renderDashboard() {
+    const classValue = classFilter?.value || "all";
+    const sectionValue = sectionFilter?.value || "all";
+    const examValue = examDashboardFilter?.value || "all";
+
+    const rows = buildDashboardRows().filter((row) => {
+        const classMatch = classValue === "all" || row.class === classValue;
+        const sectionMatch = sectionValue === "all" || row.section === sectionValue;
+        const examMatch = examValue === "all" || row.exam.toUpperCase() === examValue;
+        return classMatch && sectionMatch && examMatch;
+    });
+
+    const totalStudents = rows.length;
+    const avgScore = totalStudents ? Math.round(rows.reduce((sum, row) => sum + Number(row.score || 0), 0) / totalStudents) : 0;
+    const passCount = rows.filter((row) => (row.status || "").toLowerCase() === "pass").length;
+    const goodCount = rows.filter((row) => (row.status || "").toLowerCase() === "good").length;
+
+    if (dashboardSummary) {
+        dashboardSummary.innerHTML = `
+            <div class="summary-card">
+                <span>Total Students</span>
+                <strong>${totalStudents}</strong>
+            </div>
+            <div class="summary-card">
+                <span>Avg Score</span>
+                <strong>${avgScore}</strong>
+            </div>
+            <div class="summary-card">
+                <span>Pass</span>
+                <strong>${passCount}</strong>
+            </div>
+            <div class="summary-card">
+                <span>Good</span>
+                <strong>${goodCount}</strong>
+            </div>
+        `;
+    }
+
+    if (dashboardTableBody) {
+        if (!rows.length) {
+            dashboardTableBody.innerHTML = `
+                <tr>
+                    <td colspan="9">No student records found for the selected filters.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        dashboardTableBody.innerHTML = rows.map((row) => {
+            const statusClass = (row.status || "").toLowerCase() === "pass"
+                ? "pass"
+                : (row.status || "").toLowerCase() === "good"
+                    ? "good"
+                    : "watch";
+
+            return `
+                <tr>
+                    <td>${row.student}</td>
+                    <td>${row.class}</td>
+                    <td>${row.section}</td>
+                    <td>${row.exam}</td>
+                    <td>${row.score}</td>
+                    <td>${row.correct}</td>
+                    <td>${row.wrong}</td>
+                    <td>${row.blank}</td>
+                    <td><span class="status-pill ${statusClass}">${row.status}</span></td>
+                </tr>
+            `;
+        }).join("");
+    }
+}
+
+function openResultDashboard() {
+    showDashboard();
+    renderDashboard();
+    if (resultSection) {
+        resultSection.scrollIntoView({ behavior: "smooth" });
+    }
+}
 
 /* ==========================================================
    PREVIEW URL CLEANUP
@@ -1902,9 +2120,10 @@ function displayResult(
             false;
 
         resultSection.classList.remove("hidden");
-
-        resultSection.scrollIntoView({ behavior: "smooth" });
     }
+
+    showSuccessState();
+    hideDashboard();
 }
 
 
@@ -1917,7 +2136,8 @@ async function scanOMR() {
     clearError();
 
     hideResult();
-
+    hideSuccessState();
+    hideDashboard();
 
     const exam =
         examSelect
@@ -2133,6 +2353,8 @@ if (
                 );
             }
 
+            hideSuccessState();
+            hideDashboard();
 
             /*
                 Allows selecting the same image again.
@@ -2141,6 +2363,22 @@ if (
                 "";
         }
     );
+}
+
+if (viewResultButton) {
+    viewResultButton.addEventListener("click", openResultDashboard);
+}
+
+if (classFilter) {
+    classFilter.addEventListener("change", renderDashboard);
+}
+
+if (sectionFilter) {
+    sectionFilter.addEventListener("change", renderDashboard);
+}
+
+if (examDashboardFilter) {
+    examDashboardFilter.addEventListener("change", renderDashboard);
 }
 
 function updateStreamUI(stream) {
@@ -2253,7 +2491,8 @@ window.addEventListener(
     clearError();
 
     hideResult();
-
+    hideSuccessState();
+    hideDashboard();
 
     if (
         cameraContainer
