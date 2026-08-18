@@ -12,6 +12,7 @@ from fastapi import (
     Form,
     HTTPException,
     UploadFile,
+    Query,
 )
 
 from fastapi.responses import FileResponse
@@ -31,6 +32,14 @@ from scorer import (
     calculate_score,
     calculate_jee_score,
 )
+
+from database import (
+    save_omr_result_to_db,
+    get_omr_results_from_db,
+    get_omr_result_by_id_from_db,
+    is_db_configured,
+)
+
 
 
 # ============================================================
@@ -1037,6 +1046,16 @@ async def scan_omr(
     result["corrected_image_url"] = f"/uploads/{upload_filename}"
     result["bubble_debug_image_url"] = f"/results/{scan_id}_bubble_debug.jpg"
 
+    # ========================================================
+    # SAVE TO DATABASE
+    # ========================================================
+
+    db_id = save_omr_result_to_db(result)
+    if db_id:
+        result["id"] = db_id
+    else:
+        result["id"] = scan_id
+
     return result
 
 
@@ -1110,46 +1129,67 @@ def get_result_image(
 
 
 # ============================================================
-# GET RESULT
+# TEACHER DASHBOARD API — LIST EVALUATED RESULTS
 # ============================================================
 
-@app.get(
-    "/result/{scan_id}"
-)
-def get_result(
-    scan_id: str,
+@app.get("/api/omr-results")
+def list_omr_results(
+    class_name: str = Query(None, alias="class"),
+    section: str = Query(None),
+    exam: str = Query(None),
 ):
 
-    scan_id = safe_filename(
-        scan_id
+    return get_omr_results_from_db(
+        class_filter=class_name,
+        section_filter=section,
+        exam_filter=exam,
     )
 
 
-    result_path = os.path.join(
-        RESULT_DIR,
-        f"{scan_id}.json",
-    )
+# ============================================================
+# GET INDIVIDUAL OMR RESULT BY DB ID / SCAN ID
+# ============================================================
 
+@app.get("/api/omr-results/{result_id}")
+@app.get("/result/{scan_id}")
+def get_result(
+    scan_id: str = None,
+    result_id: str = None,
+):
 
-    if not os.path.exists(
-        result_path
-    ):
-
+    target_id = result_id or scan_id
+    if not target_id:
         raise HTTPException(
             status_code=404,
             detail="Result not found.",
         )
 
+    target_id = safe_filename(target_id)
 
-    with open(
-        result_path,
-        "r",
-        encoding="utf-8",
-    ) as file:
+    # 1. Database Lookup
+    if is_db_configured():
+        db_res = get_omr_result_by_id_from_db(target_id)
+        if db_res:
+            return db_res
 
-        return json.load(
-            file
-        )
+    # 2. Local Fallback JSON Lookup
+    result_path = os.path.join(
+        RESULT_DIR,
+        f"{target_id}.json",
+    )
+
+    if os.path.exists(result_path):
+        try:
+            with open(result_path, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=404,
+        detail="Result not found.",
+    )
+
 
 
 # ============================================================

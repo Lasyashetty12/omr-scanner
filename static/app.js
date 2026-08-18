@@ -241,9 +241,45 @@ const dashboardTableBody =
         "dashboardTableBody"
     );
 
+const backToDashboardButton =
+    document.getElementById(
+        "backToDashboardButton"
+    );
+
+const resStudentName =
+    document.getElementById(
+        "resStudentName"
+    );
+
+const resRollNumber =
+    document.getElementById(
+        "resRollNumber"
+    );
+
+const resClassSection =
+    document.getElementById(
+        "resClassSection"
+    );
+
+const resExamDate =
+    document.getElementById(
+        "resExamDate"
+    );
+
+const resSession =
+    document.getElementById(
+        "resSession"
+    );
+
+const questionTableBody =
+    document.getElementById(
+        "questionTableBody"
+    );
+
 let selectedStream = "pcmb";
 
 let dashboardRows = [];
+
 
 
 /* ==========================================================
@@ -385,158 +421,191 @@ function hideDashboard() {
     dashboardSection.classList.add("hidden");
 }
 
-function buildDashboardRows() {
-    const currentExam = (resultExam?.textContent || "").trim();
-    const currentScore = Number(score?.textContent || 0);
-    const currentPaper = (paperCode?.textContent || "").trim();
-
-    const seedData = [
-        {
-            student: "Aarav Sharma",
-            class: "12",
-            section: "A",
-            exam: "NEET",
-            score: 162,
-            correct: 41,
-            wrong: 8,
-            blank: 2,
-            status: "Pass"
-        },
-        {
-            student: "Meera Iyer",
-            class: "12",
-            section: "B",
-            exam: "KCET",
-            score: 148,
-            correct: 37,
-            wrong: 10,
-            blank: 3,
-            status: "Good"
-        },
-        {
-            student: "Rohan Kumar",
-            class: "11",
-            section: "C",
-            exam: "JEE",
-            score: 134,
-            correct: 34,
-            wrong: 13,
-            blank: 4,
-            status: "Watch"
-        },
-        {
-            student: "Ananya Nair",
-            class: "10",
-            section: "A",
-            exam: "KCET",
-            score: 122,
-            correct: 31,
-            wrong: 12,
-            blank: 6,
-            status: "Good"
-        }
-    ];
-
-    if (!currentExam || !currentPaper || Number.isNaN(currentScore) || currentScore <= 0) {
-        dashboardRows = seedData;
-        return seedData;
+function renderQuestionTable(questionResults) {
+    if (!questionTableBody) return;
+    if (!questionResults || Object.keys(questionResults).length === 0) {
+        questionTableBody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 16px; color: var(--muted);">No question details available.</td></tr>`;
+        return;
     }
 
-    const scannedRow = {
-        student: "Current Candidate",
-        class: "12",
-        section: "A",
-        exam: currentExam,
-        score: currentScore,
-        correct: Number(correct?.textContent || 0),
-        wrong: Number(wrong?.textContent || 0),
-        blank: Number(blank?.textContent || 0),
-        status: currentScore >= 120 ? "Pass" : currentScore >= 90 ? "Good" : "Watch"
-    };
+    const qNumbers = Object.keys(questionResults).sort((a, b) => Number(a) - Number(b));
+    questionTableBody.innerHTML = qNumbers.map((qNum) => {
+        const item = questionResults[qNum] || {};
+        const qNo = item.question_number ?? qNum;
+        const studentAns = item.detected || item.student_answer || item.answer || "—";
+        const correctAns = item.correct_answer || item.correct || "—";
+        const rawStatus = (item.status || "Uncertain").toString();
+        const statusLower = rawStatus.toLowerCase();
 
-    dashboardRows = [scannedRow, ...seedData];
-    return dashboardRows;
+        let badgeClass = "blank";
+        if (statusLower.includes("correct") || statusLower.includes("pass")) badgeClass = "correct";
+        else if (statusLower.includes("wrong") || statusLower.includes("fail")) badgeClass = "wrong";
+        else if (statusLower.includes("multiple")) badgeClass = "multiple";
+
+        return `
+            <tr>
+                <td><strong>Q${qNo}</strong></td>
+                <td>${studentAns}</td>
+                <td>${correctAns}</td>
+                <td><span class="status-badge ${badgeClass}">${rawStatus}</span></td>
+            </tr>
+        `;
+    }).join("");
 }
 
-function renderDashboard() {
-    const classValue = classFilter?.value || "all";
-    const sectionValue = sectionFilter?.value || "all";
-    const examValue = examDashboardFilter?.value || "all";
+async function fetchAndRenderDashboard() {
+    if (!dashboardTableBody) return;
 
-    const rows = buildDashboardRows().filter((row) => {
-        const classMatch = classValue === "all" || row.class === classValue;
-        const sectionMatch = sectionValue === "all" || row.section === sectionValue;
-        const examMatch = examValue === "all" || row.exam.toUpperCase() === examValue;
-        return classMatch && sectionMatch && examMatch;
-    });
+    dashboardTableBody.innerHTML = `
+        <tr>
+            <td colspan="12" style="text-align: center; padding: 24px; color: var(--muted);">
+                ⚡ Loading evaluated student records from database...
+            </td>
+        </tr>
+    `;
 
-    const totalStudents = rows.length;
-    const avgScore = totalStudents ? Math.round(rows.reduce((sum, row) => sum + Number(row.score || 0), 0) / totalStudents) : 0;
-    const passCount = rows.filter((row) => (row.status || "").toLowerCase() === "pass").length;
-    const goodCount = rows.filter((row) => (row.status || "").toLowerCase() === "good").length;
+    const classVal = classFilter?.value || "all";
+    const sectionVal = sectionFilter?.value || "all";
+    const examVal = examDashboardFilter?.value || "all";
 
-    if (dashboardSummary) {
-        dashboardSummary.innerHTML = `
-            <div class="summary-card">
-                <span>Total Students</span>
-                <strong>${totalStudents}</strong>
-            </div>
-            <div class="summary-card">
-                <span>Avg Score</span>
-                <strong>${avgScore}</strong>
-            </div>
-            <div class="summary-card">
-                <span>Pass</span>
-                <strong>${passCount}</strong>
-            </div>
-            <div class="summary-card">
-                <span>Good</span>
-                <strong>${goodCount}</strong>
-            </div>
-        `;
-    }
+    const queryParams = new URLSearchParams();
+    if (classVal !== "all") queryParams.append("class", classVal);
+    if (sectionVal !== "all") queryParams.append("section", sectionVal);
+    if (examVal !== "all") queryParams.append("exam", examVal);
 
-    if (dashboardTableBody) {
-        if (!rows.length) {
+    try {
+        const resp = await fetch("/api/omr-results?" + queryParams.toString());
+        if (!resp.ok) {
+            throw new Error(`Server returned HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        dashboardRows = data || [];
+
+        const totalStudents = dashboardRows.length;
+        const avgScore = totalStudents
+            ? Math.round(dashboardRows.reduce((sum, r) => sum + Number(r.score || 0), 0) / totalStudents)
+            : 0;
+        const passCount = dashboardRows.filter((r) => Number(r.score || 0) >= 120).length;
+        const goodCount = dashboardRows.filter((r) => Number(r.score || 0) >= 90 && Number(r.score || 0) < 120).length;
+
+        if (dashboardSummary) {
+            dashboardSummary.innerHTML = `
+                <div class="summary-card">
+                    <span>Total Students</span>
+                    <strong>${totalStudents}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Avg Score</span>
+                    <strong>${avgScore}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Pass</span>
+                    <strong>${passCount}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Good</span>
+                    <strong>${goodCount}</strong>
+                </div>
+            `;
+        }
+
+        if (!dashboardRows.length) {
             dashboardTableBody.innerHTML = `
                 <tr>
-                    <td colspan="9">No student records found for the selected filters.</td>
+                    <td colspan="12" style="text-align: center; padding: 24px; color: var(--muted);">
+                        No evaluated OMR results found.
+                    </td>
                 </tr>
             `;
             return;
         }
 
-        dashboardTableBody.innerHTML = rows.map((row) => {
-            const statusClass = (row.status || "").toLowerCase() === "pass"
-                ? "pass"
-                : (row.status || "").toLowerCase() === "good"
-                    ? "good"
-                    : "watch";
-
+        dashboardTableBody.innerHTML = dashboardRows.map((r) => {
+            const formattedDate = r.date ? new Date(r.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-";
             return `
                 <tr>
-                    <td>${row.student}</td>
-                    <td>${row.class}</td>
-                    <td>${row.section}</td>
-                    <td>${row.exam}</td>
-                    <td>${row.score}</td>
-                    <td>${row.correct}</td>
-                    <td>${row.wrong}</td>
-                    <td>${row.blank}</td>
-                    <td><span class="status-pill ${statusClass}">${row.status}</span></td>
+                    <td><strong>${r.student_name || 'Student Candidate'}</strong></td>
+                    <td>${r.roll_number || '-'}</td>
+                    <td>${r.class || '-'}</td>
+                    <td>${r.section || '-'}</td>
+                    <td>${r.exam || '-'}</td>
+                    <td>${r.paper_code || '-'}</td>
+                    <td><strong>${r.score}</strong></td>
+                    <td>${r.correct}</td>
+                    <td>${r.wrong}</td>
+                    <td>${r.blank}</td>
+                    <td>${formattedDate}</td>
+                    <td>
+                        <button type="button" class="action-view-btn" data-id="${r.id}">
+                            View
+                        </button>
+                    </td>
                 </tr>
             `;
         }).join("");
+
+        // Attach event listeners to View buttons
+        const viewBtns = dashboardTableBody.querySelectorAll(".action-view-btn");
+        viewBtns.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const resId = btn.getAttribute("data-id");
+                if (resId) {
+                    openIndividualResult(resId);
+                }
+            });
+        });
+
+    } catch (err) {
+        console.error("Dashboard fetch error:", err);
+        dashboardTableBody.innerHTML = `
+            <tr>
+                <td colspan="12" style="text-align: center; padding: 24px; color: var(--danger);">
+                    Unable to load student results: ${err.message || 'API failure'}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function openIndividualResult(resultId) {
+    if (!resultId) return;
+
+    clearError();
+    showLoading("Loading student OMR evaluation...");
+    try {
+        const resp = await fetch(`/api/omr-results/${resultId}`);
+        if (!resp.ok) {
+            throw new Error(resp.status === 404 ? "Result not found." : "Failed to load result.");
+        }
+        const data = await resp.json();
+
+        displayResult(data);
+
+        hideDashboard();
+        if (resultSection) {
+            resultSection.hidden = false;
+            resultSection.classList.remove("hidden");
+            resultSection.scrollIntoView({ behavior: "smooth" });
+        }
+    } catch (err) {
+        console.error("Error opening result:", err);
+        showError(err.message || "Result not found.");
+    } finally {
+        hideLoading();
     }
 }
 
 function openResultDashboard() {
+    clearError();
+    hideResult();
+    hideSuccessState();
     showDashboard();
-    renderDashboard();
-    if (resultSection) {
-        resultSection.scrollIntoView({ behavior: "smooth" });
+    fetchAndRenderDashboard();
+    if (dashboardSection) {
+        dashboardSection.scrollIntoView({ behavior: "smooth" });
     }
 }
+
 
 /* ==========================================================
    PREVIEW URL CLEANUP
@@ -1933,6 +2002,33 @@ function displayResult(
         data.result
         || data;
 
+    // Student & Exam Information Card
+    const studentObj = result.student || {};
+    const examInfoObj = result.exam_info || {};
+
+    if (resStudentName) {
+        resStudentName.textContent = studentObj.name || result.student_name || "Student Candidate";
+    }
+    if (resRollNumber) {
+        resRollNumber.textContent = studentObj.roll_number || result.roll_number || `ROLL-${result.id || result.scan_id || '101'}`;
+    }
+    if (resClassSection) {
+        const cls = studentObj.class || result.class || "12";
+        const sec = studentObj.section || result.section || "A";
+        resClassSection.textContent = `${cls} - Section ${sec}`;
+    }
+    if (resExamDate) {
+        const rawDt = examInfoObj.exam_date || result.date;
+        resExamDate.textContent = rawDt ? new Date(rawDt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today";
+    }
+    if (resSession) {
+        resSession.textContent = examInfoObj.session || "Morning";
+    }
+
+    // Render Question-wise Analysis
+    renderQuestionTable(result.question_results);
+
+
 
     if (
         resultExam
@@ -2369,17 +2465,22 @@ if (viewResultButton) {
     viewResultButton.addEventListener("click", openResultDashboard);
 }
 
+if (backToDashboardButton) {
+    backToDashboardButton.addEventListener("click", openResultDashboard);
+}
+
 if (classFilter) {
-    classFilter.addEventListener("change", renderDashboard);
+    classFilter.addEventListener("change", fetchAndRenderDashboard);
 }
 
 if (sectionFilter) {
-    sectionFilter.addEventListener("change", renderDashboard);
+    sectionFilter.addEventListener("change", fetchAndRenderDashboard);
 }
 
 if (examDashboardFilter) {
-    examDashboardFilter.addEventListener("change", renderDashboard);
+    examDashboardFilter.addEventListener("change", fetchAndRenderDashboard);
 }
+
 
 function updateStreamUI(stream) {
     selectedStream = stream.toLowerCase();

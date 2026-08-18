@@ -131,8 +131,33 @@
 
             <!-- EVALUATION RESULTS DISPLAY SECTION -->
             <section id="resultSection" class="results-container hidden">
-                <div class="results-header">
-                    <h3>Evaluation Summary</h3>
+                <div class="results-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <h3>Individual OMR Sheet Analysis</h3>
+                    <button id="backToDashboardButton" type="button" class="back-to-dashboard-btn">← Back to Dashboard</button>
+                </div>
+
+                <!-- STUDENT & EXAM INFORMATION -->
+                <div id="studentInfoCard" class="student-info-card">
+                    <div class="student-info-item">
+                        <span>STUDENT NAME</span>
+                        <strong id="resStudentName">Student Candidate</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>ROLL NUMBER</span>
+                        <strong id="resRollNumber">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>CLASS & SECTION</span>
+                        <strong id="resClassSection">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>EXAM DATE</span>
+                        <strong id="resExamDate">-</strong>
+                    </div>
+                    <div class="student-info-item">
+                        <span>SESSION</span>
+                        <strong id="resSession">Morning</strong>
+                    </div>
                 </div>
 
                 <div class="summary-tiles-row">
@@ -180,10 +205,35 @@
                 <div id="quality" class="quality-info"></div>
                 <div id="message" class="message-info"></div>
 
+                <!-- QUESTION-WISE ANALYSIS DISPLAY CARD -->
+                <div id="questionAnalysisCard" class="question-analysis-card">
+                    <div class="card-title-bar">
+                        <h4>📋 Question-wise Analysis</h4>
+                        <p>Detailed evaluation break-down per question.</p>
+                    </div>
+                    <div class="question-table-wrap">
+                        <table class="question-table">
+                            <thead>
+                                <tr>
+                                    <th>Question #</th>
+                                    <th>Student Answer</th>
+                                    <th>Correct Answer</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="questionTableBody">
+                                <tr>
+                                    <td colspan="4">No question details available.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- EVALUATED OMR BUBBLE ANALYSIS DISPLAY CARD -->
                 <div id="bubbleAnalysisCard" class="bubble-analysis-card hidden">
                     <div class="bubble-analysis-title-bar">
-                        <h4>🔍 Evaluated OMR Sheet Analysis (Tap image to zoom full screen)</h4>
+                        <h4>🔍 Evaluated OMR Sheet Visual Analysis (Tap image to zoom)</h4>
                         <p>Visual overlay displaying all detected bubbles, answer keys, and grid alignment.</p>
                     </div>
                     <div class="bubble-analysis-img-wrapper" style="cursor: zoom-in;">
@@ -197,7 +247,7 @@
                 <div class="dashboard-header">
                     <div>
                         <p class="eyebrow">Teacher Dashboard</p>
-                        <h3>Performance Overview</h3>
+                        <h3>Evaluated Student Results</h3>
                     </div>
                     <div class="dashboard-filters">
                         <label>
@@ -236,14 +286,17 @@
                         <thead>
                             <tr>
                                 <th>Student</th>
+                                <th>Roll No.</th>
                                 <th>Class</th>
                                 <th>Section</th>
                                 <th>Exam</th>
+                                <th>Paper Code</th>
                                 <th>Score</th>
                                 <th>Correct</th>
                                 <th>Wrong</th>
                                 <th>Blank</th>
-                                <th>Status</th>
+                                <th>Date</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="dashboardTableBody"></tbody>
