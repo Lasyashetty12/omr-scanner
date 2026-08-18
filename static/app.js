@@ -593,48 +593,20 @@ function isReadyForAutoCapture(
     videoHeight
 ) {
     /*
-        Only auto-capture when the sheet is actually a valid OMR-sized document,
-        positioned correctly and not moving excessively.
+        Auto-capture should trigger when the black corner registration blocks
+        are detected, not when the whole sheet geometry is perfectly aligned.
     */
 
     if (!detection || !detection.sourcePoints) {
         return {
             ready: false,
-            reason: "No corners detected"
-        };
-    }
-
-    if (!isCompleteSheetInFrame(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Sheet partially outside frame"
-        };
-    }
-
-    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Registration-marker quadrilateral is too small"
-        };
-    }
-
-    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
-        return {
-            ready: false,
-            reason: "Sheet is too tilted"
-        };
-    }
-
-    if (previousDetection && hasExcessiveMovement(detection, previousDetection)) {
-        return {
-            ready: false,
-            reason: "Hold the sheet steady"
+            reason: "No black corner boxes detected"
         };
     }
 
     return {
         ready: true,
-        reason: "Positioned correctly"
+        reason: "Black corner boxes detected"
     };
 }
 
