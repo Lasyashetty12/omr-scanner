@@ -233,6 +233,10 @@ let autoCaptureTriggered = false;
 
 let detectedDocumentBounds = null;
 
+let previousDetection = null;
+
+let consecutiveValidFrames = 0;
+
 const markerAnalysisCanvas = document.createElement(
     "canvas"
 );
@@ -361,6 +365,10 @@ function stopCamera() {
 
     detectedDocumentBounds = null;
 
+    previousDetection = null;
+
+    consecutiveValidFrames = 0;
+
     cameraContainer?.classList.remove(
         "page-corners-detected"
     );
@@ -368,7 +376,7 @@ function stopCamera() {
     if (torchEnabled && cameraStream) {
         const track = cameraStream.getVideoTracks()[0];
         if (track) {
-            try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch (e) {}
+            try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch (e) { }
         }
     }
     torchEnabled = false;
@@ -458,11 +466,204 @@ function updateTorchUI(active, supported = true) {
 
 
 /* ==========================================================
+   AUTO-CAPTURE VALIDATION
+   ========================================================== */
+
+function isCompleteSheetInFrame(
+    sourcePoints,
+    videoWidth,
+    videoHeight
+) {
+    /*
+        Verify that the entire OMR sheet is visible.
+        
+        Check margins to ensure:
+        - Sheet is not cropped at edges
+        - Bottom row is completely visible
+        
+        Require at least 5% margin on each side.
+    */
+
+    const marginRatio = 0.05;
+
+    const minMargin = Math.max(
+        videoWidth * marginRatio,
+        videoHeight * marginRatio
+    );
+
+    const minX = Math.min(...sourcePoints.map(p => p.x));
+    const maxX = Math.max(...sourcePoints.map(p => p.x));
+    const minY = Math.min(...sourcePoints.map(p => p.y));
+    const maxY = Math.max(...sourcePoints.map(p => p.y));
+
+    /* Check that sheet is far enough from edges */
+    const leftMargin = minX;
+    const rightMargin = videoWidth - maxX;
+    const topMargin = minY;
+    const bottomMargin = videoHeight - maxY;
+
+    const allMarginsOk = (
+        leftMargin >= minMargin &&
+        rightMargin >= minMargin &&
+        topMargin >= minMargin &&
+        bottomMargin >= minMargin
+    );
+
+    return allMarginsOk;
+}
+
+
+function isSheetReasonablyAligned(
+    sourcePoints
+) {
+    /*
+        Check that the sheet is not severely tilted.
+        
+        Calculate angle from top-left to top-right.
+        If angle > ~15 degrees, sheet is too tilted.
+    */
+
+    const topLeft = sourcePoints[0];
+    const topRight = sourcePoints[1];
+
+    const dx = topRight.x - topLeft.x;
+    const dy = topRight.y - topLeft.y;
+
+    const angleRad = Math.atan2(dy, dx);
+    const angleDeg = Math.abs(angleRad * 180 / Math.PI);
+
+    /* Allow up to 15 degrees tilt */
+    return angleDeg <= 15;
+}
+
+
+function isSheetLargeEnough(
+    sourcePoints,
+    videoWidth,
+    videoHeight
+) {
+    /*
+        Verify sheet is large enough in frame for reliable recognition.
+        
+        Sheet should occupy at least 25% of frame area for good OMR recognition.
+    */
+
+    const minX = Math.min(...sourcePoints.map(p => p.x));
+    const maxX = Math.max(...sourcePoints.map(p => p.x));
+    const minY = Math.min(...sourcePoints.map(p => p.y));
+    const maxY = Math.max(...sourcePoints.map(p => p.y));
+
+    const sheetWidth = maxX - minX;
+    const sheetHeight = maxY - minY;
+    const sheetArea = sheetWidth * sheetHeight;
+
+    const videoArea = videoWidth * videoHeight;
+    const areaRatio = sheetArea / videoArea;
+
+    /* Require at least 25% of frame area */
+    return areaRatio >= 0.25;
+}
+
+
+function hasExcessiveMovement(
+    currentDetection,
+    previousDetection
+) {
+    /*
+        Detect if sheet is moving excessively between frames.
+        
+        If corners move more than 5% of screen, it's still moving.
+    */
+
+    if (!previousDetection) {
+        return false;
+    }
+
+    const videoWidth = camera.videoWidth;
+    const videoHeight = camera.videoHeight;
+
+    const maxMotion = Math.max(videoWidth, videoHeight) * 0.05;
+
+    const maxDistance = Math.max(
+        ...currentDetection.sourcePoints.map((current, idx) => {
+            const prev = previousDetection.sourcePoints[idx];
+            const dx = current.x - prev.x;
+            const dy = current.y - prev.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        })
+    );
+
+    return maxDistance > maxMotion;
+}
+
+
+function isReadyForAutoCapture(
+    detection,
+    videoWidth,
+    videoHeight
+) {
+    /*
+        Comprehensive check for auto-capture readiness.
+        
+        Return: { ready: bool, reason: string }
+    */
+
+    if (!detection || !detection.sourcePoints) {
+        return {
+            ready: false,
+            reason: "No corners detected"
+        };
+    }
+
+    if (stableCornerChecks < 2) {
+        return {
+            ready: false,
+            reason: "Corners not stable yet"
+        };
+    }
+
+    if (!isCompleteSheetInFrame(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Sheet partially outside frame"
+        };
+    }
+
+    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
+        return {
+            ready: false,
+            reason: "Sheet too tilted"
+        };
+    }
+
+    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Sheet too small"
+        };
+    }
+
+    if (hasExcessiveMovement(detection, previousDetection)) {
+        return {
+            ready: false,
+            reason: "Sheet still moving"
+        };
+    }
+
+    return {
+        ready: true,
+        reason: "Ready to capture"
+    };
+}
+
+
+/* ==========================================================
    LIVE CORNER-BLOCK DETECTION
    ========================================================== */
 
 function setCornerDetectionState(
-    detected
+    detected,
+    statusMessage = null
 ) {
 
     pageCornersDetected = detected;
@@ -474,9 +675,13 @@ function setCornerDetectionState(
 
     if (cornerDetectionStatus) {
 
-        cornerDetectionStatus.textContent = detected
-            ? "Page detected — all four corner blocks visible"
-            : "Point camera at OMR sheet (Tap Capture anytime)";
+        if (statusMessage) {
+            cornerDetectionStatus.textContent = statusMessage;
+        } else {
+            cornerDetectionStatus.textContent = detected
+                ? "OMR detected — hold steady"
+                : "Position the complete OMR inside the frame";
+        }
     }
 
     if (captureButton) {
@@ -745,8 +950,73 @@ function monitorCornerBlocks(timestamp) {
             ? stableCornerChecks + 1
             : 0;
 
+        const videoWidth = camera.videoWidth;
+        const videoHeight = camera.videoHeight;
+
+        /*
+            Check if ready for auto-capture.
+        */
+        const readinessCheck = isReadyForAutoCapture(
+            detection,
+            videoWidth,
+            videoHeight
+        );
+
+        let statusMessage = null;
+
+        if (readinessCheck.ready) {
+            /*
+                All conditions met. Increment counter.
+            */
+            consecutiveValidFrames += 1;
+
+            statusMessage = `Ready to capture — ${consecutiveValidFrames}/${AUTO_CAPTURE_STABLE_CHECKS}`;
+
+            if (
+                consecutiveValidFrames >= AUTO_CAPTURE_STABLE_CHECKS
+                && !autoCaptureTriggered
+            ) {
+                /*
+                    Stable for long enough. Auto-capture!
+                */
+                autoCaptureTriggered = true;
+                setCornerDetectionState(
+                    true,
+                    "Capturing…"
+                );
+
+                /*
+                    Delay slightly to ensure UI update is visible.
+                */
+                setTimeout(() => {
+                    captureCameraImage(true);
+                }, 100);
+
+                cornerDetectionFrame = requestAnimationFrame(
+                    monitorCornerBlocks
+                );
+                return;
+            }
+        } else {
+            /*
+                Not ready. Reset counter and show status.
+            */
+            consecutiveValidFrames = 0;
+
+            if (stableCornerChecks >= 2) {
+                /*
+                    Corners detected but not ready.
+                    Show why.
+                */
+                statusMessage = readinessCheck.reason;
+            } else {
+                statusMessage = null;
+            }
+        }
+
         setCornerDetectionState(
-            stableCornerChecks >= 2
+            stableCornerChecks >= 2,
+            statusMessage
         );
 
         drawDocumentBoundary(
@@ -758,6 +1028,11 @@ function monitorCornerBlocks(timestamp) {
 
             detectedDocumentBounds = detection.sourcePoints;
         }
+
+        /*
+            Track previous frame for movement detection.
+        */
+        previousDetection = detection;
     }
 
     cornerDetectionFrame = requestAnimationFrame(
@@ -1892,13 +2167,13 @@ function updateStreamUI(stream) {
 }
 
 if (streamPcmbBtn) {
-    streamPcmbBtn.addEventListener("click", function() {
+    streamPcmbBtn.addEventListener("click", function () {
         updateStreamUI("pcmb");
     });
 }
 
 if (streamPcmBtn) {
-    streamPcmBtn.addEventListener("click", function() {
+    streamPcmBtn.addEventListener("click", function () {
         updateStreamUI("pcm");
     });
 }
