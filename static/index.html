@@ -241,6 +241,25 @@
                             alt="Evaluated OMR Bubble Analysis">
                     </div>
                 </div>
+
+                <!-- DOWNLOAD OPTIONS CARD -->
+                <div id="downloadOptionsCard" class="download-options-card" style="margin-top: 16px; background: var(--card-bg2); border: 1px solid var(--border); border-radius: 12px; padding: 16px;">
+                    <div class="card-title-bar">
+                        <h4 style="color: var(--gold); font-size: 15px; font-weight: 800;">📥 Download Evaluation Report</h4>
+                        <p style="font-size: 12px; color: var(--muted); margin-top: 4px;">Export student score summary and question-wise breakdown.</p>
+                    </div>
+                    <div class="download-btn-group" style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
+                        <button id="downloadPdfBtn" type="button" class="action-view-btn" style="padding: 10px 16px;">
+                            📄 Download PDF
+                        </button>
+                        <button id="downloadExcelBtn" type="button" class="action-view-btn" style="padding: 10px 16px; background: linear-gradient(135deg, #10b981, #059669); color: #fff;">
+                            📊 Download Excel
+                        </button>
+                        <button id="downloadWordBtn" type="button" class="action-view-btn" style="padding: 10px 16px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff;">
+                            📝 Download Word
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <section id="dashboardSection" class="dashboard-panel hidden">

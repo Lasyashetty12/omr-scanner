@@ -276,9 +276,25 @@ const questionTableBody =
         "questionTableBody"
     );
 
+const downloadPdfBtn =
+    document.getElementById(
+        "downloadPdfBtn"
+    );
+
+const downloadExcelBtn =
+    document.getElementById(
+        "downloadExcelBtn"
+    );
+
+const downloadWordBtn =
+    document.getElementById(
+        "downloadWordBtn"
+    );
+
 let selectedStream = "pcmb";
 
 let dashboardRows = [];
+
 
 
 
@@ -1995,7 +2011,8 @@ async function readServerResponse(
    ========================================================== */
 
 function displayResult(
-    data
+    data,
+    showDetailed = true
 ) {
 
     const result =
@@ -2211,16 +2228,21 @@ function displayResult(
     if (
         resultSection
     ) {
-
-        resultSection.hidden =
-            false;
-
-        resultSection.classList.remove("hidden");
+        if (showDetailed) {
+            resultSection.hidden = false;
+            resultSection.classList.remove("hidden");
+        } else {
+            resultSection.hidden = true;
+            resultSection.classList.add("hidden");
+        }
     }
 
-    showSuccessState();
-    hideDashboard();
+    if (!showDetailed) {
+        showSuccessState();
+        hideDashboard();
+    }
 }
+
 
 
 /* ==========================================================
@@ -2330,8 +2352,17 @@ async function scanOMR() {
 
 
         displayResult(
-            data
+            data,
+            false
         );
+
+        showSuccessState();
+        hideResult();
+        hideDashboard();
+        if (successState) {
+            successState.scrollIntoView({ behavior: "smooth" });
+        }
+
 
 
     } catch (
@@ -2480,6 +2511,135 @@ if (sectionFilter) {
 if (examDashboardFilter) {
     examDashboardFilter.addEventListener("change", fetchAndRenderDashboard);
 }
+
+/* DOWNLOAD HANDLERS */
+function downloadPDF() {
+    window.print();
+}
+
+function downloadExcel() {
+    const name = (resStudentName?.textContent || "Student").replace(/[^a-zA-Z0-9]/g, "_");
+    const roll = (resRollNumber?.textContent || "101").replace(/[^a-zA-Z0-9]/g, "_");
+
+    let csv = "STUDENT EVALUATION REPORT\n";
+    csv += `Student Name,${resStudentName?.textContent || '-'}\n`;
+    csv += `Roll Number,${resRollNumber?.textContent || '-'}\n`;
+    csv += `Class & Section,${resClassSection?.textContent || '-'}\n`;
+    csv += `Exam,${resultExam?.textContent || '-'}\n`;
+    csv += `Stream,${resultStream?.textContent || '-'}\n`;
+    csv += `Paper / Series,${paperCode?.textContent || '-'}\n`;
+    csv += `Total Score,${score?.textContent || '-'}\n`;
+    csv += `Correct,${correct?.textContent || '0'}\n`;
+    csv += `Wrong,${wrong?.textContent || '0'}\n`;
+    csv += `Blank,${blank?.textContent || '0'}\n`;
+    csv += `Multiple,${multiple?.textContent || '0'}\n`;
+    csv += `Uncertain,${uncertain?.textContent || '0'}\n\n`;
+
+    csv += "QUESTION-WISE ANALYSIS\n";
+    csv += "Question #,Student Answer,Correct Answer,Status\n";
+
+    if (questionTableBody) {
+        const trs = questionTableBody.querySelectorAll("tr");
+        trs.forEach(tr => {
+            const tds = tr.querySelectorAll("td");
+            if (tds.length === 4) {
+                const q = tds[0].textContent.trim();
+                const s = tds[1].textContent.trim();
+                const c = tds[2].textContent.trim();
+                const st = tds[3].textContent.trim();
+                csv += `"${q}","${s}","${c}","${st}"\n`;
+            }
+        });
+    }
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `OMR_Report_${name}_${roll}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function downloadWord() {
+    const name = (resStudentName?.textContent || "Student").replace(/[^a-zA-Z0-9]/g, "_");
+    const roll = (resRollNumber?.textContent || "101").replace(/[^a-zA-Z0-9]/g, "_");
+
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><title>OMR Evaluation Report</title><style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h2 { color: #1a365d; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+    th { background-color: #f1f5f9; }
+    </style></head><body>
+    <h2>OMR Evaluation Report — Manchester Technologies</h2>
+    <hr/>
+    <h3>Student Information</h3>
+    <p><b>Student Name:</b> ${resStudentName?.textContent || '-'}</p>
+    <p><b>Roll Number:</b> ${resRollNumber?.textContent || '-'}</p>
+    <p><b>Class & Section:</b> ${resClassSection?.textContent || '-'}</p>
+    <p><b>Exam:</b> ${resultExam?.textContent || '-'}</p>
+    <p><b>Stream:</b> ${resultStream?.textContent || '-'}</p>
+    <p><b>Paper / Series:</b> ${paperCode?.textContent || '-'}</p>
+    
+    <h3>Score Summary</h3>
+    <table>
+        <tr><th>Total Score</th><th>Correct</th><th>Wrong</th><th>Blank</th><th>Multiple</th><th>Uncertain</th></tr>
+        <tr>
+            <td><b>${score?.textContent || '-'}</b></td>
+            <td>${correct?.textContent || '0'}</td>
+            <td>${wrong?.textContent || '0'}</td>
+            <td>${blank?.textContent || '0'}</td>
+            <td>${multiple?.textContent || '0'}</td>
+            <td>${uncertain?.textContent || '0'}</td>
+        </tr>
+    </table>
+
+    <h3>Detailed Evaluation Breakdown Per Question</h3>
+    <table>
+        <thead>
+            <tr><th>Question #</th><th>Student Answer</th><th>Correct Answer</th><th>Status</th></tr>
+        </thead>
+        <tbody>`;
+
+    if (questionTableBody) {
+        const trs = questionTableBody.querySelectorAll("tr");
+        trs.forEach(tr => {
+            const tds = tr.querySelectorAll("td");
+            if (tds.length === 4) {
+                html += `<tr><td>${tds[0].innerHTML}</td><td>${tds[1].innerHTML}</td><td>${tds[2].innerHTML}</td><td>${tds[3].innerHTML}</td></tr>`;
+            }
+        });
+    }
+
+    html += `</tbody></table></body></html>`;
+
+    const blob = new Blob([html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `OMR_Report_${name}_${roll}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+if (downloadPdfBtn) {
+    downloadPdfBtn.addEventListener("click", downloadPDF);
+}
+
+if (downloadExcelBtn) {
+    downloadExcelBtn.addEventListener("click", downloadExcel);
+}
+
+if (downloadWordBtn) {
+    downloadWordBtn.addEventListener("click", downloadWord);
+}
+
 
 
 function updateStreamUI(stream) {
