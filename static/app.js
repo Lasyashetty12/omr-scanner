@@ -275,9 +275,9 @@ const JPEG_QUALITY =
     0.92;
 
 
-// Check runs four times per second.  Waiting two seconds avoids capturing
-// while the phone is still moving into alignment.
-const AUTO_CAPTURE_STABLE_CHECKS = 8;
+// QR-Scanner style: Check runs 4 times per second.
+// Capture when stable for just 2-3 frames (~500-750ms) like QR scanners
+const AUTO_CAPTURE_STABLE_CHECKS = 2;
 
 
 /* ==========================================================
@@ -477,22 +477,11 @@ function isCompleteSheetInFrame(
     /*
         Verify that the entire OMR sheet is visible.
         
-        Check margins to ensure:
-        - Sheet is not cropped at edges
-        - Bottom row is completely visible
-        
-        Require at least 5% margin on each side.
+        More lenient than before - only require 2-3% margin
+        to match QR scanner speed (doesn't need perfect framing).
     */
 
-    const marginRatio = 0.05;
-
-    const minMargin = Math.max(
-        videoWidth * marginRatio,
-        videoHeight * marginRatio
-    );
-
-    const minX = Math.min(...sourcePoints.map(p => p.x));
-    const maxX = Math.max(...sourcePoints.map(p => p.x));
+    const marginRatio = 0.02; /* Reduced from 0.05 */
     const minY = Math.min(...sourcePoints.map(p => p.y));
     const maxY = Math.max(...sourcePoints.map(p => p.y));
 
@@ -519,8 +508,7 @@ function isSheetReasonablyAligned(
     /*
         Check that the sheet is not severely tilted.
         
-        Calculate angle from top-left to top-right.
-        If angle > ~15 degrees, sheet is too tilted.
+        Allow up to 20 degrees tilt (more lenient for QR-scanner speed).
     */
 
     const topLeft = sourcePoints[0];
@@ -532,8 +520,8 @@ function isSheetReasonablyAligned(
     const angleRad = Math.atan2(dy, dx);
     const angleDeg = Math.abs(angleRad * 180 / Math.PI);
 
-    /* Allow up to 15 degrees tilt */
-    return angleDeg <= 15;
+    /* Allow up to 20 degrees tilt */
+    return angleDeg <= 20;
 }
 
 
@@ -545,7 +533,7 @@ function isSheetLargeEnough(
     /*
         Verify sheet is large enough in frame for reliable recognition.
         
-        Sheet should occupy at least 25% of frame area for good OMR recognition.
+        Reduced requirement for faster capture (15% instead of 25%).
     */
 
     const minX = Math.min(...sourcePoints.map(p => p.x));
@@ -560,8 +548,8 @@ function isSheetLargeEnough(
     const videoArea = videoWidth * videoHeight;
     const areaRatio = sheetArea / videoArea;
 
-    /* Require at least 25% of frame area */
-    return areaRatio >= 0.25;
+    /* Require at least 15% of frame area */
+    return areaRatio >= 0.15;
 }
 
 
@@ -572,7 +560,7 @@ function hasExcessiveMovement(
     /*
         Detect if sheet is moving excessively between frames.
         
-        If corners move more than 5% of screen, it's still moving.
+        More lenient - allow up to 10% of screen motion (faster capture).
     */
 
     if (!previousDetection) {
@@ -582,7 +570,7 @@ function hasExcessiveMovement(
     const videoWidth = camera.videoWidth;
     const videoHeight = camera.videoHeight;
 
-    const maxMotion = Math.max(videoWidth, videoHeight) * 0.05;
+    const maxMotion = Math.max(videoWidth, videoHeight) * 0.10;
 
     const maxDistance = Math.max(
         ...currentDetection.sourcePoints.map((current, idx) => {
@@ -843,7 +831,8 @@ function detectDocumentCorners() {
         return null;
     }
 
-    const analysisWidth = 180;
+    /* Higher resolution for better accuracy (like QR scanner) */
+    const analysisWidth = 360;
 
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
@@ -882,9 +871,10 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    const zoneWidth = Math.round(analysisWidth * 0.18);
+    /* Larger zones for better corner detection */
+    const zoneWidth = Math.round(analysisWidth * 0.22);
 
-    const zoneHeight = Math.round(analysisHeight * 0.13);
+    const zoneHeight = Math.round(analysisHeight * 0.16);
 
     const zones = [
         [0, 0],
@@ -905,7 +895,7 @@ function detectDocumentCorners() {
         )
     );
 
-    if (!measurements.every(({ coverage }) => coverage >= 0.015)) {
+    if (!measurements.every(({ coverage }) => coverage >= 0.008)) {
 
         return null;
     }
@@ -1536,7 +1526,7 @@ async function retakeImage() {
     /*
         If the user originally used camera,
         reopen camera.
-
+ 
         Otherwise return to initial state.
     */
     await openCamera();
