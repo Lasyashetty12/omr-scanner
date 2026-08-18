@@ -476,14 +476,17 @@ function isCompleteSheetInFrame(
 ) {
     /*
         Verify that the entire OMR sheet is visible.
-        
+
         More lenient than before - only require 2-3% margin
         to match QR scanner speed (doesn't need perfect framing).
     */
 
     const marginRatio = 0.02; /* Reduced from 0.05 */
+    const minX = Math.min(...sourcePoints.map(p => p.x));
+    const maxX = Math.max(...sourcePoints.map(p => p.x));
     const minY = Math.min(...sourcePoints.map(p => p.y));
     const maxY = Math.max(...sourcePoints.map(p => p.y));
+    const minMargin = Math.min(videoWidth, videoHeight) * marginRatio;
 
     /* Check that sheet is far enough from edges */
     const leftMargin = minX;
