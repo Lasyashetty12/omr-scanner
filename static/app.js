@@ -275,9 +275,8 @@ const JPEG_QUALITY =
     0.92;
 
 
-// Capture after corners are stable for 2-3 frames (~500-750ms)
-// Fast enough to feel instant, but stable enough for accuracy
-const AUTO_CAPTURE_STABLE_CHECKS = 3;
+// Instant auto-capture when the sheet is fully visible.
+const AUTO_CAPTURE_STABLE_CHECKS = 1;
 
 
 /* ==========================================================
@@ -975,9 +974,9 @@ function monitorCornerBlocks(timestamp) {
 
         let statusMessage = null;
 
-        if (readinessCheck.ready && stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS && !autoCaptureTriggered) {
+        if (readinessCheck.ready && !autoCaptureTriggered) {
             /*
-                Stable for required frames. AUTO-CAPTURE NOW!
+                Sheet is correctly positioned. Capture immediately.
             */
             autoCaptureTriggered = true;
             setCornerDetectionState(
@@ -994,9 +993,9 @@ function monitorCornerBlocks(timestamp) {
                 monitorCornerBlocks
             );
             return;
-        } else if (readinessCheck.ready && stableCornerChecks < AUTO_CAPTURE_STABLE_CHECKS) {
-            /* Corners detected but waiting for stability */
-            statusMessage = `Hold steady — ${stableCornerChecks}/${AUTO_CAPTURE_STABLE_CHECKS}`;
+        } else if (readinessCheck.ready) {
+            /* Capture already triggered */
+            statusMessage = "Capturing…";
         } else if (!readinessCheck.ready && detection) {
             /* Corners detected but not properly positioned */
             statusMessage = readinessCheck.reason;
