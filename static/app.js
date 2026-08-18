@@ -275,9 +275,9 @@ const JPEG_QUALITY =
     0.92;
 
 
-// QR-Scanner style: Check runs 4 times per second.
-// Capture when stable for just 2-3 frames (~500-750ms) like QR scanners
-const AUTO_CAPTURE_STABLE_CHECKS = 2;
+// Capture after corners are stable for 2-3 frames (~500-750ms)
+// Fast enough to feel instant, but stable enough for accuracy
+const AUTO_CAPTURE_STABLE_CHECKS = 3;
 
 
 /* ==========================================================
@@ -591,22 +591,14 @@ function isReadyForAutoCapture(
     videoHeight
 ) {
     /*
-        Comprehensive check for auto-capture readiness.
-        
-        Return: { ready: bool, reason: string }
+        Check if corners are properly positioned.
+        Stability check is done in monitorCornerBlocks.
     */
 
     if (!detection || !detection.sourcePoints) {
         return {
             ready: false,
             reason: "No corners detected"
-        };
-    }
-
-    if (stableCornerChecks < 2) {
-        return {
-            ready: false,
-            reason: "Corners not stable yet"
         };
     }
 
@@ -617,30 +609,10 @@ function isReadyForAutoCapture(
         };
     }
 
-    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
-        return {
-            ready: false,
-            reason: "Sheet too tilted"
-        };
-    }
-
-    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Sheet too small"
-        };
-    }
-
-    if (hasExcessiveMovement(detection, previousDetection)) {
-        return {
-            ready: false,
-            reason: "Sheet still moving"
-        };
-    }
-
+    /* All positioning checks passed */
     return {
         ready: true,
-        reason: "Ready to capture"
+        reason: "Positioned correctly"
     };
 }
 
@@ -990,7 +962,7 @@ function monitorCornerBlocks(timestamp) {
         const videoHeight = camera.videoHeight;
 
         /*
-            Check if ready for auto-capture.
+            Check if positioned correctly for auto-capture.
         */
         const readinessCheck = isReadyForAutoCapture(
             detection,
@@ -1000,67 +972,47 @@ function monitorCornerBlocks(timestamp) {
 
         let statusMessage = null;
 
-        if (readinessCheck.ready) {
+        if (readinessCheck.ready && stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS && !autoCaptureTriggered) {
             /*
-                All conditions met. Increment counter.
+                Stable for required frames. AUTO-CAPTURE NOW!
             */
-            consecutiveValidFrames += 1;
+            autoCaptureTriggered = true;
+            setCornerDetectionState(
+                true,
+                "Capturing…"
+            );
 
-            statusMessage = `Ready to capture — ${consecutiveValidFrames}/${AUTO_CAPTURE_STABLE_CHECKS}`;
+            /* Minimal delay for UI update */
+            setTimeout(() => {
+                captureCameraImage(true);
+            }, 50);
 
-            if (
-                consecutiveValidFrames >= AUTO_CAPTURE_STABLE_CHECKS
-                && !autoCaptureTriggered
-            ) {
-                /*
-                    Stable for long enough. Auto-capture!
-                */
-                autoCaptureTriggered = true;
-                setCornerDetectionState(
-                    true,
-                    "Capturing…"
-                );
-
-                /*
-                    Delay slightly to ensure UI update is visible.
-                */
-                setTimeout(() => {
-                    captureCameraImage(true);
-                }, 100);
-
-                cornerDetectionFrame = requestAnimationFrame(
-                    monitorCornerBlocks
-                );
-                return;
-            }
+            cornerDetectionFrame = requestAnimationFrame(
+                monitorCornerBlocks
+            );
+            return;
+        } else if (readinessCheck.ready && stableCornerChecks < AUTO_CAPTURE_STABLE_CHECKS) {
+            /* Corners detected but waiting for stability */
+            statusMessage = `Hold steady — ${stableCornerChecks}/${AUTO_CAPTURE_STABLE_CHECKS}`;
+        } else if (!readinessCheck.ready && detection) {
+            /* Corners detected but not properly positioned */
+            statusMessage = readinessCheck.reason;
         } else {
-            /*
-                Not ready. Reset counter and show status.
-            */
-            consecutiveValidFrames = 0;
-
-            if (stableCornerChecks >= 2) {
-                /*
-                    Corners detected but not ready.
-                    Show why.
-                */
-                statusMessage = readinessCheck.reason;
-            } else {
-                statusMessage = null;
-            }
+            /* No detection yet */
+            statusMessage = null;
         }
 
         setCornerDetectionState(
-            stableCornerChecks >= 2,
+            stableCornerChecks >= 1 && detection,
             statusMessage
         );
 
         drawDocumentBoundary(
             detection?.displayPoints,
-            stableCornerChecks >= 2
+            stableCornerChecks >= 1 && detection
         );
 
-        if (stableCornerChecks >= 2) {
+        if (stableCornerChecks >= 1 && detection) {
 
             detectedDocumentBounds = detection.sourcePoints;
         }
