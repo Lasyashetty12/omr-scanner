@@ -94,6 +94,34 @@ body {
   color: var(--muted);
 }
 
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.nav-dashboard-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+  border: 1px solid var(--gold-dim);
+  border-radius: 20px;
+  color: var(--gold-text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(201, 162, 39, 0.25);
+}
+
+.nav-dashboard-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(201, 162, 39, 0.4);
+}
+
 .online-status {
   display: inline-flex;
   align-items: center;

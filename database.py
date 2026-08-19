@@ -215,120 +215,180 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
             paper_code = e_data.get("paper_code") or e_data.get("paper_series") or "A1"
             created_at = r.get("created_at") or datetime.utcnow().isoformat()
 
-            results.append({
-                "id": r["id"],
-                "student_name": student_name,
-                "roll_number": roll_number,
-                "class": class_name,
-                "section": section,
-                "batch": s_data.get("batch") or "2026",
-                "exam": exam_type,
-                "paper_code": paper_code,
-                "score": r.get("score", 0),
-                "correct": r.get("correct", 0),
-                "wrong": r.get("wrong", 0),
-                "blank": r.get("blank", 0),
-                "multiple": r.get("multiple", 0),
-                "uncertain": r.get("uncertain", 0),
-                "total_questions": r.get("total_questions", 180),
-                "stream": r.get("stream", "PCMB"),
-                "date": created_at
-            })
-
-        return results
-
+        if results:
+            return results
     except Exception as e:
         print("Database list error:", e)
-        return []
+
+    # Local RESULT_DIR fallback when DB is not configured or empty
+    results = []
+    try:
+        from config import RESULT_DIR
+        if os.path.exists(RESULT_DIR):
+            files = [os.path.join(RESULT_DIR, f) for f in os.listdir(RESULT_DIR) if f.endswith(".json")]
+            files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            for fpath in files:
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+
+                    c_name = str(data.get("class") or data.get("student", {}).get("class") or "12")
+                    sec_name = str(data.get("section") or data.get("student", {}).get("section") or "A")
+                    e_type = str(data.get("exam") or "NEET").upper()
+
+                    if class_filter and class_filter.lower() != "all" and c_name.lower() != class_filter.lower():
+                        continue
+                    if section_filter and section_filter.lower() != "all" and sec_name.lower() != section_filter.lower():
+                        continue
+                    if exam_filter and exam_filter.lower() != "all" and e_type.lower() != exam_filter.lower():
+                        continue
+
+                    res_id = str(data.get("id") or data.get("scan_id") or os.path.basename(fpath).replace(".json", ""))
+                    st_name = data.get("student_name") or data.get("student", {}).get("name") or "Student Candidate"
+                    roll_num = data.get("roll_number") or data.get("student", {}).get("roll_number") or f"ROLL-{res_id[:6]}"
+                    p_code = str(data.get("paper_code") or data.get("series") or data.get("jee_series") or "A")
+                    mtime = os.path.getmtime(fpath)
+                    date_str = datetime.fromtimestamp(mtime).isoformat()
+
+                    results.append({
+                        "id": res_id,
+                        "student_name": st_name,
+                        "roll_number": roll_num,
+                        "class": c_name,
+                        "section": sec_name,
+                        "batch": "2026",
+                        "exam": e_type,
+                        "paper_code": p_code,
+                        "score": data.get("score", 0),
+                        "correct": data.get("correct", 0),
+                        "wrong": data.get("wrong", 0),
+                        "blank": data.get("blank", 0),
+                        "multiple": data.get("multiple", 0),
+                        "uncertain": data.get("uncertain", 0),
+                        "total_questions": data.get("total_questions", 180),
+                        "stream": data.get("stream", "PCMB"),
+                        "date": date_str
+                    })
+                except Exception:
+                    pass
+    except Exception as local_err:
+        print("Local result dir fallback error:", local_err)
+
+    return results
 
 
 def get_omr_result_by_id_from_db(result_id):
     """
-    Fetches detailed result for a single result_id from database.
+    Fetches detailed result for a single result_id from database or local storage fallback.
     """
-    if not is_db_configured():
-        return None
+    if is_db_configured() and str(result_id).isdigit():
+        try:
+            # Query Supabase if ID is numeric
+            omr_records = _supabase_request(f"omr_results?id=eq.{result_id}", method="GET") or []
+            if omr_records:
+                r = omr_records[0]
 
+                # Fetch student and exam
+                s_data = {}
+                if r.get("student_id"):
+                    s_list = _supabase_request(f"students?id=eq.{r['student_id']}", method="GET") or []
+                    if s_list:
+                        s_data = s_list[0]
+
+                e_data = {}
+                if r.get("exam_id"):
+                    e_list = _supabase_request(f"exams?id=eq.{r['exam_id']}", method="GET") or []
+                    if e_list:
+                        e_data = e_list[0]
+
+                # Fetch question results
+                q_list = _supabase_request(f"question_results?omr_result_id=eq.{result_id}&order=question_number.asc", method="GET") or []
+
+                q_dict = {}
+                for q in q_list:
+                    q_num = str(q.get("question_number", 0))
+                    q_dict[q_num] = {
+                        "question_number": q.get("question_number"),
+                        "detected": q.get("marked_answer"),
+                        "student_answer": q.get("marked_answer"),
+                        "correct_answer": q.get("correct_answer"),
+                        "status": q.get("status")
+                    }
+
+                # Parse raw JSON if available for extra image references or scores
+                raw_data = {}
+                if r.get("raw_result_json"):
+                    try:
+                        raw_data = json.loads(r["raw_result_json"])
+                    except Exception:
+                        pass
+
+                scan_id = raw_data.get("scan_id") or f"id_{r['id']}"
+
+                result_obj = {
+                    "id": r["id"],
+                    "scan_id": scan_id,
+                    "status": "processed",
+                    "exam": (e_data.get("exam_type") or "NEET").upper(),
+                    "stream": r.get("stream", "PCMB"),
+                    "paper_code": e_data.get("paper_code") or e_data.get("paper_series") or "A1",
+                    "score": r.get("score"),
+                    "correct": r.get("correct"),
+                    "wrong": r.get("wrong"),
+                    "blank": r.get("blank"),
+                    "multiple": r.get("multiple"),
+                    "uncertain": r.get("uncertain"),
+                    "total_questions": r.get("total_questions"),
+                    "student": {
+                        "name": s_data.get("name") or "Student Candidate",
+                        "roll_number": s_data.get("roll_number") or f"ROLL-{r['id']}",
+                        "class": s_data.get("class_name") or "12",
+                        "section": s_data.get("section") or "A",
+                        "batch": s_data.get("batch") or "2026"
+                    },
+                    "exam_info": {
+                        "exam_type": (e_data.get("exam_type") or "NEET").upper(),
+                        "paper_code": e_data.get("paper_code") or "A1",
+                        "paper_series": e_data.get("paper_series") or "A1",
+                        "exam_date": e_data.get("exam_date") or r.get("created_at", "")[:10],
+                        "session": e_data.get("session") or "Morning"
+                    },
+                    "question_results": q_dict if q_dict else raw_data.get("question_results", {}),
+                    "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",
+                    "corrected_image_url": raw_data.get("corrected_image_url") or f"/uploads/{scan_id}.jpg",
+                    "bubble_debug_image_url": raw_data.get("bubble_debug_image_url") or f"/results/{scan_id}_bubble_debug.jpg"
+                }
+
+                return result_obj
+        except Exception as e:
+            print("Database get by id error:", e)
+
+    # Local RESULT_DIR Fallback
     try:
-        omr_records = _supabase_request(f"omr_results?id=eq.{result_id}", method="GET") or []
-        if not omr_records:
-            return None
+        from config import RESULT_DIR
+        local_path = os.path.join(RESULT_DIR, f"{result_id}.json")
+        if os.path.exists(local_path):
+            with open(local_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                if "id" not in data or not data["id"]:
+                    data["id"] = result_id
+                return data
 
-        r = omr_records[0]
+        if os.path.exists(RESULT_DIR):
+            for fname in os.listdir(RESULT_DIR):
+                if fname.endswith(".json"):
+                    fpath = os.path.join(RESULT_DIR, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as file:
+                            data = json.load(file)
+                        res_id_in_file = str(data.get("id") or data.get("scan_id") or fname.replace(".json", ""))
+                        if res_id_in_file == str(result_id) or fname.replace(".json", "") == str(result_id):
+                            if "id" not in data or not data["id"]:
+                                data["id"] = res_id_in_file
+                            return data
+                    except Exception:
+                        pass
+    except Exception as local_err:
+        print("Local result get by id error:", local_err)
 
-        # Fetch student and exam
-        s_data = {}
-        if r.get("student_id"):
-            s_list = _supabase_request(f"students?id=eq.{r['student_id']}", method="GET") or []
-            if s_list:
-                s_data = s_list[0]
-
-        e_data = {}
-        if r.get("exam_id"):
-            e_list = _supabase_request(f"exams?id=eq.{r['exam_id']}", method="GET") or []
-            if e_list:
-                e_data = e_list[0]
-
-        # Fetch question results
-        q_list = _supabase_request(f"question_results?omr_result_id=eq.{result_id}&order=question_number.asc", method="GET") or []
-
-        q_dict = {}
-        for q in q_list:
-            q_num = str(q.get("question_number", 0))
-            q_dict[q_num] = {
-                "question_number": q.get("question_number"),
-                "detected": q.get("marked_answer"),
-                "student_answer": q.get("marked_answer"),
-                "correct_answer": q.get("correct_answer"),
-                "status": q.get("status")
-            }
-
-        # Parse raw JSON if available for extra image references or scores
-        raw_data = {}
-        if r.get("raw_result_json"):
-            try:
-                raw_data = json.loads(r["raw_result_json"])
-            except Exception:
-                pass
-
-        scan_id = raw_data.get("scan_id") or f"id_{r['id']}"
-
-        result_obj = {
-            "id": r["id"],
-            "scan_id": scan_id,
-            "status": "processed",
-            "exam": (e_data.get("exam_type") or "NEET").upper(),
-            "stream": r.get("stream", "PCMB"),
-            "paper_code": e_data.get("paper_code") or e_data.get("paper_series") or "A1",
-            "score": r.get("score"),
-            "correct": r.get("correct"),
-            "wrong": r.get("wrong"),
-            "blank": r.get("blank"),
-            "multiple": r.get("multiple"),
-            "uncertain": r.get("uncertain"),
-            "total_questions": r.get("total_questions"),
-            "student": {
-                "name": s_data.get("name") or "Student Candidate",
-                "roll_number": s_data.get("roll_number") or f"ROLL-{r['id']}",
-                "class": s_data.get("class_name") or "12",
-                "section": s_data.get("section") or "A",
-                "batch": s_data.get("batch") or "2026"
-            },
-            "exam_info": {
-                "exam_type": (e_data.get("exam_type") or "NEET").upper(),
-                "paper_code": e_data.get("paper_code") or "A1",
-                "paper_series": e_data.get("paper_series") or "A1",
-                "exam_date": e_data.get("exam_date") or r.get("created_at", "")[:10],
-                "session": e_data.get("session") or "Morning"
-            },
-            "question_results": q_dict if q_dict else raw_data.get("question_results", {}),
-            "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",
-            "corrected_image_url": raw_data.get("corrected_image_url") or f"/uploads/{scan_id}.jpg",
-            "bubble_debug_image_url": raw_data.get("bubble_debug_image_url") or f"/results/{scan_id}_bubble_debug.jpg"
-        }
-
-        return result_obj
-
-    except Exception as e:
-        print("Database get by id error:", e)
-        return None
+    return None

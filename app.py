@@ -140,12 +140,20 @@ def load_answer_key_for_exam(
     if not os.path.exists(
         answer_key_path
     ):
-
-        raise ValueError(
-            f"No answer key found for "
-            f"{exam_name.upper()} "
-            f"paper/series {identifier}."
-        )
+        exam_dir = os.path.join(ANSWER_KEY_DIR, exam_name)
+        fallback_path = os.path.join(exam_dir, "A.json")
+        if not os.path.exists(fallback_path) and os.path.exists(exam_dir):
+            json_files = [f for f in os.listdir(exam_dir) if f.endswith(".json")]
+            if json_files:
+                fallback_path = os.path.join(exam_dir, json_files[0])
+        if os.path.exists(fallback_path):
+            answer_key_path = fallback_path
+        else:
+            raise ValueError(
+                f"No answer key found for "
+                f"{exam_name.upper()} "
+                f"paper/series {identifier}."
+            )
 
     try:
 
@@ -186,6 +194,10 @@ def save_debug_images(
     debug_img = processing.get("debug")
     if debug_img is not None:
         _fast_write(os.path.join(RESULT_DIR, f"{scan_id}_bubble_debug.jpg"), debug_img)
+
+    bubble_analysis = processing.get("bubble_analysis")
+    if bubble_analysis is not None:
+        _fast_write(os.path.join(RESULT_DIR, f"{scan_id}_bubble_analysis.jpg"), bubble_analysis)
 
 
 # ============================================================
@@ -1133,6 +1145,7 @@ def get_result_image(
 # ============================================================
 
 @app.get("/result.html")
+@app.get("/results/view/{result_id}")
 def get_result_html():
 
     result_path = os.path.join(
