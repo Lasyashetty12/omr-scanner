@@ -163,92 +163,18 @@ def save_omr_result_to_db(result_data, student_info=None):
         return None
 
 
-def _get_local_omr_results(class_filter=None, section_filter=None, exam_filter=None):
-    try:
-        from config import RESULT_DIR
-        if not os.path.exists(RESULT_DIR):
-            return []
-
-        json_files = []
-        for f in os.listdir(RESULT_DIR):
-            if f.endswith(".json") and not f.endswith("_diagnostics.json"):
-                path = os.path.join(RESULT_DIR, f)
-                try:
-                    mtime = os.path.getmtime(path)
-                    json_files.append((mtime, path))
-                except Exception:
-                    pass
-
-        json_files.sort(key=lambda x: x[0], reverse=True)
-
-        results = []
-        for mtime, path in json_files:
-            try:
-                with open(path, "r", encoding="utf-8") as file:
-                    data = json.load(file)
-
-                res_id = data.get("id") or data.get("scan_id")
-                if not res_id:
-                    continue
-
-                student = data.get("student") or {}
-                s_name = student.get("name") or data.get("student_name") or "Student Candidate"
-                r_num = student.get("roll_number") or data.get("roll_number") or f"ROLL-{str(res_id)[:6]}"
-                cls_name = student.get("class") or data.get("class") or "12"
-                sec_name = student.get("section") or data.get("section") or "A"
-                exam_type = (data.get("exam") or data.get("exam_name") or "NEET").upper()
-                paper = data.get("paper_code") or data.get("series") or data.get("jee_series") or "A1"
-
-                if class_filter and class_filter.lower() != "all" and cls_name.lower() != class_filter.lower():
-                    continue
-                if section_filter and section_filter.lower() != "all" and sec_name.lower() != section_filter.lower():
-                    continue
-                if exam_filter and exam_filter.lower() != "all" and exam_type.lower() != exam_filter.lower():
-                    continue
-
-                dt_str = datetime.fromtimestamp(mtime).isoformat()
-
-                results.append({
-                    "id": res_id,
-                    "student_name": s_name,
-                    "roll_number": r_num,
-                    "class": cls_name,
-                    "section": sec_name,
-                    "batch": student.get("batch") or "2026",
-                    "exam": exam_type,
-                    "paper_code": paper,
-                    "score": data.get("score") if data.get("score") is not None else 0,
-                    "correct": data.get("correct") or 0,
-                    "wrong": data.get("wrong") or 0,
-                    "blank": data.get("blank") or 0,
-                    "multiple": data.get("multiple") or 0,
-                    "uncertain": data.get("uncertain") or 0,
-                    "total_questions": len(data.get("question_results") or {}) or 180,
-                    "stream": data.get("stream") or "PCMB",
-                    "date": dt_str
-                })
-            except Exception:
-                pass
-
-        return results
-    except Exception as e:
-        print("Local results error:", e)
-        return []
-
-
 def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=None):
     """
     Retrieves all evaluated student OMR results from database with student & exam details.
-    Falls back to local saved JSON results if database is not configured.
     """
     if not is_db_configured():
-        return _get_local_omr_results(class_filter, section_filter, exam_filter)
+        return []
 
     try:
         # Fetch omr_results select=*
         omr_records = _supabase_request("omr_results?select=*&order=created_at.desc", method="GET") or []
         if not omr_records:
-            return _get_local_omr_results(class_filter, section_filter, exam_filter)
+            return []
 
         # Collect student_ids and exam_ids
         student_ids = list(set([r["student_id"] for r in omr_records if r.get("student_id")]))
@@ -313,8 +239,7 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
 
     except Exception as e:
         print("Database list error:", e)
-        return _get_local_omr_results(class_filter, section_filter, exam_filter)
-
+        return []
 
 
 def get_omr_result_by_id_from_db(result_id):
