@@ -946,26 +946,21 @@ function setCornerDetectionState(
 
         captureButton.disabled = false;
         captureButton.classList.remove("hidden");
-    }
-}
-
-
-function cornerBlockMeasurement(
+function findCornerBlockInZone(
     pixels,
     width,
     height,
     startX,
     startY,
     endX,
-    endY
+    endY,
+    cornerType
 ) {
-
     let brightnessSum = 0;
     let maxBrightness = 0;
     let minBrightness = 255;
     let pixelCount = 0;
 
-    /* 1. Inspect lighting and contrast in this corner zone */
     for (let y = startY; y < endY; y += 1) {
         for (let x = startX; x < endX; x += 1) {
             const offset = (y * width + x) * 4;
@@ -981,135 +976,171 @@ function cornerBlockMeasurement(
         }
     }
 
-    if (pixelCount === 0) {
+    if (pixelCount === 0 || maxBrightness < 75 || (maxBrightness - minBrightness) < 25) {
         return { valid: false };
     }
 
     const avgBrightness = brightnessSum / pixelCount;
+    const darkThreshold = Math.min(avgBrightness * 0.75, minBrightness + 55, 115);
 
-    /*
-        Paper Background & Contrast Validation (Indoor Room Lighting Friendly):
-        1. Must contain paper background (maxBrightness >= 90).
-        2. High contrast between paper and dark mark (maxBrightness - minBrightness >= 35).
-    */
-    if (maxBrightness < 90 || (maxBrightness - minBrightness) < 35) {
-        return { valid: false };
-    }
-
-    /* Adaptive threshold for dark registration mark pixels */
-    const darkThreshold = Math.min(avgBrightness * 0.70, minBrightness + 45, 100);
-
-    let darkCount = 0;
-    let minX = endX, maxX = startX;
-    let minY = endY, maxY = startY;
-    let sumX = 0, sumY = 0;
-    let darkBrightnessSum = 0;
+    const zoneW = endX - startX;
+    const zoneH = endY - startY;
+    const visited = new Uint8Array(zoneW * zoneH);
+    const candidateBlobs = [];
 
     for (let y = startY; y < endY; y += 1) {
         for (let x = startX; x < endX; x += 1) {
+            const localIdx = (y - startY) * zoneW + (x - startX);
+            if (visited[localIdx]) continue;
+
             const offset = (y * width + x) * 4;
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
-            if (brightness < darkThreshold) {
-                darkCount += 1;
-                darkBrightnessSum += brightness;
-                sumX += x;
-                sumY += y;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
+            if (brightness >= darkThreshold) {
+                visited[localIdx] = 1;
+                continue;
             }
-        }
-    }
 
-    if (darkCount === 0 || minX > maxX || minY > maxY) {
-        return { valid: false };
-    }
+            // Breadth-First-Search (BFS) blob extraction
+            let blobDarkCount = 0;
+            let blobMinX = x, blobMaxX = x;
+            let blobMinY = y, blobMaxY = y;
+            let blobSumX = 0, blobSumY = 0;
+            let blobBrightnessSum = 0;
 
-    const blockW = maxX - minX + 1;
-    const blockH = maxY - minY + 1;
-    const bboxArea = blockW * blockH;
-    const blockAvgBrightness = darkBrightnessSum / darkCount;
+            const queue = [x, y];
+            visited[localIdx] = 1;
 
-    /*
-        2. Registration Mark Geometry & Shape Filter:
-        - Dimension: 5px <= blockW, blockH <= 55px (at 480px analysis width)
-        - Aspect Ratio: 0.50 <= blockW / blockH <= 1.80 (box/circle shape)
-        - Solidity / Fill Ratio: darkCount / bboxArea >= 0.45 (solid mark)
-        - Relative Ink Darkness: avgBrightness - blockAvgBrightness >= 20
-        - Frame Area Fraction: 0.0002 <= bboxArea / (width * height) <= 0.03
-    */
-    const aspect = blockW / blockH;
-    const fillRatio = darkCount / bboxArea;
-    const frameArea = width * height;
-    const areaFraction = bboxArea / frameArea;
+            let head = 0;
+            while (head < queue.length) {
+                const cx = queue[head++];
+                const cy = queue[head++];
 
-    if (blockW < 5 || blockH < 5 || blockW > 55 || blockH > 55) {
-        return { valid: false };
-    }
-    if (aspect < 0.50 || aspect > 1.80) {
-        return { valid: false };
-    }
-    if (fillRatio < 0.45) {
-        return { valid: false };
-    }
-    if (blockAvgBrightness > 90 || (avgBrightness - blockAvgBrightness) < 20) {
-        return { valid: false };
-    }
-    if (areaFraction < 0.0002 || areaFraction > 0.03) {
-        return { valid: false };
-    }
+                const cOffset = (cy * width + cx) * 4;
+                const cBrightness =
+                    pixels[cOffset] * 0.299
+                    + pixels[cOffset + 1] * 0.587
+                    + pixels[cOffset + 2] * 0.114;
 
-    /*
-        3. Quiet Zone Validation (Surrounding Paper Margin):
-        A genuine OMR corner registration mark is printed on paper background.
-        The pixels in a 3px ring around the bounding box should be lighter paper background.
-    */
-    let quietZonePixels = 0;
-    let quietZoneWhitePixels = 0;
-    const margin = 3;
+                blobDarkCount += 1;
+                blobBrightnessSum += cBrightness;
+                blobSumX += cx;
+                blobSumY += cy;
 
-    const qMinX = Math.max(startX, minX - margin);
-    const qMaxX = Math.min(endX - 1, maxX + margin);
-    const qMinY = Math.max(startY, minY - margin);
-    const qMaxY = Math.min(endY - 1, maxY + margin);
+                if (cx < blobMinX) blobMinX = cx;
+                if (cx > blobMaxX) blobMaxX = cx;
+                if (cy < blobMinY) blobMinY = cy;
+                if (cy > blobMaxY) blobMaxY = cy;
 
-    for (let y = qMinY; y <= qMaxY; y += 1) {
-        for (let x = qMinX; x <= qMaxX; x += 1) {
-            if (x < minX || x > maxX || y < minY || y > maxY) {
-                const offset = (y * width + x) * 4;
-                const brightness =
-                    pixels[offset] * 0.299
-                    + pixels[offset + 1] * 0.587
-                    + pixels[offset + 2] * 0.114;
+                const neighbors = [
+                    [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]
+                ];
 
-                quietZonePixels += 1;
-                if (brightness >= (darkThreshold + 15) || brightness >= (blockAvgBrightness + 25)) {
-                    quietZoneWhitePixels += 1;
+                for (let i = 0; i < neighbors.length; i++) {
+                    const nx = neighbors[i][0];
+                    const ny = neighbors[i][1];
+                    if (nx >= startX && nx < endX && ny >= startY && ny < endY) {
+                        const nLocalIdx = (ny - startY) * zoneW + (nx - startX);
+                        if (!visited[nLocalIdx]) {
+                            visited[nLocalIdx] = 1;
+                            const nOffset = (ny * width + nx) * 4;
+                            const nBrightness =
+                                pixels[nOffset] * 0.299
+                                + pixels[nOffset + 1] * 0.587
+                                + pixels[nOffset + 2] * 0.114;
+
+                            if (nBrightness < darkThreshold) {
+                                queue.push(nx, ny);
+                            }
+                        }
+                    }
+                }
+            }
+
+            const bw = blobMaxX - blobMinX + 1;
+            const bh = blobMaxY - blobMinY + 1;
+            const bboxArea = bw * bh;
+            const aspect = bw / bh;
+            const fillRatio = blobDarkCount / bboxArea;
+            const blobAvgBrightness = blobBrightnessSum / blobDarkCount;
+
+            // Geometry filter for OMR corner box (box/circle)
+            if (bw >= 3 && bh >= 3 && bw <= 65 && bh <= 65) {
+                if (aspect >= 0.40 && aspect <= 2.3 && fillRatio >= 0.32) {
+                    if (blobAvgBrightness <= 110 && (avgBrightness - blobAvgBrightness) >= 12) {
+                        // Quiet zone check around this specific blob
+                        let qPixels = 0;
+                        let qWhite = 0;
+                        const margin = 2;
+
+                        const qMinX = Math.max(startX, blobMinX - margin);
+                        const qMaxX = Math.min(endX - 1, blobMaxX + margin);
+                        const qMinY = Math.max(startY, blobMinY - margin);
+                        const qMaxY = Math.min(endY - 1, blobMaxY + margin);
+
+                        for (let qy = qMinY; qy <= qMaxY; qy++) {
+                            for (let qx = qMinX; qx <= qMaxX; qx++) {
+                                if (qx < blobMinX || qx > blobMaxX || qy < blobMinY || qy > blobMaxY) {
+                                    const qOffset = (qy * width + qx) * 4;
+                                    const qBright =
+                                        pixels[qOffset] * 0.299
+                                        + pixels[qOffset + 1] * 0.587
+                                        + pixels[qOffset + 2] * 0.114;
+
+                                    qPixels++;
+                                    if (qBright >= (darkThreshold + 8) || qBright >= (blobAvgBrightness + 15)) {
+                                        qWhite++;
+                                    }
+                                }
+                            }
+                        }
+
+                        const quietRatio = qPixels > 0 ? qWhite / qPixels : 1.0;
+                        if (quietRatio >= 0.45) {
+                            const centerX = blobSumX / blobDarkCount;
+                            const centerY = blobSumY / blobDarkCount;
+
+                            // Distance to target outer corner of quadrant
+                            let targetX = startX, targetY = startY;
+                            if (cornerType === 'tr') targetX = endX;
+                            if (cornerType === 'bl') targetY = endY;
+                            if (cornerType === 'br') { targetX = endX; targetY = endY; }
+
+                            const distToCorner = Math.hypot(centerX - targetX, centerY - targetY);
+                            const score = fillRatio * 100 - distToCorner * 0.2;
+
+                            candidateBlobs.push({
+                                x: centerX,
+                                y: centerY,
+                                bw,
+                                bh,
+                                fillRatio,
+                                score
+                            });
+                        }
+                    }
                 }
             }
         }
     }
 
-    if (quietZonePixels > 0) {
-        const quietZoneWhiteRatio = quietZoneWhitePixels / quietZonePixels;
-        if (quietZoneWhiteRatio < 0.65) {
-            return { valid: false };
-        }
+    if (candidateBlobs.length === 0) {
+        return { valid: false };
     }
+
+    candidateBlobs.sort((a, b) => b.score - a.score);
+    const best = candidateBlobs[0];
 
     return {
         valid: true,
-        x: sumX / darkCount,
-        y: sumY / darkCount,
-        blockW,
-        blockH,
-        fillRatio,
-        coverage: darkCount / pixelCount
+        x: best.x,
+        y: best.y,
+        blockW: best.bw,
+        blockH: best.bh,
+        fillRatio: best.fillRatio
     };
 }
 
@@ -1256,28 +1287,25 @@ function detectDocumentCorners() {
     ).data;
 
     /* 
-        Search 4 broad quadrant halves so corner marks are found 
-        regardless of sheet positioning in camera frame
+        Search 4 broad quadrant halves using BFS blob extraction
     */
-    const midX = Math.round(analysisWidth * 0.50);
-    const midY = Math.round(analysisHeight * 0.50);
-
     const zones = [
-        [0, 0, Math.round(analysisWidth * 0.52), Math.round(analysisHeight * 0.48)], // Top-Left
-        [Math.round(analysisWidth * 0.48), 0, analysisWidth, Math.round(analysisHeight * 0.48)], // Top-Right
-        [0, Math.round(analysisHeight * 0.52), Math.round(analysisWidth * 0.52), analysisHeight], // Bottom-Left
-        [Math.round(analysisWidth * 0.48), Math.round(analysisHeight * 0.52), analysisWidth, analysisHeight], // Bottom-Right
+        [0, 0, Math.round(analysisWidth * 0.52), Math.round(analysisHeight * 0.48), 'tl'],
+        [Math.round(analysisWidth * 0.48), 0, analysisWidth, Math.round(analysisHeight * 0.48), 'tr'],
+        [0, Math.round(analysisHeight * 0.52), Math.round(analysisWidth * 0.52), analysisHeight, 'bl'],
+        [Math.round(analysisWidth * 0.48), Math.round(analysisHeight * 0.52), analysisWidth, analysisHeight, 'br'],
     ];
 
     const measurements = zones.map(
-        ([startX, startY, endX, endY]) => cornerBlockMeasurement(
+        ([startX, startY, endX, endY, type]) => findCornerBlockInZone(
             pixels,
             analysisWidth,
             analysisHeight,
             startX,
             startY,
             endX,
-            endY
+            endY,
+            type
         )
     );
 
@@ -1327,10 +1355,10 @@ function detectDocumentCorners() {
     const rightEdgeDist = Math.hypot(br.x - tr.x, br.y - tr.y);
 
     /* Parallel & symmetry checks */
-    if (Math.abs(topEdgeDist - bottomEdgeDist) / Math.max(topEdgeDist, bottomEdgeDist) > 0.35) {
+    if (Math.abs(topEdgeDist - bottomEdgeDist) / Math.max(topEdgeDist, bottomEdgeDist) > 0.40) {
         return null;
     }
-    if (Math.abs(leftEdgeDist - rightEdgeDist) / Math.max(leftEdgeDist, rightEdgeDist) > 0.35) {
+    if (Math.abs(leftEdgeDist - rightEdgeDist) / Math.max(leftEdgeDist, rightEdgeDist) > 0.40) {
         return null;
     }
 
