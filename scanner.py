@@ -4893,38 +4893,35 @@ def process_omr(
     #
     # The clean reference image is NOT blended into this image and is
     # NOT used for answer decisions. It is only used earlier for geometry.
-    if not os.environ.get(
-        "VERCEL"
-    ):
+    detailed_debug = None
+    if exam_name in [
+        "NEET",
+        "KCET",
+        "JEE",
+    ]:
+        flat_answers = {}
+        if isinstance(answers, dict) and ("mcq" in answers or "numerical" in answers):
+            flat_answers.update(answers.get("mcq", {}))
+            flat_answers.update(answers.get("numerical", {}))
+        else:
+            flat_answers = answers
+
+        detailed_debug = (
+            draw_answer_analysis(
+                corrected,
+                template,
+                flat_answers,
+                original_image=image,
+                homography=homography,
+            )
+        )
+
+    if not os.environ.get("VERCEL"):
         cv2.imwrite(
             "debug_omr.jpg",
             debug,
         )
-
-        # Keep the more detailed colored analysis image as well.
-        detailed_debug = None
-        if exam_name in [
-            "NEET",
-            "KCET",
-            "JEE",
-        ]:
-            flat_answers = {}
-            if isinstance(answers, dict) and ("mcq" in answers or "numerical" in answers):
-                flat_answers.update(answers.get("mcq", {}))
-                flat_answers.update(answers.get("numerical", {}))
-            else:
-                flat_answers = answers
-
-            detailed_debug = (
-                draw_answer_analysis(
-                    corrected,
-                    template,
-                    flat_answers,
-                    original_image=image,
-                    homography=homography,
-                )
-            )
-
+        if detailed_debug is not None:
             cv2.imwrite(
                 "bubble_analysis_debug.jpg",
                 detailed_debug,
