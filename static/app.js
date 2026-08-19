@@ -876,8 +876,8 @@ function isReadyForAutoCapture(
     previousDetection
 ) {
     /*
-        Auto-capture ONLY triggers when 4 corner registration blocks with quiet zones
-        are stably detected for at least 5 consecutive frames (1.25s) with low motion.
+        Auto-capture triggers when OMR corner registration marks are stably detected
+        for 3 consecutive frames with low motion.
     */
 
     if (!detection || !detection.sourcePoints) {
@@ -887,10 +887,10 @@ function isReadyForAutoCapture(
         };
     }
 
-    if (stableChecks < 5) {
+    if (stableChecks < 3) {
         return {
             ready: false,
-            reason: "OMR sheet detected — hold steady (100% match)"
+            reason: "OMR sheet detected — hold steady"
         };
     }
 
@@ -910,7 +910,7 @@ function isReadyForAutoCapture(
 
     return {
         ready: true,
-        reason: "100% OMR Corner Markers Verified"
+        reason: "OMR Corner Markers Verified"
     };
 }
 
@@ -988,16 +988,16 @@ function cornerBlockMeasurement(
     const avgBrightness = brightnessSum / pixelCount;
 
     /*
-        Strict Paper Background & Contrast Validation (QR-code level):
-        1. Must contain bright white paper background (maxBrightness >= 140).
-        2. High contrast between paper and dark mark (maxBrightness - minBrightness >= 60).
+        Paper Background & Contrast Validation (Indoor Room Lighting Friendly):
+        1. Must contain paper background (maxBrightness >= 90).
+        2. High contrast between paper and dark mark (maxBrightness - minBrightness >= 35).
     */
-    if (maxBrightness < 140 || (maxBrightness - minBrightness) < 60) {
+    if (maxBrightness < 90 || (maxBrightness - minBrightness) < 35) {
         return { valid: false };
     }
 
-    /* Threshold for dark registration block pixels */
-    const darkThreshold = Math.min(avgBrightness * 0.55, minBrightness + 45, 80);
+    /* Adaptive threshold for dark registration mark pixels */
+    const darkThreshold = Math.min(avgBrightness * 0.70, minBrightness + 45, 100);
 
     let darkCount = 0;
     let minX = endX, maxX = startX;
@@ -1036,39 +1036,38 @@ function cornerBlockMeasurement(
     const blockAvgBrightness = darkBrightnessSum / darkCount;
 
     /*
-        2. Strict Registration Mark Shape Filter (Square Box or Circle):
-        - Dimension: 6px <= blockW, blockH <= 45px (at 480px width analysis resolution)
-        - Aspect Ratio: 0.65 <= blockW / blockH <= 1.40 (compact box/circle shape)
-        - Solidity / Fill Ratio: darkCount / bboxArea >= 0.60 (60% to 95% solid black block)
-        - Deep Ink Darkness: blockAvgBrightness <= 70
-        - Frame Fraction: 0.0003 <= bboxArea / (width * height) <= 0.025
+        2. Registration Mark Geometry & Shape Filter:
+        - Dimension: 5px <= blockW, blockH <= 55px (at 480px analysis width)
+        - Aspect Ratio: 0.50 <= blockW / blockH <= 1.80 (box/circle shape)
+        - Solidity / Fill Ratio: darkCount / bboxArea >= 0.45 (solid mark)
+        - Relative Ink Darkness: avgBrightness - blockAvgBrightness >= 20
+        - Frame Area Fraction: 0.0002 <= bboxArea / (width * height) <= 0.03
     */
     const aspect = blockW / blockH;
     const fillRatio = darkCount / bboxArea;
     const frameArea = width * height;
     const areaFraction = bboxArea / frameArea;
 
-    if (blockW < 6 || blockH < 6 || blockW > 45 || blockH > 45) {
+    if (blockW < 5 || blockH < 5 || blockW > 55 || blockH > 55) {
         return { valid: false };
     }
-    if (aspect < 0.65 || aspect > 1.40) {
+    if (aspect < 0.50 || aspect > 1.80) {
         return { valid: false };
     }
-    if (fillRatio < 0.60) {
+    if (fillRatio < 0.45) {
         return { valid: false };
     }
-    if (blockAvgBrightness > 70) {
+    if (blockAvgBrightness > 90 || (avgBrightness - blockAvgBrightness) < 20) {
         return { valid: false };
     }
-    if (areaFraction < 0.0003 || areaFraction > 0.025) {
+    if (areaFraction < 0.0002 || areaFraction > 0.03) {
         return { valid: false };
     }
 
     /*
-        3. Quiet Zone Validation (Surrounding White Ring) -- QR Code Detector Method:
-        A genuine OMR corner registration block is printed on white paper, so the pixels
-        in a 3px ring around the bounding box MUST BE WHITE PAPER (> 120 brightness).
-        Newspapers, bedsheets, and photos fail this because dark ink/texture extends outside.
+        3. Quiet Zone Validation (Surrounding Paper Margin):
+        A genuine OMR corner registration mark is printed on paper background.
+        The pixels in a 3px ring around the bounding box should be lighter paper background.
     */
     let quietZonePixels = 0;
     let quietZoneWhitePixels = 0;
@@ -1081,7 +1080,6 @@ function cornerBlockMeasurement(
 
     for (let y = qMinY; y <= qMaxY; y += 1) {
         for (let x = qMinX; x <= qMaxX; x += 1) {
-            // Only check pixels outside the black bounding box
             if (x < minX || x > maxX || y < minY || y > maxY) {
                 const offset = (y * width + x) * 4;
                 const brightness =
@@ -1090,17 +1088,16 @@ function cornerBlockMeasurement(
                     + pixels[offset + 2] * 0.114;
 
                 quietZonePixels += 1;
-                if (brightness >= 120 && brightness >= darkThreshold + 45) {
+                if (brightness >= (darkThreshold + 15) || brightness >= (blockAvgBrightness + 25)) {
                     quietZoneWhitePixels += 1;
                 }
             }
         }
     }
 
-    // Require at least 80% of the surrounding quiet zone ring to be bright white paper
     if (quietZonePixels > 0) {
         const quietZoneWhiteRatio = quietZoneWhitePixels / quietZonePixels;
-        if (quietZoneWhiteRatio < 0.80) {
+        if (quietZoneWhiteRatio < 0.65) {
             return { valid: false };
         }
     }
@@ -1218,7 +1215,7 @@ function detectDocumentCorners() {
         return null;
     }
 
-    /* Analysis resolution for accuracy */
+    /* Analysis resolution */
     const analysisWidth = 480;
 
     const analysisHeight = Math.round(
@@ -1258,41 +1255,51 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    /* Corner zones for registration block search */
-    const zoneWidth = Math.round(analysisWidth * 0.28);
-
-    const zoneHeight = Math.round(analysisHeight * 0.25);
+    /* 
+        Search 4 broad quadrant halves so corner marks are found 
+        regardless of sheet positioning in camera frame
+    */
+    const midX = Math.round(analysisWidth * 0.50);
+    const midY = Math.round(analysisHeight * 0.50);
 
     const zones = [
-        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.01)],
-        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.01)],
-        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.73)],
-        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.73)],
+        [0, 0, Math.round(analysisWidth * 0.52), Math.round(analysisHeight * 0.48)], // Top-Left
+        [Math.round(analysisWidth * 0.48), 0, analysisWidth, Math.round(analysisHeight * 0.48)], // Top-Right
+        [0, Math.round(analysisHeight * 0.52), Math.round(analysisWidth * 0.52), analysisHeight], // Bottom-Left
+        [Math.round(analysisWidth * 0.48), Math.round(analysisHeight * 0.52), analysisWidth, analysisHeight], // Bottom-Right
     ];
 
     const measurements = zones.map(
-        ([x, y]) => cornerBlockMeasurement(
+        ([startX, startY, endX, endY]) => cornerBlockMeasurement(
             pixels,
             analysisWidth,
             analysisHeight,
-            x,
-            y,
-            Math.min(x + zoneWidth, analysisWidth),
-            Math.min(y + zoneHeight, analysisHeight)
+            startX,
+            startY,
+            endX,
+            endY
         )
     );
 
     const validMeasurements = measurements.filter(m => m.valid);
 
-    /* 
-        QR Code Level Strictness: Require ALL 4 corner registration blocks
-        to be positively identified with white quiet zones and square/circle shape!
-    */
-    if (validMeasurements.length < 4) {
+    /* Allow detection if at least 3 or 4 valid corner registration blocks are found */
+    if (validMeasurements.length < 3) {
         return null;
     }
 
-    const points = measurements.map(m => ({ x: m.x, y: m.y }));
+    /* Estimate missing 4th corner point using quad symmetry if 3 are present */
+    let points = measurements.map(m => m.valid ? { x: m.x, y: m.y } : null);
+
+    if (!points[0] && points[1] && points[2] && points[3]) {
+        points[0] = { x: points[1].x + points[2].x - points[3].x, y: points[1].y + points[2].y - points[3].y };
+    } else if (!points[1] && points[0] && points[2] && points[3]) {
+        points[1] = { x: points[0].x + points[3].x - points[2].x, y: points[0].y + points[3].y - points[2].y };
+    } else if (!points[2] && points[0] && points[1] && points[3]) {
+        points[2] = { x: points[0].x + points[3].x - points[1].x, y: points[0].y + points[3].y - points[1].y };
+    } else if (!points[3] && points[0] && points[1] && points[2]) {
+        points[3] = { x: points[1].x + points[2].x - points[0].x, y: points[1].y + points[2].y - points[0].y };
+    }
 
     const displayWidth = cameraContainer.clientWidth;
 
@@ -1320,18 +1327,10 @@ function detectDocumentCorners() {
     const rightEdgeDist = Math.hypot(br.x - tr.x, br.y - tr.y);
 
     /* Parallel & symmetry checks */
-    if (Math.abs(topEdgeDist - bottomEdgeDist) / Math.max(topEdgeDist, bottomEdgeDist) > 0.25) {
+    if (Math.abs(topEdgeDist - bottomEdgeDist) / Math.max(topEdgeDist, bottomEdgeDist) > 0.35) {
         return null;
     }
-    if (Math.abs(leftEdgeDist - rightEdgeDist) / Math.max(leftEdgeDist, rightEdgeDist) > 0.25) {
-        return null;
-    }
-
-    /* Check that top and bottom edges are roughly horizontal */
-    const topAngle = Math.abs(Math.atan2(tr.y - tl.y, tr.x - tl.x) * 180 / Math.PI);
-    const bottomAngle = Math.abs(Math.atan2(br.y - bl.y, br.x - bl.x) * 180 / Math.PI);
-
-    if (topAngle > 20 || bottomAngle > 20) {
+    if (Math.abs(leftEdgeDist - rightEdgeDist) / Math.max(leftEdgeDist, rightEdgeDist) > 0.35) {
         return null;
     }
 
