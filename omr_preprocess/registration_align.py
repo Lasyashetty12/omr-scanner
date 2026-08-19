@@ -18,14 +18,11 @@ the JSON coordinates + runtime column calibration + ML/classical reader.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
 import cv2
 import numpy as np
-
-logger = logging.getLogger(__name__)
 
 
 
