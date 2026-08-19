@@ -1105,7 +1105,7 @@ function detectDocumentCorners() {
         return null;
     }
 
-    /* Even higher resolution for pixel-perfect accuracy */
+    /* Search canvas resolution */
     const analysisWidth = 480;
 
     const analysisHeight = Math.round(
@@ -1145,16 +1145,16 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    const zoneWidth = Math.round(analysisWidth * 0.25);
+    const zoneWidth = Math.round(analysisWidth * 0.28);
 
-    const zoneHeight = Math.round(analysisHeight * 0.20);
+    const zoneHeight = Math.round(analysisHeight * 0.22);
 
     /* Zones: [0]=TL, [1]=TR, [2]=BL, [3]=BR */
     const zones = [
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.78)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.78)],
+        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.01)],
+        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.01)],
+        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.76)],
+        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.76)],
     ];
 
     const measurements = zones.map(
@@ -1170,7 +1170,7 @@ function detectDocumentCorners() {
     );
 
     /* Require all 4 printed black corner markers to be detected */
-    if (!measurements.every(({ coverage }) => coverage >= 0.025)) {
+    if (!measurements.every(({ coverage }) => coverage >= 0.02)) {
 
         return null;
     }
@@ -1210,33 +1210,22 @@ function detectDocumentCorners() {
     const leftH = Math.hypot(bl.x - tl.x, bl.y - tl.y);
     const rightH = Math.hypot(br.x - tr.x, br.y - tr.y);
 
-    /* Minimum size requirement (> 25% of frame dimensions) */
-    if (topW < videoWidth * 0.25 || botW < videoWidth * 0.25) return null;
-    if (leftH < videoHeight * 0.25 || rightH < videoHeight * 0.25) return null;
+    /* Minimum size requirement (> 20% of frame dimensions) */
+    if (topW < videoWidth * 0.20 || botW < videoWidth * 0.20) return null;
+    if (leftH < videoHeight * 0.20 || rightH < videoHeight * 0.20) return null;
 
     /* Parallel & symmetry check */
-    if (Math.abs(topW - botW) / Math.max(topW, botW) > 0.3) return null;
-    if (Math.abs(leftH - rightH) / Math.max(leftH, rightH) > 0.3) return null;
+    if (Math.abs(topW - botW) / Math.max(topW, botW) > 0.35) return null;
+    if (Math.abs(leftH - rightH) / Math.max(leftH, rightH) > 0.35) return null;
 
-    if (Math.abs(tl.y - tr.y) > videoHeight * 0.18) return null;
-    if (Math.abs(bl.y - br.y) > videoHeight * 0.18) return null;
-    if (Math.abs(tl.x - bl.x) > videoWidth * 0.18) return null;
-    if (Math.abs(tr.x - br.x) > videoWidth * 0.18) return null;
-
-    /* Upright orientation check */
-    if (!isSheetUpright(tl, tr)) return null;
+    /* Upright orientation check (tilt angle <= 20 deg) */
+    if (!isSheetReasonablyAligned(sourcePoints)) return null;
 
     /* Require sheet area >= 15% of total frame */
     if (!isSheetLargeEnough(sourcePoints, videoWidth, videoHeight)) return null;
 
     /* Require all 4 corners to be inside frame bounds */
-    const marginX = videoWidth * 0.01;
-    const marginY = videoHeight * 0.01;
-    for (const p of sourcePoints) {
-        if (p.x < marginX || p.x > videoWidth - marginX || p.y < marginY || p.y > videoHeight - marginY) {
-            return null;
-        }
-    }
+    if (!isCompleteSheetInFrame(sourcePoints, videoWidth, videoHeight)) return null;
 
     return {
         displayPoints,
