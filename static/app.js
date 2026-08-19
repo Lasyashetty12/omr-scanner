@@ -871,46 +871,23 @@ function hasExcessiveMovement(
 function isReadyForAutoCapture(
     detection,
     videoWidth,
-    videoHeight,
-    stableChecks,
-    previousDetection
+    videoHeight
 ) {
     /*
-        Auto-capture triggers when OMR corner registration marks are stably detected
-        for 3 consecutive frames with low motion.
+        Auto-capture should trigger when the black corner registration blocks
+        are detected, not when the whole sheet geometry is perfectly aligned.
     */
 
     if (!detection || !detection.sourcePoints) {
         return {
             ready: false,
-            reason: "Position complete OMR sheet inside frame"
-        };
-    }
-
-    if (stableChecks < 3) {
-        return {
-            ready: false,
-            reason: "OMR sheet detected — hold steady"
-        };
-    }
-
-    if (hasExcessiveMovement(detection, previousDetection)) {
-        return {
-            ready: false,
-            reason: "Hold camera still"
-        };
-    }
-
-    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Move camera closer to OMR sheet"
+            reason: "No black corner boxes detected"
         };
     }
 
     return {
         ready: true,
-        reason: "OMR Corner Markers Verified"
+        reason: "Black corner boxes detected"
     };
 }
 
@@ -937,8 +914,8 @@ function setCornerDetectionState(
             cornerDetectionStatus.textContent = statusMessage;
         } else {
             cornerDetectionStatus.textContent = detected
-                ? "OMR sheet detected — hold steady"
-                : "Position complete OMR sheet inside frame";
+                ? "OMR detected — hold steady"
+                : "Position the complete OMR inside the frame";
         }
     }
 
@@ -946,201 +923,81 @@ function setCornerDetectionState(
 
         captureButton.disabled = false;
         captureButton.classList.remove("hidden");
-function findCornerBlockInZone(
+    }
+}
+
+
+function cornerBlockMeasurement(
     pixels,
     width,
     height,
     startX,
     startY,
     endX,
-    endY,
-    cornerType
+    endY
 ) {
+
+    let darkPixels = 0;
+
+    let totalPixels = 0;
+
+    let weightedX = 0;
+
+    let weightedY = 0;
+
+    /* Adaptive brightness threshold based on region lighting */
     let brightnessSum = 0;
-    let maxBrightness = 0;
-    let minBrightness = 255;
     let pixelCount = 0;
 
     for (let y = startY; y < endY; y += 1) {
+
         for (let x = startX; x < endX; x += 1) {
+
             const offset = (y * width + x) * 4;
+
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
             brightnessSum += brightness;
-            if (brightness > maxBrightness) maxBrightness = brightness;
-            if (brightness < minBrightness) minBrightness = brightness;
             pixelCount += 1;
+
+            totalPixels += 1;
         }
     }
 
-    if (pixelCount === 0 || maxBrightness < 75 || (maxBrightness - minBrightness) < 25) {
-        return { valid: false };
-    }
+    /* Calculate average brightness and use as adaptive threshold */
+    const avgBrightness = brightnessSum / Math.max(pixelCount, 1);
+    const threshold = Math.min(avgBrightness * 0.5, 80);
 
-    const avgBrightness = brightnessSum / pixelCount;
-    const darkThreshold = Math.min(avgBrightness * 0.75, minBrightness + 55, 115);
-
-    const zoneW = endX - startX;
-    const zoneH = endY - startY;
-    const visited = new Uint8Array(zoneW * zoneH);
-    const candidateBlobs = [];
-
+    /* Second pass: find dark pixels using adaptive threshold */
     for (let y = startY; y < endY; y += 1) {
+
         for (let x = startX; x < endX; x += 1) {
-            const localIdx = (y - startY) * zoneW + (x - startX);
-            if (visited[localIdx]) continue;
 
             const offset = (y * width + x) * 4;
+
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
-            if (brightness >= darkThreshold) {
-                visited[localIdx] = 1;
-                continue;
-            }
+            if (brightness < threshold) {
 
-            // Breadth-First-Search (BFS) blob extraction
-            let blobDarkCount = 0;
-            let blobMinX = x, blobMaxX = x;
-            let blobMinY = y, blobMaxY = y;
-            let blobSumX = 0, blobSumY = 0;
-            let blobBrightnessSum = 0;
+                darkPixels += 1;
 
-            const queue = [x, y];
-            visited[localIdx] = 1;
+                weightedX += x;
 
-            let head = 0;
-            while (head < queue.length) {
-                const cx = queue[head++];
-                const cy = queue[head++];
-
-                const cOffset = (cy * width + cx) * 4;
-                const cBrightness =
-                    pixels[cOffset] * 0.299
-                    + pixels[cOffset + 1] * 0.587
-                    + pixels[cOffset + 2] * 0.114;
-
-                blobDarkCount += 1;
-                blobBrightnessSum += cBrightness;
-                blobSumX += cx;
-                blobSumY += cy;
-
-                if (cx < blobMinX) blobMinX = cx;
-                if (cx > blobMaxX) blobMaxX = cx;
-                if (cy < blobMinY) blobMinY = cy;
-                if (cy > blobMaxY) blobMaxY = cy;
-
-                const neighbors = [
-                    [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]
-                ];
-
-                for (let i = 0; i < neighbors.length; i++) {
-                    const nx = neighbors[i][0];
-                    const ny = neighbors[i][1];
-                    if (nx >= startX && nx < endX && ny >= startY && ny < endY) {
-                        const nLocalIdx = (ny - startY) * zoneW + (nx - startX);
-                        if (!visited[nLocalIdx]) {
-                            visited[nLocalIdx] = 1;
-                            const nOffset = (ny * width + nx) * 4;
-                            const nBrightness =
-                                pixels[nOffset] * 0.299
-                                + pixels[nOffset + 1] * 0.587
-                                + pixels[nOffset + 2] * 0.114;
-
-                            if (nBrightness < darkThreshold) {
-                                queue.push(nx, ny);
-                            }
-                        }
-                    }
-                }
-            }
-
-            const bw = blobMaxX - blobMinX + 1;
-            const bh = blobMaxY - blobMinY + 1;
-            const bboxArea = bw * bh;
-            const aspect = bw / bh;
-            const fillRatio = blobDarkCount / bboxArea;
-            const blobAvgBrightness = blobBrightnessSum / blobDarkCount;
-
-            // Geometry filter for OMR corner box (box/circle)
-            if (bw >= 3 && bh >= 3 && bw <= 65 && bh <= 65) {
-                if (aspect >= 0.40 && aspect <= 2.3 && fillRatio >= 0.32) {
-                    if (blobAvgBrightness <= 110 && (avgBrightness - blobAvgBrightness) >= 12) {
-                        // Quiet zone check around this specific blob
-                        let qPixels = 0;
-                        let qWhite = 0;
-                        const margin = 2;
-
-                        const qMinX = Math.max(startX, blobMinX - margin);
-                        const qMaxX = Math.min(endX - 1, blobMaxX + margin);
-                        const qMinY = Math.max(startY, blobMinY - margin);
-                        const qMaxY = Math.min(endY - 1, blobMaxY + margin);
-
-                        for (let qy = qMinY; qy <= qMaxY; qy++) {
-                            for (let qx = qMinX; qx <= qMaxX; qx++) {
-                                if (qx < blobMinX || qx > blobMaxX || qy < blobMinY || qy > blobMaxY) {
-                                    const qOffset = (qy * width + qx) * 4;
-                                    const qBright =
-                                        pixels[qOffset] * 0.299
-                                        + pixels[qOffset + 1] * 0.587
-                                        + pixels[qOffset + 2] * 0.114;
-
-                                    qPixels++;
-                                    if (qBright >= (darkThreshold + 8) || qBright >= (blobAvgBrightness + 15)) {
-                                        qWhite++;
-                                    }
-                                }
-                            }
-                        }
-
-                        const quietRatio = qPixels > 0 ? qWhite / qPixels : 1.0;
-                        if (quietRatio >= 0.45) {
-                            const centerX = blobSumX / blobDarkCount;
-                            const centerY = blobSumY / blobDarkCount;
-
-                            // Distance to target outer corner of quadrant
-                            let targetX = startX, targetY = startY;
-                            if (cornerType === 'tr') targetX = endX;
-                            if (cornerType === 'bl') targetY = endY;
-                            if (cornerType === 'br') { targetX = endX; targetY = endY; }
-
-                            const distToCorner = Math.hypot(centerX - targetX, centerY - targetY);
-                            const score = fillRatio * 100 - distToCorner * 0.2;
-
-                            candidateBlobs.push({
-                                x: centerX,
-                                y: centerY,
-                                bw,
-                                bh,
-                                fillRatio,
-                                score
-                            });
-                        }
-                    }
-                }
+                weightedY += y;
             }
         }
     }
 
-    if (candidateBlobs.length === 0) {
-        return { valid: false };
-    }
-
-    candidateBlobs.sort((a, b) => b.score - a.score);
-    const best = candidateBlobs[0];
-
     return {
-        valid: true,
-        x: best.x,
-        y: best.y,
-        blockW: best.bw,
-        blockH: best.bh,
-        fillRatio: best.fillRatio
+        coverage: darkPixels / Math.max(totalPixels, 1),
+        x: darkPixels ? weightedX / darkPixels : 0,
+        y: darkPixels ? weightedY / darkPixels : 0,
     };
 }
 
@@ -1246,7 +1103,7 @@ function detectDocumentCorners() {
         return null;
     }
 
-    /* Analysis resolution */
+    /* Even higher resolution for pixel-perfect accuracy */
     const analysisWidth = 480;
 
     const analysisHeight = Math.round(
@@ -1286,79 +1143,67 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    /* 
-        Search 4 broad quadrant halves using BFS blob extraction
-    */
+    /* Optimized zones for better OMR corner detection */
+    const zoneWidth = Math.round(analysisWidth * 0.25);
+
+    const zoneHeight = Math.round(analysisHeight * 0.20);
+
+    /* Positions slightly inset from edges for better accuracy */
     const zones = [
-        [0, 0, Math.round(analysisWidth * 0.52), Math.round(analysisHeight * 0.48), 'tl'],
-        [Math.round(analysisWidth * 0.48), 0, analysisWidth, Math.round(analysisHeight * 0.48), 'tr'],
-        [0, Math.round(analysisHeight * 0.52), Math.round(analysisWidth * 0.52), analysisHeight, 'bl'],
-        [Math.round(analysisWidth * 0.48), Math.round(analysisHeight * 0.52), analysisWidth, analysisHeight, 'br'],
+        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.02)],
+        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.02)],
+        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.78)],
+        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.78)],
     ];
 
     const measurements = zones.map(
-        ([startX, startY, endX, endY, type]) => findCornerBlockInZone(
+        ([x, y]) => cornerBlockMeasurement(
             pixels,
             analysisWidth,
             analysisHeight,
-            startX,
-            startY,
-            endX,
-            endY,
-            type
+            x,
+            y,
+            Math.min(x + zoneWidth, analysisWidth),
+            Math.min(y + zoneHeight, analysisHeight)
         )
     );
 
-    const validMeasurements = measurements.filter(m => m.valid);
+    if (!measurements.every(({ coverage }) => coverage >= 0.02)) {
 
-    /* Allow detection if at least 3 or 4 valid corner registration blocks are found */
-    if (validMeasurements.length < 3) {
         return null;
-    }
-
-    /* Estimate missing 4th corner point using quad symmetry if 3 are present */
-    let points = measurements.map(m => m.valid ? { x: m.x, y: m.y } : null);
-
-    if (!points[0] && points[1] && points[2] && points[3]) {
-        points[0] = { x: points[1].x + points[2].x - points[3].x, y: points[1].y + points[2].y - points[3].y };
-    } else if (!points[1] && points[0] && points[2] && points[3]) {
-        points[1] = { x: points[0].x + points[3].x - points[2].x, y: points[0].y + points[3].y - points[2].y };
-    } else if (!points[2] && points[0] && points[1] && points[3]) {
-        points[2] = { x: points[0].x + points[3].x - points[1].x, y: points[0].y + points[3].y - points[1].y };
-    } else if (!points[3] && points[0] && points[1] && points[2]) {
-        points[3] = { x: points[1].x + points[2].x - points[0].x, y: points[1].y + points[2].y - points[0].y };
     }
 
     const displayWidth = cameraContainer.clientWidth;
 
     const displayHeight = cameraContainer.clientHeight;
 
-    const displayPoints = points.map(({ x, y }) => ({
+    const displayPoints = measurements.map(({ x, y }) => ({
         x: (x / analysisWidth) * displayWidth,
         y: (y / analysisHeight) * displayHeight,
     }));
 
-    const sourcePoints = points.map(({ x, y }) => ({
+    const sourcePoints = measurements.map(({ x, y }) => ({
         x: (x / analysisWidth) * videoWidth,
         y: (y / analysisHeight) * videoHeight,
     }));
 
-    /* Validate quad geometry */
+    /* Validate that corners are roughly in expected positions */
     const tl = sourcePoints[0];
     const tr = sourcePoints[1];
     const bl = sourcePoints[2];
     const br = sourcePoints[3];
 
-    const topEdgeDist = Math.hypot(tr.x - tl.x, tr.y - tl.y);
-    const bottomEdgeDist = Math.hypot(br.x - bl.x, br.y - bl.y);
-    const leftEdgeDist = Math.hypot(bl.x - tl.x, bl.y - tl.y);
-    const rightEdgeDist = Math.hypot(br.x - tr.x, br.y - tr.y);
+    /* Check basic quad properties */
+    const topEdgeDist = Math.abs(tl.y - tr.y);
+    const bottomEdgeDist = Math.abs(bl.y - br.y);
+    const leftEdgeDist = Math.abs(tl.x - bl.x);
+    const rightEdgeDist = Math.abs(tr.x - br.x);
 
-    /* Parallel & symmetry checks */
-    if (Math.abs(topEdgeDist - bottomEdgeDist) / Math.max(topEdgeDist, bottomEdgeDist) > 0.40) {
+    /* All edges should be relatively parallel */
+    if (Math.max(topEdgeDist, bottomEdgeDist) > videoHeight * 0.15) {
         return null;
     }
-    if (Math.abs(leftEdgeDist - rightEdgeDist) / Math.max(leftEdgeDist, rightEdgeDist) > 0.40) {
+    if (Math.max(leftEdgeDist, rightEdgeDist) > videoWidth * 0.15) {
         return null;
     }
 
@@ -1391,24 +1236,28 @@ function monitorCornerBlocks(timestamp) {
         const videoWidth = camera.videoWidth;
         const videoHeight = camera.videoHeight;
 
-        /* Check if positioned correctly and stably for auto-capture */
+        /*
+            Check if positioned correctly for auto-capture.
+        */
         const readinessCheck = isReadyForAutoCapture(
             detection,
             videoWidth,
-            videoHeight,
-            stableCornerChecks,
-            previousDetection
+            videoHeight
         );
 
         let statusMessage = null;
 
         if (readinessCheck.ready && !autoCaptureTriggered) {
+            /*
+                Sheet is correctly positioned. Capture immediately.
+            */
             autoCaptureTriggered = true;
             setCornerDetectionState(
                 true,
                 "Capturing…"
             );
 
+            /* Minimal delay for UI update */
             setTimeout(() => {
                 captureCameraImage(true);
             }, 50);
@@ -1418,21 +1267,24 @@ function monitorCornerBlocks(timestamp) {
             );
             return;
         } else if (readinessCheck.ready) {
+            /* Capture already triggered */
             statusMessage = "Capturing…";
-        } else if (detection) {
+        } else if (!readinessCheck.ready && detection) {
+            /* Corners detected but not properly positioned */
             statusMessage = readinessCheck.reason;
         } else {
-            statusMessage = "Position complete OMR sheet inside frame";
+            /* No detection yet */
+            statusMessage = null;
         }
 
         setCornerDetectionState(
-            stableCornerChecks >= 1 && detection !== null,
+            stableCornerChecks >= 1 && detection,
             statusMessage
         );
 
         drawDocumentBoundary(
             detection?.displayPoints,
-            stableCornerChecks >= 1 && detection !== null
+            stableCornerChecks >= 1 && detection
         );
 
         if (stableCornerChecks >= 1 && detection) {
@@ -1440,6 +1292,9 @@ function monitorCornerBlocks(timestamp) {
             detectedDocumentBounds = detection.sourcePoints;
         }
 
+        /*
+            Track previous frame for movement detection.
+        */
         previousDetection = detection;
     }
 

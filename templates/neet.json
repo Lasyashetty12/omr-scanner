@@ -1,120 +1,67 @@
 {
-    "template_name": "neet",
-    "exam_name": "NEET",
-    "version": 4,
-    "sheet_width": 1600,
-    "sheet_height": 2200,
-    "total_questions": 180,
-    "questions_per_column": 45,
+    "template_name": "jee",
+    "exam_name": "JEE",
+    "version": 1,
+    "sheet_width": 1071,
+    "sheet_height": 1536,
+    "coordinate_system": {
+        "origin": "top_left",
+        "x_axis": "horizontal",
+        "y_axis": "vertical",
+        "units": "pixels",
+        "coordinates_refer_to": "bubble_center"
+    },
+    "bubble_radius": 8,
+    "dark_pixel_threshold": 120,
+    "blank_threshold": 0.18,
+    "filled_threshold": 0.42,
+    "multiple_threshold": 0.42,
     "options": [
         "A",
         "B",
         "C",
         "D"
     ],
-    "bubble_radius": 11,
-    "dark_pixel_threshold": 120,
-    "blank_threshold": 0.18,
-    "filled_threshold": 0.42,
-    "multiple_threshold": 0.42,
-    "columns": [
-        {
-            "A": 218,
-            "B": 257,
-            "C": 291,
-            "D": 326
-        },
-        {
-            "A": 583,
-            "B": 618,
-            "C": 654,
-            "D": 691
-        },
-        {
-            "A": 947,
-            "B": 983,
-            "C": 1020,
-            "D": 1054
-        },
-        {
-            "A": 1312,
-            "B": 1349,
-            "C": 1385,
-            "D": 1419
+    "digit_values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+    ],
+    "alignment_markers": {
+        "enabled": true,
+        "corner_markers": {
+            "top_left": {
+                "x": 40,
+                "y": 93
+            },
+            "top_right": {
+                "x": 1032,
+                "y": 93
+            },
+            "bottom_left": {
+                "x": 22,
+                "y": 1464
+            },
+            "bottom_right": {
+                "x": 1044,
+                "y": 1468
+            }
         }
-    ],
-    "question_y_positions": [
-        824,
-        854,
-        881,
-        911,
-        940,
-        967,
-        997,
-        1026,
-        1054,
-        1084,
-        1113,
-        1140,
-        1170,
-        1199,
-        1227,
-        1256,
-        1286,
-        1313,
-        1342,
-        1371,
-        1400,
-        1429,
-        1458,
-        1485,
-        1515,
-        1544,
-        1572,
-        1602,
-        1629,
-        1658,
-        1688,
-        1716,
-        1745,
-        1774,
-        1801,
-        1831,
-        1860,
-        1888,
-        1918,
-        1947,
-        1974,
-        2003,
-        2033,
-        2061,
-        2090
-    ],
+    },
     "paper_code": {
         "enabled": true,
-        "filled_threshold": 0.35,
-        "minimum_confidence_gap": 0.03,
-        "characters": [
+        "digit_columns": [
             {
-                "type": "letter",
-                "values": [
-                    "A",
-                    "B",
-                    "C",
-                    "D",
-                    "E",
-                    "F",
-                    "G",
-                    "H",
-                    "I",
-                    "J"
-                ],
-                "x": 1323,
-                "start_y": 428,
-                "gap": 31
-            },
-            {
-                "type": "digit",
+                "x": 81,
+                "start_y": 134,
+                "gap": 20.5,
                 "values": [
                     "0",
                     "1",
@@ -126,13 +73,12 @@
                     "7",
                     "8",
                     "9"
-                ],
-                "x": 1361,
-                "start_y": 428,
-                "gap": 31
+                ]
             },
             {
-                "type": "digit",
+                "x": 101,
+                "start_y": 134,
+                "gap": 20.5,
                 "values": [
                     "0",
                     "1",
@@ -144,13 +90,12 @@
                     "7",
                     "8",
                     "9"
-                ],
-                "x": 1400,
-                "start_y": 428,
-                "gap": 31
+                ]
             },
             {
-                "type": "digit",
+                "x": 122,
+                "start_y": 134,
+                "gap": 20.5,
                 "values": [
                     "0",
                     "1",
@@ -162,11 +107,664 @@
                     "7",
                     "8",
                     "9"
-                ],
-                "x": 1439,
-                "start_y": 428,
-                "gap": 31
+                ]
+            },
+            {
+                "x": 143,
+                "start_y": 134,
+                "gap": 20.5,
+                "values": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9"
+                ]
+            },
+            {
+                "x": 164,
+                "start_y": 134,
+                "gap": 20.5,
+                "values": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9"
+                ]
+            },
+            {
+                "x": 184,
+                "start_y": 134,
+                "gap": 20.5,
+                "values": [
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9"
+                ]
             }
         ]
+    },
+    "series": {
+        "enabled": true,
+        "x": 225,
+        "start_y": 153,
+        "gap": 20.5,
+        "values": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+        ]
+    },
+    "sections": {
+        "section_1": {
+            "type": "mcq",
+            "name": "Multiple Choice",
+            "options": [
+                "A",
+                "B",
+                "C",
+                "D"
+            ],
+            "question_y_positions": [
+                291,
+                312,
+                332,
+                353,
+                374,
+                395,
+                416,
+                436,
+                457,
+                477
+            ],
+            "subjects": {
+                "physics": {
+                    "question_ranges": [
+                        {
+                            "start_question": 1,
+                            "end_question": 10,
+                            "columns": {
+                                "A": 267,
+                                "B": 288,
+                                "C": 309,
+                                "D": 329
+                            }
+                        },
+                        {
+                            "start_question": 11,
+                            "end_question": 20,
+                            "columns": {
+                                "A": 392,
+                                "B": 413,
+                                "C": 434,
+                                "D": 455
+                            }
+                        }
+                    ]
+                },
+                "chemistry": {
+                    "question_ranges": [
+                        {
+                            "start_question": 26,
+                            "end_question": 35,
+                            "columns": {
+                                "A": 538,
+                                "B": 560,
+                                "C": 581,
+                                "D": 602
+                            }
+                        },
+                        {
+                            "start_question": 36,
+                            "end_question": 45,
+                            "columns": {
+                                "A": 665,
+                                "B": 687,
+                                "C": 708,
+                                "D": 729
+                            }
+                        }
+                    ]
+                },
+                "mathematics": {
+                    "question_ranges": [
+                        {
+                            "start_question": 51,
+                            "end_question": 60,
+                            "columns": {
+                                "A": 812,
+                                "B": 833,
+                                "C": 854,
+                                "D": 876
+                            }
+                        },
+                        {
+                            "start_question": 61,
+                            "end_question": 70,
+                            "columns": {
+                                "A": 940,
+                                "B": 961,
+                                "C": 981,
+                                "D": 1004
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "section_2": {
+            "type": "numerical",
+            "name": "Numerical Value",
+            "digit_values": [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9"
+            ],
+            "digit_columns": 7,
+            "subjects": {
+                "physics": {
+                    "questions": [
+                        {
+                            "question": 21,
+                            "y_positions": [
+                                563,
+                                584,
+                                605,
+                                626,
+                                647,
+                                668,
+                                689,
+                                710,
+                                731,
+                                752
+                            ],
+                            "columns": {
+                                "digit_1": 116,
+                                "digit_2": 137,
+                                "digit_3": 159,
+                                "digit_4": 180,
+                                "digit_5": 202,
+                                "digit_6": 223,
+                                "digit_7": 244
+                            },
+                            "sign": {
+                                "x": 90,
+                                "y": 761
+                            }
+                        },
+                        {
+                            "question": 22,
+                            "y_positions": [
+                                563,
+                                584,
+                                605,
+                                626,
+                                647,
+                                668,
+                                689,
+                                710,
+                                731,
+                                752
+                            ],
+                            "columns": {
+                                "digit_1": 307,
+                                "digit_2": 328,
+                                "digit_3": 350,
+                                "digit_4": 371,
+                                "digit_5": 392,
+                                "digit_6": 414,
+                                "digit_7": 435
+                            },
+                            "sign": {
+                                "x": 274,
+                                "y": 761
+                            }
+                        },
+                        {
+                            "question": 23,
+                            "y_positions": [
+                                563,
+                                584,
+                                605,
+                                626,
+                                647,
+                                668,
+                                689,
+                                710,
+                                731,
+                                752
+                            ],
+                            "columns": {
+                                "digit_1": 498,
+                                "digit_2": 519,
+                                "digit_3": 540,
+                                "digit_4": 562,
+                                "digit_5": 582,
+                                "digit_6": 603,
+                                "digit_7": 625
+                            },
+                            "sign": {
+                                "x": 460,
+                                "y": 761
+                            }
+                        },
+                        {
+                            "question": 24,
+                            "y_positions": [
+                                563,
+                                584,
+                                605,
+                                626,
+                                647,
+                                668,
+                                689,
+                                710,
+                                731,
+                                752
+                            ],
+                            "columns": {
+                                "digit_1": 687,
+                                "digit_2": 709,
+                                "digit_3": 729,
+                                "digit_4": 751,
+                                "digit_5": 773,
+                                "digit_6": 795,
+                                "digit_7": 816
+                            },
+                            "sign": {
+                                "x": 641,
+                                "y": 761
+                            }
+                        },
+                        {
+                            "question": 25,
+                            "y_positions": [
+                                563,
+                                584,
+                                605,
+                                626,
+                                647,
+                                668,
+                                689,
+                                710,
+                                731,
+                                752
+                            ],
+                            "columns": {
+                                "digit_1": 880,
+                                "digit_2": 901,
+                                "digit_3": 922,
+                                "digit_4": 943,
+                                "digit_5": 965,
+                                "digit_6": 987,
+                                "digit_7": 1008
+                            },
+                            "sign": {
+                                "x": 823,
+                                "y": 761
+                            }
+                        }
+                    ]
+                },
+                "chemistry": {
+                    "questions": [
+                        {
+                            "question": 46,
+                            "y_positions": [
+                                880,
+                                901,
+                                922,
+                                943,
+                                965,
+                                986,
+                                1008,
+                                1030,
+                                1051
+                            ],
+                            "columns": {
+                                "digit_1": 116,
+                                "digit_2": 137,
+                                "digit_3": 159,
+                                "digit_4": 180,
+                                "digit_5": 202,
+                                "digit_6": 223,
+                                "digit_7": 244
+                            },
+                            "sign": {
+                                "x": 88,
+                                "y": 1068
+                            }
+                        },
+                        {
+                            "question": 47,
+                            "y_positions": [
+                                880,
+                                901,
+                                922,
+                                943,
+                                965,
+                                986,
+                                1008,
+                                1030,
+                                1051
+                            ],
+                            "columns": {
+                                "digit_1": 307,
+                                "digit_2": 328,
+                                "digit_3": 350,
+                                "digit_4": 371,
+                                "digit_5": 392,
+                                "digit_6": 414,
+                                "digit_7": 435
+                            },
+                            "sign": {
+                                "x": 274,
+                                "y": 1068
+                            }
+                        },
+                        {
+                            "question": 48,
+                            "y_positions": [
+                                880,
+                                901,
+                                922,
+                                943,
+                                965,
+                                986,
+                                1008,
+                                1030,
+                                1051
+                            ],
+                            "columns": {
+                                "digit_1": 498,
+                                "digit_2": 519,
+                                "digit_3": 540,
+                                "digit_4": 562,
+                                "digit_5": 582,
+                                "digit_6": 603,
+                                "digit_7": 625
+                            },
+                            "sign": {
+                                "x": 460,
+                                "y": 1068
+                            }
+                        },
+                        {
+                            "question": 49,
+                            "y_positions": [
+                                880,
+                                901,
+                                922,
+                                943,
+                                965,
+                                986,
+                                1008,
+                                1030,
+                                1051
+                            ],
+                            "columns": {
+                                "digit_1": 687,
+                                "digit_2": 709,
+                                "digit_3": 729,
+                                "digit_4": 751,
+                                "digit_5": 773,
+                                "digit_6": 795,
+                                "digit_7": 816
+                            },
+                            "sign": {
+                                "x": 641,
+                                "y": 1068
+                            }
+                        },
+                        {
+                            "question": 50,
+                            "y_positions": [
+                                880,
+                                901,
+                                922,
+                                943,
+                                965,
+                                986,
+                                1008,
+                                1030,
+                                1051
+                            ],
+                            "columns": {
+                                "digit_1": 880,
+                                "digit_2": 901,
+                                "digit_3": 922,
+                                "digit_4": 943,
+                                "digit_5": 965,
+                                "digit_6": 987,
+                                "digit_7": 1008
+                            },
+                            "sign": {
+                                "x": 823,
+                                "y": 1068
+                            }
+                        }
+                    ]
+                },
+                "mathematics": {
+                    "questions": [
+                        {
+                            "question": 71,
+                            "y_positions": [
+                                1204,
+                                1226,
+                                1247,
+                                1269,
+                                1291,
+                                1313,
+                                1335,
+                                1357,
+                                1379
+                            ],
+                            "columns": {
+                                "digit_1": 116,
+                                "digit_2": 137,
+                                "digit_3": 159,
+                                "digit_4": 180,
+                                "digit_5": 202,
+                                "digit_6": 223,
+                                "digit_7": 244
+                            },
+                            "sign": {
+                                "x": 84,
+                                "y": 1399
+                            }
+                        },
+                        {
+                            "question": 72,
+                            "y_positions": [
+                                1204,
+                                1226,
+                                1247,
+                                1269,
+                                1291,
+                                1313,
+                                1335,
+                                1357,
+                                1379
+                            ],
+                            "columns": {
+                                "digit_1": 307,
+                                "digit_2": 328,
+                                "digit_3": 350,
+                                "digit_4": 371,
+                                "digit_5": 392,
+                                "digit_6": 414,
+                                "digit_7": 435
+                            },
+                            "sign": {
+                                "x": 274,
+                                "y": 1399
+                            }
+                        },
+                        {
+                            "question": 73,
+                            "y_positions": [
+                                1204,
+                                1226,
+                                1247,
+                                1269,
+                                1291,
+                                1313,
+                                1335,
+                                1357,
+                                1379
+                            ],
+                            "columns": {
+                                "digit_1": 498,
+                                "digit_2": 519,
+                                "digit_3": 540,
+                                "digit_4": 562,
+                                "digit_5": 582,
+                                "digit_6": 604,
+                                "digit_7": 625
+                            },
+                            "sign": {
+                                "x": 460,
+                                "y": 1399
+                            }
+                        },
+                        {
+                            "question": 74,
+                            "y_positions": [
+                                1204,
+                                1226,
+                                1247,
+                                1269,
+                                1291,
+                                1313,
+                                1335,
+                                1357,
+                                1379
+                            ],
+                            "columns": {
+                                "digit_1": 687,
+                                "digit_2": 709,
+                                "digit_3": 729,
+                                "digit_4": 751,
+                                "digit_5": 773,
+                                "digit_6": 795,
+                                "digit_7": 816
+                            },
+                            "sign": {
+                                "x": 641,
+                                "y": 1399
+                            }
+                        },
+                        {
+                            "question": 75,
+                            "y_positions": [
+                                1204,
+                                1226,
+                                1247,
+                                1269,
+                                1291,
+                                1313,
+                                1335,
+                                1357,
+                                1379
+                            ],
+                            "columns": {
+                                "digit_1": 880,
+                                "digit_2": 901,
+                                "digit_3": 922,
+                                "digit_4": 943,
+                                "digit_5": 965,
+                                "digit_6": 987,
+                                "digit_7": 1008
+                            },
+                            "sign": {
+                                "x": 823,
+                                "y": 1399
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "header_fields": {
+        "student_name": {
+            "enabled": false,
+            "type": "handwritten"
+        },
+        "section": {
+            "enabled": false,
+            "type": "text"
+        },
+        "course": {
+            "enabled": false,
+            "type": "text"
+        },
+        "invigilator_name": {
+            "enabled": false,
+            "type": "handwritten"
+        },
+        "date": {
+            "enabled": false,
+            "type": "handwritten"
+        },
+        "candidate_signature": {
+            "enabled": false,
+            "type": "handwritten"
+        },
+        "invigilator_signature": {
+            "enabled": false,
+            "type": "handwritten"
+        }
+    },
+    "numerical_response": {
+        "digit_count": 7,
+        "digit_order": [
+            "digit_1",
+            "digit_2",
+            "digit_3",
+            "digit_4",
+            "digit_5",
+            "digit_6",
+            "digit_7"
+        ],
+        "sign": {
+            "enabled": true,
+            "type": "negative_sign_bubble"
+        },
+        "decimal": {
+            "enabled": false,
+            "type": "none"
+        }
     }
 }
