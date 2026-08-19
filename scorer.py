@@ -461,67 +461,117 @@ def calculate_jee_numerical_score(
 # ============================================================
 
 def calculate_jee_score(
-    detected_mcq_or_full,
-    detected_num_or_key,
-    mcq_answer_key=None,
-    numerical_answer_key=None,
+    detected_mcq,
+    detected_numerical,
+    mcq_answer_key,
+    numerical_answer_key,
     marking=None,
 ):
     """
-    Combine JEE MCQ and numerical scoring. Supports both 2-arg and 4-arg signatures.
+    Combine JEE MCQ and numerical scoring.
+
+    marking example:
+
+    {
+        "mcq_correct": 4,
+        "mcq_wrong": -1,
+        "mcq_blank": 0,
+        "mcq_multiple": -1,
+
+        "numerical_correct": 4,
+        "numerical_wrong": 0,
+        "numerical_blank": 0
+    }
     """
-    if mcq_answer_key is not None and numerical_answer_key is not None:
-        detected_mcq = detected_mcq_or_full
-        detected_numerical = detected_num_or_key
-    else:
-        detected_full = detected_mcq_or_full or {}
-        answer_key_full = detected_num_or_key or {}
-
-        if marking is None:
-            marking = answer_key_full.get("marking", {})
-
-        detected_mcq = detected_full.get("mcq", {})
-        detected_numerical = detected_full.get("numerical", {})
-
-        answers_dict = answer_key_full.get("answers", {})
-        mcq_answer_key = {}
-        numerical_answer_key = {}
-
-        if "mcq" in answers_dict and "numerical" in answers_dict:
-            mcq_answer_key = answers_dict["mcq"]
-            numerical_answer_key = answers_dict["numerical"]
-        else:
-            for q_num, ans in answers_dict.items():
-                try:
-                    q_int = int(q_num)
-                    if (21 <= q_int <= 25) or (46 <= q_int <= 50) or (71 <= q_int <= 75):
-                        numerical_answer_key[str(q_int)] = str(ans)
-                    else:
-                        mcq_answer_key[str(q_int)] = str(ans)
-                except ValueError:
-                    mcq_answer_key[str(q_num)] = str(ans)
 
     if marking is None:
+
         marking = {}
 
-    mcq_result = calculate_jee_mcq_score(
-        detected_answers=detected_mcq,
-        answer_key=mcq_answer_key,
-        correct_marks=marking.get("mcq_correct", marking.get("correct", 4)),
-        wrong_marks=marking.get("mcq_wrong", marking.get("wrong", -1)),
-        blank_marks=marking.get("mcq_blank", marking.get("blank", 0)),
-        multiple_marks=marking.get("mcq_multiple", marking.get("multiple", -1)),
+
+    # --------------------------------------------------------
+    # MCQ
+    # --------------------------------------------------------
+
+    mcq_result = (
+        calculate_jee_mcq_score(
+
+            detected_answers=
+                detected_mcq,
+
+            answer_key=
+                mcq_answer_key,
+
+            correct_marks=
+                marking.get(
+                    "mcq_correct",
+                    4,
+                ),
+
+            wrong_marks=
+                marking.get(
+                    "mcq_wrong",
+                    -1,
+                ),
+
+            blank_marks=
+                marking.get(
+                    "mcq_blank",
+                    0,
+                ),
+
+            multiple_marks=
+                marking.get(
+                    "mcq_multiple",
+                    -1,
+                ),
+        )
     )
 
-    numerical_result = calculate_jee_numerical_score(
-        detected_answers=detected_numerical,
-        answer_key=numerical_answer_key,
-        correct_marks=marking.get("numerical_correct", marking.get("correct", 4)),
-        wrong_marks=marking.get("numerical_wrong", 0),
-        blank_marks=marking.get("numerical_blank", marking.get("blank", 0)),
+
+    # --------------------------------------------------------
+    # NUMERICAL
+    # --------------------------------------------------------
+
+    numerical_result = (
+        calculate_jee_numerical_score(
+
+            detected_answers=
+                detected_numerical,
+
+            answer_key=
+                numerical_answer_key,
+
+            correct_marks=
+                marking.get(
+                    "numerical_correct",
+                    4,
+                ),
+
+            wrong_marks=
+                marking.get(
+                    "numerical_wrong",
+                    0,
+                ),
+
+            blank_marks=
+                marking.get(
+                    "numerical_blank",
+                    0,
+                ),
+        )
     )
 
-    total_score = mcq_result["score"] + numerical_result["score"]
+
+    total_score = (
+        mcq_result[
+            "score"
+        ]
+        +
+        numerical_result[
+            "score"
+        ]
+    )
 
 
     return {

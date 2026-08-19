@@ -224,30 +224,59 @@
     },
     "paper_code": {
         "enabled": true,
-        "filled_threshold": 0.30,
-        "blank_threshold": 0.15,
-        "characters": [
+        "type": "7_digit",
+        "values": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9"
+        ],
+        "columns": [
             {
-                "x": 168,
-                "start_y": 25,
-                "gap": 19,
-                "values": [
-                    "A",
-                    "B",
-                    "C",
-                    "D",
-                    "E",
-                    "F",
-                    "G",
-                    "H",
-                    "I",
-                    "J"
-                ]
+                "x": 101,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 124,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 147,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 170,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 193,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 216,
+                "start_y": 157,
+                "gap": 17
+            },
+            {
+                "x": 239,
+                "start_y": 157,
+                "gap": 17
             }
         ]
     },
     "series": {
-        "enabled": false,
+        "enabled": true,
         "values": [
             "A",
             "B",
@@ -260,17 +289,7 @@
         ],
         "x": 272,
         "start_y": 157,
-        "gap": 20,
-        "coordinates": {
-            "A": [272, 157],
-            "B": [272, 177],
-            "C": [272, 197],
-            "D": [272, 217],
-            "E": [272, 237],
-            "F": [272, 257],
-            "G": [272, 277],
-            "H": [272, 297]
-        }
+        "gap": 20
     },
     "scan_guidance": {
         "page_detection": "Use the four large solid corner squares as primary document anchors.",

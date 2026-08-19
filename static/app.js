@@ -206,11 +206,6 @@ const successState =
         "successState"
     );
 
-const navDashboardBtn =
-    document.getElementById(
-        "navDashboardBtn"
-    );
-
 const viewResultButton =
     document.getElementById(
         "viewResultButton"
@@ -876,49 +871,23 @@ function hasExcessiveMovement(
 function isReadyForAutoCapture(
     detection,
     videoWidth,
-    videoHeight,
-    previousDetection
+    videoHeight
 ) {
-    if (!detection || !detection.sourcePoints || detection.sourcePoints.length < 4) {
+    /*
+        Auto-capture should trigger when the black corner registration blocks
+        are detected, not when the whole sheet geometry is perfectly aligned.
+    */
+
+    if (!detection || !detection.sourcePoints) {
         return {
             ready: false,
-            reason: "Looking for four corner blocks…"
-        };
-    }
-
-    const sourcePoints = detection.sourcePoints;
-
-    if (!isCompleteSheetInFrame(sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Position complete OMR sheet inside frame"
-        };
-    }
-
-    if (!isSheetReasonablyAligned(sourcePoints)) {
-        return {
-            ready: false,
-            reason: "Hold camera straight (sheet tilted)"
-        };
-    }
-
-    if (!isSheetLargeEnough(sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Move camera closer to OMR sheet"
-        };
-    }
-
-    if (hasExcessiveMovement(detection, previousDetection)) {
-        return {
-            ready: false,
-            reason: "Hold steady…"
+            reason: "No black corner boxes detected"
         };
     }
 
     return {
         ready: true,
-        reason: "Valid four-corner OMR detected — hold steady"
+        reason: "Black corner boxes detected"
     };
 }
 
@@ -1260,6 +1229,10 @@ function monitorCornerBlocks(timestamp) {
 
         const detection = detectDocumentCorners();
 
+        stableCornerChecks = detection
+            ? stableCornerChecks + 1
+            : 0;
+
         const videoWidth = camera.videoWidth;
         const videoHeight = camera.videoHeight;
 
@@ -1269,22 +1242,15 @@ function monitorCornerBlocks(timestamp) {
         const readinessCheck = isReadyForAutoCapture(
             detection,
             videoWidth,
-            videoHeight,
-            previousDetection
+            videoHeight
         );
-
-        const REQUIRED_STABLE_CHECKS = 5; // 5 * 250ms = ~1.25 seconds of continuous valid stability
-
-        if (readinessCheck.ready && detection) {
-            stableCornerChecks += 1;
-        } else {
-            // Reset stability timer if corner detection or geometry validation fails at any point
-            stableCornerChecks = 0;
-        }
 
         let statusMessage = null;
 
-        if (readinessCheck.ready && stableCornerChecks >= REQUIRED_STABLE_CHECKS && !autoCaptureTriggered) {
+        if (readinessCheck.ready && !autoCaptureTriggered) {
+            /*
+                Sheet is correctly positioned. Capture immediately.
+            */
             autoCaptureTriggered = true;
             setCornerDetectionState(
                 true,
@@ -1300,32 +1266,30 @@ function monitorCornerBlocks(timestamp) {
                 monitorCornerBlocks
             );
             return;
-        } else if (autoCaptureTriggered) {
-            statusMessage = "Capturing…";
         } else if (readinessCheck.ready) {
-            const pct = Math.min(100, Math.round((stableCornerChecks / REQUIRED_STABLE_CHECKS) * 100));
-            statusMessage = `OMR detected — hold steady (${pct}%)`;
-        } else if (detection) {
+            /* Capture already triggered */
+            statusMessage = "Capturing…";
+        } else if (!readinessCheck.ready && detection) {
+            /* Corners detected but not properly positioned */
             statusMessage = readinessCheck.reason;
         } else {
-            statusMessage = "Position the complete OMR inside the frame";
+            /* No detection yet */
+            statusMessage = null;
         }
 
         setCornerDetectionState(
-            readinessCheck.ready && detection !== null,
+            stableCornerChecks >= 1 && detection,
             statusMessage
         );
 
         drawDocumentBoundary(
             detection?.displayPoints,
-            readinessCheck.ready && detection !== null
+            stableCornerChecks >= 1 && detection
         );
 
-        if (readinessCheck.ready && detection) {
+        if (stableCornerChecks >= 1 && detection) {
 
             detectedDocumentBounds = detection.sourcePoints;
-        } else {
-            detectedDocumentBounds = null;
         }
 
         /*
@@ -2364,8 +2328,6 @@ async function scanOMR() {
                 response
             );
 
-        const resObj = data.result || data;
-        const savedResultId = resObj.id || resObj.scan_id;
 
         displayResult(
             data,
@@ -2375,16 +2337,6 @@ async function scanOMR() {
         showSuccessState();
         hideResult();
         hideDashboard();
-
-        // Refresh dashboard so newly evaluated OMR appears immediately
-        fetchAndRenderDashboard();
-
-        if (viewResultButton && savedResultId) {
-            viewResultButton.onclick = () => {
-                openIndividualResult(savedResultId);
-            };
-        }
-
         if (successState) {
             successState.scrollIntoView({ behavior: "smooth" });
         }
@@ -2425,15 +2377,6 @@ async function scanOMR() {
 /* ==========================================================
    EVENTS
    ========================================================== */
-
-if (
-    navDashboardBtn
-) {
-    navDashboardBtn.addEventListener(
-        "click",
-        openResultDashboard
-    );
-}
 
 if (
     openCameraButton

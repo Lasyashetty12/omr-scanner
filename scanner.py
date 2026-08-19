@@ -1334,36 +1334,13 @@ def detect_corner_markers(
     - brightness / white-paper fraction
     - candidate size
 
-    Supports full-frame capture, pre-cropped scans, low-contrast table backgrounds,
-    and high area ratios up to 99.5%.
+    This prevents the laptop screen, browser frame, table, or the
+    complete camera frame from being mistaken for the OMR sheet.
     """
-
-    if image is None or image.size == 0:
-        raise ValueError("Empty image.")
 
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY,
-    )
-
-    image_height, image_width = gray.shape[:2]
-
-    image_area = float(
-        image_height
-        * image_width
-    )
-
-    expected_width = float(
-        template.get("sheet_width", 1600)
-    )
-
-    expected_height = float(
-        template.get("sheet_height", 2200)
-    )
-
-    expected_ratio = (
-        expected_width
-        / expected_height
     )
 
     blurred = cv2.GaussianBlur(
@@ -1372,268 +1349,248 @@ def detect_corner_markers(
         0,
     )
 
-    # Mask 1: Canny edges with morphological closure
     edges = cv2.Canny(
         blurred,
-        35,
-        140,
+        40,
+        150,
     )
 
-    kernel_edge = cv2.getStructuringElement(
+    kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
-        (7, 7),
+        (5, 5),
     )
 
     edges = cv2.morphologyEx(
         edges,
         cv2.MORPH_CLOSE,
-        kernel_edge,
+        kernel,
         iterations=2,
     )
 
-    # Mask 2: Otsu binary thresholding for bright paper on light/low-contrast background
-    _, white = cv2.threshold(
-        blurred,
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    contours, _ = cv2.findContours(
+        edges,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE,
     )
 
-    kernel_white = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (15, 15),
+    if not contours:
+        raise ValueError(
+            "Could not detect OMR sheet."
+        )
+
+    image_height, image_width = image.shape[:2]
+
+    image_area = float(
+        image_height
+        * image_width
     )
 
-    white = cv2.morphologyEx(
-        white,
-        cv2.MORPH_CLOSE,
-        kernel_white,
-        iterations=2,
+    expected_width = float(
+        template["sheet_width"]
+    )
+
+    expected_height = float(
+        template["sheet_height"]
+    )
+
+    expected_ratio = (
+        expected_width
+        / expected_height
     )
 
     best_candidate = None
     best_score = -1.0
 
-    for mask in (edges, white):
+    contours = sorted(
+        contours,
+        key=cv2.contourArea,
+        reverse=True,
+    )
 
-        contours, _ = cv2.findContours(
-            mask,
-            cv2.RETR_LIST,
-            cv2.CHAIN_APPROX_SIMPLE,
+    for contour in contours[:150]:
+
+        area = float(
+            cv2.contourArea(
+                contour
+            )
         )
 
-        if not contours:
+        area_ratio = (
+            area
+            / image_area
+        )
+
+        # The paper may occupy only part of the mobile frame.
+        if area_ratio < 0.06:
             continue
 
-        contours = sorted(
-            contours,
-            key=cv2.contourArea,
-            reverse=True,
+        # Never accept almost the entire camera frame.
+        if area_ratio > 0.92:
+            continue
+
+        perimeter = cv2.arcLength(
+            contour,
+            True,
         )
 
-        for contour in contours[:120]:
+        if perimeter <= 0:
+            continue
 
-            area = float(
-                cv2.contourArea(
-                    contour
-                )
-            )
+        for epsilon_factor in (
+            0.01,
+            0.015,
+            0.02,
+            0.025,
+            0.03,
+        ):
 
-            area_ratio = (
-                area
-                / image_area
-            )
-
-            # The paper may occupy part of the frame, or fill almost all of it.
-            if area_ratio < 0.05:
-                continue
-
-            # Allow paper to fill up to 99.5% of the frame (e.g. close-up photos).
-            if area_ratio > 0.995:
-                continue
-
-            hull = cv2.convexHull(contour)
-            perimeter = cv2.arcLength(
-                hull,
+            approx = cv2.approxPolyDP(
+                contour,
+                epsilon_factor
+                * perimeter,
                 True,
             )
 
-            if perimeter <= 0:
+            if len(approx) != 4:
                 continue
 
-            quad_candidates = []
+            points = (
+                approx
+                .reshape(4, 2)
+                .astype("float32")
+            )
 
-            for epsilon_factor in (
-                0.008,
-                0.01,
-                0.015,
-                0.02,
-                0.025,
-                0.03,
-                0.04,
-                0.05,
+            ordered = order_points(
+                points
+            )
+
+            tl, tr, br, bl = ordered
+
+            top_width = float(
+                np.linalg.norm(
+                    tr - tl
+                )
+            )
+
+            bottom_width = float(
+                np.linalg.norm(
+                    br - bl
+                )
+            )
+
+            left_height = float(
+                np.linalg.norm(
+                    bl - tl
+                )
+            )
+
+            right_height = float(
+                np.linalg.norm(
+                    br - tr
+                )
+            )
+
+            average_width = (
+                top_width
+                + bottom_width
+            ) / 2.0
+
+            average_height = (
+                left_height
+                + right_height
+            ) / 2.0
+
+            if (
+                average_width <= 0
+                or average_height <= 0
             ):
+                continue
 
-                approx = cv2.approxPolyDP(
-                    hull,
-                    epsilon_factor
-                    * perimeter,
-                    True,
+            ratio = (
+                average_width
+                / average_height
+            )
+
+            # Allow perspective variation around the template ratio.
+            if not (
+                expected_ratio * 0.68
+                <= ratio
+                <= expected_ratio * 1.35
+            ):
+                continue
+
+            mask = np.zeros(
+                gray.shape,
+                dtype=np.uint8,
+            )
+
+            polygon = (
+                ordered
+                .astype(np.int32)
+                .reshape((-1, 1, 2))
+            )
+
+            cv2.fillConvexPoly(
+                mask,
+                polygon,
+                255,
+            )
+
+            pixels = gray[
+                mask > 0
+            ]
+
+            if pixels.size == 0:
+                continue
+
+            mean_brightness = float(
+                np.mean(
+                    pixels
                 )
+            )
 
-                if len(approx) == 4:
-                    quad_candidates.append(
-                        (
-                            approx
-                            .reshape(4, 2)
-                            .astype("float32"),
-                            "poly",
-                        )
-                    )
-
-            rect = cv2.minAreaRect(hull)
-            box = cv2.boxPoints(rect).astype("float32")
-            quad_candidates.append((box, "min_area_rect"))
-
-            for pts, cand_type in quad_candidates:
-
-                ordered = order_points(pts)
-                tl, tr, br, bl = ordered
-
-                top_width = float(
-                    np.linalg.norm(tr - tl)
+            white_fraction = float(
+                np.mean(
+                    pixels > 150
                 )
+            )
 
-                bottom_width = float(
-                    np.linalg.norm(br - bl)
-                )
+            ratio_error = abs(
+                ratio
+                - expected_ratio
+            )
 
-                left_height = float(
-                    np.linalg.norm(bl - tl)
-                )
+            ratio_score = max(
+                0.0,
+                1.0
+                - (
+                    ratio_error
+                    / expected_ratio
+                ),
+            )
 
-                right_height = float(
-                    np.linalg.norm(br - tr)
-                )
+            brightness_score = (
+                mean_brightness
+                / 255.0
+            )
 
-                average_width = (
-                    top_width
-                    + bottom_width
-                ) / 2.0
+            size_score = min(
+                area_ratio / 0.40,
+                1.0,
+            )
 
-                average_height = (
-                    left_height
-                    + right_height
-                ) / 2.0
+            score = (
+                ratio_score * 4.0
+                + white_fraction * 4.0
+                + brightness_score * 2.0
+                + size_score
+            )
 
-                if (
-                    average_width <= 0
-                    or average_height <= 0
-                ):
-                    continue
+            if score > best_score:
+                best_score = score
+                best_candidate = ordered
 
-                ratio = (
-                    average_width
-                    / average_height
-                )
-
-                # Allow perspective variation around the template ratio.
-                if not (
-                    expected_ratio * 0.45
-                    <= ratio
-                    <= expected_ratio * 1.50
-                ):
-                    continue
-
-                mask_poly = np.zeros(
-                    gray.shape,
-                    dtype=np.uint8,
-                )
-
-                polygon = (
-                    ordered
-                    .astype(np.int32)
-                    .reshape((-1, 1, 2))
-                )
-
-                cv2.fillConvexPoly(
-                    mask_poly,
-                    polygon,
-                    255,
-                )
-
-                pixels = gray[
-                    mask_poly > 0
-                ]
-
-                if pixels.size == 0:
-                    continue
-
-                mean_brightness = float(
-                    np.mean(
-                        pixels
-                    )
-                )
-
-                white_fraction = float(
-                    np.mean(
-                        pixels > 130
-                    )
-                )
-
-                ratio_error = abs(
-                    ratio
-                    - expected_ratio
-                )
-
-                ratio_score = max(
-                    0.0,
-                    1.0
-                    - (
-                        ratio_error
-                        / expected_ratio
-                    ),
-                )
-
-                brightness_score = (
-                    mean_brightness
-                    / 255.0
-                )
-
-                size_score = min(
-                    area_ratio / 0.40,
-                    1.0,
-                )
-
-                score = (
-                    ratio_score * 4.0
-                    + white_fraction * 4.0
-                    + brightness_score * 2.0
-                    + size_score
-                )
-
-                if cand_type == "min_area_rect":
-                    score -= 0.15
-
-                if score > best_score:
-                    best_score = score
-                    best_candidate = ordered
-
-    # Fallback to full frame bounds if image itself is a cropped/full-frame OMR sheet
-    if best_candidate is None:
-        full_frame_ratio = float(image_width) / float(image_height)
-        if expected_ratio * 0.45 <= full_frame_ratio <= expected_ratio * 1.50:
-            frame_white_fraction = float(np.mean(gray > 130))
-            if frame_white_fraction > 0.35:
-                best_candidate = np.array(
-                    [
-                        [0.0, 0.0],
-                        [float(image_width - 1), 0.0],
-                        [float(image_width - 1), float(image_height - 1)],
-                        [0.0, float(image_height - 1)],
-                    ],
-                    dtype="float32",
-                )
+            break
 
     if best_candidate is None:
         raise ValueError(
@@ -3078,9 +3035,19 @@ def draw_answer_analysis(
     Projects canonical coordinates back onto original_image when provided.
     """
 
-    debug_image = corrected_image.copy()
-    scale_ratio = 1.0
     inv_homography = None
+    if original_image is not None and homography is not None:
+        try:
+            inv_homography = np.linalg.inv(homography)
+            debug_image = original_image.copy()
+            scale_ratio = max(original_image.shape[:2]) / 1600.0
+        except Exception:
+            inv_homography = None
+            debug_image = corrected_image.copy()
+            scale_ratio = 1.0
+    else:
+        debug_image = corrected_image.copy()
+        scale_ratio = 1.0
 
     # Reduced bubble and pin point radius for subtle, compact indicators
     base_radius = max(3.0, float(template.get("bubble_radius", 11)) - 6.0)
@@ -3140,31 +3107,79 @@ def draw_answer_analysis(
         answer_record,
         option_label,
     ):
-        if not isinstance(answer_record, dict):
-            return None
-
-        center = None
-        ml_details = answer_record.get("ml", {})
-        if isinstance(ml_details, dict):
-            option_details = ml_details.get("options", {}).get(option_label, {})
-            center = (
-                option_details.get("draw_center")
-                or option_details.get("crop_center")
-                or option_details.get("calibrated_center")
+        ml_details = (
+            answer_record.get(
+                "ml",
+                {},
             )
+            if isinstance(
+                answer_record,
+                dict,
+            )
+            else {}
+        )
 
-        if center is None:
-            coords = answer_record.get("coordinates", {})
-            if isinstance(coords, dict):
-                center = coords.get(option_label)
+        option_details = (
+            ml_details.get(
+                "options",
+                {},
+            ).get(
+                option_label,
+                {},
+            )
+        )
 
-        if not isinstance(center, (list, tuple)) or len(center) != 2:
+        center = (
+            option_details.get(
+                "draw_center"
+            )
+            or
+            option_details.get(
+                "crop_center"
+            )
+            or
+            option_details.get(
+                "calibrated_center"
+            )
+        )
+
+        if (
+            not isinstance(
+                center,
+                (list, tuple),
+            )
+            or
+            len(
+                center
+            ) != 2
+        ):
             return None
 
-        cx = int(round(float(center[0])))
-        cy = int(round(float(center[1])))
+        cx = int(
+            round(
+                float(
+                    center[
+                        0
+                    ]
+                )
+            )
+        )
 
-        if response_y_min > 0 and (cy < response_y_min or cy > response_y_max):
+        cy = int(
+            round(
+                float(
+                    center[
+                        1
+                    ]
+                )
+            )
+        )
+
+        # Do not draw any accidental candidate below/above response grid.
+        if (
+            cy < response_y_min
+            or cy > response_y_max
+        ):
             return None
 
         def transform_pt(x_c, y_c):
@@ -3225,40 +3240,6 @@ def draw_answer_analysis(
                 ),
             )
         ).lower()
-
-        # Handle Numerical Question Grid Overlay
-        cols_config = answer_record.get("columns_config", [])
-        cols_info = answer_record.get("columns", [])
-        if cols_config:
-            for c_idx, col_cfg in enumerate(cols_config):
-                x_col = col_cfg.get("x")
-                s_y = col_cfg.get("start_y")
-                g_val = col_cfg.get("gap", 5)
-                vals = col_cfg.get("values", [str(i) for i in range(10)])
-
-                col_detected_val = ""
-                if c_idx < len(cols_info):
-                    col_detected_val = cols_info[c_idx].get("value", "")
-
-                for r_idx, val_str in enumerate(vals):
-                    b_x = x_col
-                    b_y = s_y + r_idx * g_val
-                    c_pt = (int(b_x), int(b_y))
-                    if inv_homography is not None:
-                        pt = np.array([b_x, b_y, 1.0], dtype=np.float64)
-                        opt = inv_homography @ pt
-                        if opt[2] != 0:
-                            c_pt = (int(round(opt[0] / opt[2])), int(round(opt[1] / opt[2])))
-
-                    # Draw neutral ring & dot
-                    cv2.circle(debug_image, c_pt, dot_radius, (0, 165, 255), -1, lineType=cv2.LINE_AA)
-                    cv2.circle(debug_image, c_pt, bubble_radius, (180, 180, 180), line_thick, lineType=cv2.LINE_AA)
-
-                    # Highlight filled digit in GREEN
-                    if col_detected_val and val_str == col_detected_val:
-                        cv2.circle(debug_image, c_pt, bubble_radius, (0, 255, 0), ring_thick, lineType=cv2.LINE_AA)
-
-            continue
 
         # Draw a small neutral ring and exact pin dot for all A/B/C/D.
         for option_label in option_order:
@@ -3419,23 +3400,14 @@ def detect_paper_code(
     characters = (
         paper_code_config.get(
             "characters",
-            paper_code_config.get(
-                "columns",
-                [],
-            ),
+            [],
         )
     )
 
     if not characters:
-        return {
-            "paper_code": "A",
-            "characters": [],
-        }
-
-    default_values = paper_code_config.get(
-        "values",
-        ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
-    )
+        raise ValueError(
+            "Paper code character coordinates are missing."
+        )
 
     detected_characters = []
 
@@ -3465,10 +3437,9 @@ def detect_paper_code(
         )
 
         values = (
-            character_config.get(
-                "values",
-                default_values,
-            )
+            character_config[
+                "values"
+            ]
         )
 
         scores = {}
@@ -3504,20 +3475,30 @@ def detect_paper_code(
         )
 
         if not ranked:
-            best_value = "A"
-            best_score = 0.0
-            second_score = 0.0
-        else:
-            best_value = ranked[0][0]
-            best_score = float(ranked[0][1])
-            second_score = float(ranked[1][1] if len(ranked) > 1 else 0.0)
+            raise ValueError(
+                f"Could not detect paper code position {position_index}."
+            )
+
+        best_value = (
+            ranked[0][0]
+        )
+
+        best_score = float(
+            ranked[0][1]
+        )
+
+        second_score = float(
+            ranked[1][1]
+            if len(ranked) > 1
+            else 0
+        )
 
         threshold = float(
             paper_code_config.get(
                 "filled_threshold",
                 template.get(
                     "filled_threshold",
-                    0.30,
+                    0.50,
                 ),
             )
         )
@@ -3525,16 +3506,42 @@ def detect_paper_code(
         confidence_gap_required = float(
             paper_code_config.get(
                 "minimum_confidence_gap",
-                0.02,
+                0.05,
             )
         )
 
-        confidence_gap = float(best_score - second_score)
+        if (
+            best_score
+            < threshold
+        ):
+            raise ValueError(
+                "Question paper code could not be detected "
+                f"at position {position_index}."
+            )
 
-        if best_score < threshold:
-            logger.warning(
-                "Paper code low confidence at position %d: best=%s, score=%.4f (threshold=%.4f). Defaulting to best match.",
-                position_index, best_value, best_score, threshold
+        confidence_gap = (
+            best_score
+            - second_score
+        )
+
+        if (
+            confidence_gap
+            < confidence_gap_required
+        ):
+            readable_scores = ", ".join(
+                f"{key}={float(value):.4f}"
+                for key, value
+                in scores.items()
+            )
+
+            raise ValueError(
+                "Question paper code is ambiguous "
+                f"at position {position_index}. "
+                f"Best={best_value} "
+                f"score={best_score:.4f}, "
+                f"second={second_score:.4f}, "
+                f"gap={confidence_gap:.4f}. "
+                f"Scores: {readable_scores}"
             )
 
         detected_characters.append(
@@ -3608,11 +3615,9 @@ def detect_jee_series(
         "enabled",
         False,
     ):
-        return {
-            "value": "A",
-            "score": 1.0,
-            "confidence_gap": 1.0,
-        }
+        raise ValueError(
+            "JEE series detection is disabled."
+        )
 
     coordinates = (
         series_config.get(
@@ -3620,21 +3625,6 @@ def detect_jee_series(
             {},
         )
     )
-
-    if not coordinates:
-        if (
-            "x" in series_config
-            and "start_y" in series_config
-            and "gap" in series_config
-            and "values" in series_config
-        ):
-            coordinates = {
-                str(val): [
-                    int(series_config["x"]),
-                    int(series_config["start_y"] + idx * series_config["gap"]),
-                ]
-                for idx, val in enumerate(series_config["values"])
-            }
 
     if not coordinates:
         raise ValueError(
@@ -3775,65 +3765,107 @@ def scan_jee_mcq_sections(
         corrected_image
     )
 
-    detected = {}
-
-    # Format 1: top-level mcq_sections list
-    sections_list = template.get(
-        "mcq_sections",
-        [],
+    sections = (
+        template.get(
+            "mcq_sections",
+            [],
+        )
     )
 
-    for section in sections_list:
-        start_question = int(section["start_question"])
-        total_questions = int(section["total_questions"])
-        start_y = int(section["start_y"])
-        row_gap = int(section["row_gap"])
-        options = section.get("options", ["A", "B", "C", "D"])
-        option_x = section["option_x"]
+    detected = {}
 
-        for row_index in range(total_questions):
-            question_number = start_question + row_index
-            y = start_y + row_index * row_gap
+    for section in sections:
+
+        start_question = int(
+            section[
+                "start_question"
+            ]
+        )
+
+        total_questions = int(
+            section[
+                "total_questions"
+            ]
+        )
+
+        start_y = int(
+            section[
+                "start_y"
+            ]
+        )
+
+        row_gap = int(
+            section[
+                "row_gap"
+            ]
+        )
+
+        options = (
+            section.get(
+                "options",
+                [
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                ],
+            )
+        )
+
+        option_x = (
+            section[
+                "option_x"
+            ]
+        )
+
+        for row_index in range(
+            total_questions
+        ):
+
+            question_number = (
+                start_question
+                +
+                row_index
+            )
+
+            y = (
+                start_y
+                +
+                row_index
+                *
+                row_gap
+            )
+
             coordinates = {}
-            for option in options:
-                coordinates[option] = (int(option_x[option]), int(y))
 
-            temporary_template = template.copy()
-            temporary_template["options"] = options
-            detected[question_number] = detect_question_answer(
+            for option in options:
+
+                coordinates[
+                    option
+                ] = (
+                    int(
+                        option_x[
+                            option
+                        ]
+                    ),
+                    int(y),
+                )
+
+            temporary_template = (
+                template.copy()
+            )
+
+            temporary_template[
+                "options"
+            ] = options
+
+            detected[
+                question_number
+            ] = detect_question_answer(
                 gray,
                 coordinates,
                 temporary_template,
             )
-
-    # Format 2: template["sections"] object (e.g. jee.json)
-    sections_dict = template.get("sections", {})
-    options_default = list(template.get("options", ["A", "B", "C", "D"]))
-
-    for sec_key, sec_val in sections_dict.items():
-        if not isinstance(sec_val, dict):
-            continue
-        if sec_val.get("type") == "mcq":
-            subjects = sec_val.get("subjects", {})
-            for subj_key, subj_val in subjects.items():
-                start_q = int(subj_val.get("start_question", 1))
-                cols = subj_val.get("columns", {})
-                y_positions = subj_val.get("question_y_positions", [])
-
-                for idx, y in enumerate(y_positions):
-                    q_num = start_q + idx
-                    coords = {}
-                    for opt in options_default:
-                        if opt in cols:
-                            coords[opt] = (int(cols[opt]), int(y))
-                    if coords:
-                        temp_tpl = template.copy()
-                        temp_tpl["options"] = options_default
-                        detected[q_num] = detect_question_answer(
-                            gray,
-                            coords,
-                            temp_tpl,
-                        )
 
     return detected
 
@@ -4073,65 +4105,39 @@ def scan_jee_numerical_sections(
         corrected_image
     )
 
-    detected = {}
-
-    # Format 1: top-level numerical_sections list
-    sections_list = template.get(
-        "numerical_sections",
-        [],
+    sections = (
+        template.get(
+            "numerical_sections",
+            [],
+        )
     )
 
-    for section in sections_list:
-        questions = section.get("questions", [])
+    detected = {}
+
+    for section in sections:
+
+        questions = (
+            section.get(
+                "questions",
+                []
+            )
+        )
+
         for question in questions:
-            question_number = int(question["question"])
-            detected[question_number] = detect_numerical_value(
+
+            question_number = int(
+                question[
+                    "question"
+                ]
+            )
+
+            detected[
+                question_number
+            ] = detect_numerical_value(
                 gray,
                 question,
                 template,
             )
-
-    # Format 2: template["sections"] object (e.g. jee.json)
-    sections_dict = template.get("sections", {})
-    for sec_key, sec_val in sections_dict.items():
-        if not isinstance(sec_val, dict):
-            continue
-        if sec_val.get("type") == "numerical":
-            digit_values = sec_val.get("digit_values", [str(i) for i in range(10)])
-            col_dict = sec_val.get("columns", {})
-            digit_cols = []
-            for col_name, x_pos in sorted(col_dict.items(), key=lambda item: item[1]):
-                if col_name == "sign":
-                    continue
-                digit_cols.append(int(x_pos))
-
-            subjects = sec_val.get("subjects", {})
-            for subj_key, subj_val in subjects.items():
-                start_q = int(subj_val.get("start_question", 21))
-                y_positions = subj_val.get("question_y_positions", [])
-
-                for idx, y in enumerate(y_positions):
-                    q_num = start_q + idx
-
-                    columns_config = []
-                    for x_col in digit_cols:
-                        columns_config.append({
-                            "x": x_col,
-                            "start_y": int(y),
-                            "gap": 5,
-                            "values": digit_values,
-                        })
-
-                    q_config = {
-                        "question": q_num,
-                        "columns": columns_config,
-                    }
-
-                    detected[q_num] = detect_numerical_value(
-                        gray,
-                        q_config,
-                        template,
-                    )
 
     return detected
 
@@ -4309,22 +4315,37 @@ def create_debug_image(
     if exam_name in [
         "NEET",
         "KCET",
-        "JEE",
     ]:
-        flat_answers = {}
-        if isinstance(answers, dict) and ("mcq" in answers or "numerical" in answers):
-            flat_answers.update(answers.get("mcq", {}))
-            flat_answers.update(answers.get("numerical", {}))
-        else:
-            flat_answers = answers
-
         return draw_answer_analysis(
             corrected_image,
             template,
-            flat_answers,
-            original_image=original_image,
-            homography=homography,
+            answers,
         )
+
+    elif exam_name == "JEE":
+
+        # JEE debug drawing can be expanded
+        # once exact MCQ and numerical coordinates
+        # are calibrated.
+
+        cv2.putText(
+            debug,
+            "JEE TEMPLATE",
+            (
+                20,
+                40,
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (
+                0,
+                0,
+                255,
+            ),
+            2,
+        )
+
+    return debug
 
 
 # ============================================================
@@ -4454,7 +4475,6 @@ def process_omr(
     if template_exam_name in [
         "NEET",
         "KCET",
-        "JEE",
     ]:
 
         project_dir = os.path.dirname(
@@ -4476,8 +4496,6 @@ def process_omr(
             else None
         )
 
-        is_jee = (template_exam_name == "JEE")
-
         corrected, alignment_debug = (
             canonicalize_omr(
                 image=image,
@@ -4486,8 +4504,8 @@ def process_omr(
                     int(template["sheet_width"]),
                     int(template["sheet_height"]),
                 ),
-                use_orb=not is_jee,
-                use_ecc=not is_jee,
+                use_orb=True,
+                use_ecc=True,
                 ecc_minimum_score=0.75,
                 debug_dir=local_debug_dir,
             )
@@ -4823,17 +4841,7 @@ def process_omr(
 
     elif exam_name == "JEE":
 
-        # Scan paper code if configured
-        if template.get("paper_code", {}).get("enabled", False):
-            try:
-                paper_code = detect_paper_code(
-                    gray,
-                    template,
-                )
-            except Exception as pc_err:
-                logger.warning("JEE paper code detection warning: %s", pc_err)
-
-        # Scan series
+        # Scan series first
         jee_series = (
             detect_jee_series(
                 gray,
@@ -4893,35 +4901,29 @@ def process_omr(
     #
     # The clean reference image is NOT blended into this image and is
     # NOT used for answer decisions. It is only used earlier for geometry.
-    detailed_debug = None
-    if exam_name in [
-        "NEET",
-        "KCET",
-        "JEE",
-    ]:
-        flat_answers = {}
-        if isinstance(answers, dict) and ("mcq" in answers or "numerical" in answers):
-            flat_answers.update(answers.get("mcq", {}))
-            flat_answers.update(answers.get("numerical", {}))
-        else:
-            flat_answers = answers
-
-        detailed_debug = (
-            draw_answer_analysis(
-                corrected,
-                template,
-                flat_answers,
-                original_image=image,
-                homography=homography,
-            )
-        )
-
-    if not os.environ.get("VERCEL"):
+    if not os.environ.get(
+        "VERCEL"
+    ):
         cv2.imwrite(
             "debug_omr.jpg",
             debug,
         )
-        if detailed_debug is not None:
+
+        # Keep the more detailed colored analysis image as well.
+        if exam_name in [
+            "NEET",
+            "KCET",
+        ]:
+            detailed_debug = (
+                draw_answer_analysis(
+                    corrected,
+                    template,
+                    answers,
+                    original_image=image,
+                    homography=homography,
+                )
+            )
+
             cv2.imwrite(
                 "bubble_analysis_debug.jpg",
                 detailed_debug,
@@ -5038,9 +5040,6 @@ def process_omr(
 
         "debug":
             debug,
-
-        "bubble_analysis":
-            detailed_debug if detailed_debug is not None else debug,
     }
 
 

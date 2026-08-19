@@ -141,14 +141,14 @@ async function loadResult() {
 
     if (!resultId || resultId === "result.html") {
         hideLoading();
-        showError("Unable to load this OMR result. Invalid or missing result ID.");
+        showError("Result not found. Invalid or missing result ID.");
         return;
     }
 
     try {
         const resp = await fetch(`/api/omr-results/${resultId}`);
         if (!resp.ok) {
-            throw new Error("Unable to load this OMR result.");
+            throw new Error("Result not found.");
         }
         const data = await resp.json();
         hideLoading();
@@ -156,7 +156,7 @@ async function loadResult() {
     } catch (err) {
         console.error("Result fetch error:", err);
         hideLoading();
-        showError("Unable to load this OMR result.");
+        showError("Result not found.");
     }
 }
 
