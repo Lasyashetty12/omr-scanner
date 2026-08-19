@@ -871,17 +871,40 @@ function hasExcessiveMovement(
 function isReadyForAutoCapture(
     detection,
     videoWidth,
-    videoHeight
+    videoHeight,
+    stableChecks,
+    previousDetection
 ) {
     /*
-        Auto-capture should trigger when the black corner registration blocks
-        are detected, not when the whole sheet geometry is perfectly aligned.
+        Auto-capture ONLY triggers when distinct black corner registration blocks
+        have been stably detected for consecutive frames with no excessive camera motion.
     */
 
     if (!detection || !detection.sourcePoints) {
         return {
             ready: false,
-            reason: "No black corner boxes detected"
+            reason: "Position the complete OMR inside the frame"
+        };
+    }
+
+    if (stableChecks < 3) {
+        return {
+            ready: false,
+            reason: "OMR detected — hold steady"
+        };
+    }
+
+    if (hasExcessiveMovement(detection, previousDetection)) {
+        return {
+            ready: false,
+            reason: "Hold camera still"
+        };
+    }
+
+    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Move camera closer to OMR sheet"
         };
     }
 
@@ -937,67 +960,111 @@ function cornerBlockMeasurement(
     endY
 ) {
 
-    let darkPixels = 0;
-
-    let totalPixels = 0;
-
-    let weightedX = 0;
-
-    let weightedY = 0;
-
-    /* Adaptive brightness threshold based on region lighting */
     let brightnessSum = 0;
+    let maxBrightness = 0;
+    let minBrightness = 255;
     let pixelCount = 0;
 
+    /* First pass: inspect lighting and contrast in this corner zone */
     for (let y = startY; y < endY; y += 1) {
-
         for (let x = startX; x < endX; x += 1) {
-
             const offset = (y * width + x) * 4;
-
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
             brightnessSum += brightness;
+            if (brightness > maxBrightness) maxBrightness = brightness;
+            if (brightness < minBrightness) minBrightness = brightness;
             pixelCount += 1;
-
-            totalPixels += 1;
         }
     }
 
-    /* Calculate average brightness and use as adaptive threshold */
-    const avgBrightness = brightnessSum / Math.max(pixelCount, 1);
-    const threshold = Math.min(avgBrightness * 0.5, 80);
+    if (pixelCount === 0) {
+        return { valid: false };
+    }
 
-    /* Second pass: find dark pixels using adaptive threshold */
+    const avgBrightness = brightnessSum / pixelCount;
+
+    /*
+        For an OMR corner box printed on paper:
+        1. Must contain bright paper background (maxBrightness >= 110).
+        2. High contrast between paper and mark (maxBrightness - minBrightness >= 45).
+    */
+    if (maxBrightness < 110 || (maxBrightness - minBrightness) < 45) {
+        return { valid: false };
+    }
+
+    /* Threshold for dark registration block pixels */
+    const darkThreshold = Math.min(avgBrightness * 0.60, maxBrightness - 40, 95);
+
+    let darkCount = 0;
+    let minX = endX, maxX = startX;
+    let minY = endY, maxY = startY;
+    let sumX = 0, sumY = 0;
+
     for (let y = startY; y < endY; y += 1) {
-
         for (let x = startX; x < endX; x += 1) {
-
             const offset = (y * width + x) * 4;
-
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
 
-            if (brightness < threshold) {
-
-                darkPixels += 1;
-
-                weightedX += x;
-
-                weightedY += y;
+            if (brightness < darkThreshold) {
+                darkCount += 1;
+                sumX += x;
+                sumY += y;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
         }
     }
 
+    if (darkCount === 0 || minX > maxX || minY > maxY) {
+        return { valid: false };
+    }
+
+    const blockW = maxX - minX + 1;
+    const blockH = maxY - minY + 1;
+    const bboxArea = blockW * blockH;
+
+    /*
+        Validate candidate registration block geometry:
+        - Block size at 480px analysis width: blockW >= 5 and blockH >= 5
+        - Aspect ratio (blockW / blockH) between 0.35 and 2.5 (square/rectangular block)
+        - Fill ratio (solidity): darkCount / bboxArea >= 0.35 (solid block, not scattered noise)
+        - Bounding box area relative to frame area between 0.0002 and 0.03
+    */
+    const aspect = blockW / blockH;
+    const fillRatio = darkCount / bboxArea;
+    const frameArea = width * height;
+    const areaFraction = bboxArea / frameArea;
+
+    if (blockW < 5 || blockH < 5) {
+        return { valid: false };
+    }
+    if (aspect < 0.35 || aspect > 2.5) {
+        return { valid: false };
+    }
+    if (fillRatio < 0.35) {
+        return { valid: false };
+    }
+    if (areaFraction < 0.0002 || areaFraction > 0.03) {
+        return { valid: false };
+    }
+
     return {
-        coverage: darkPixels / Math.max(totalPixels, 1),
-        x: darkPixels ? weightedX / darkPixels : 0,
-        y: darkPixels ? weightedY / darkPixels : 0,
+        valid: true,
+        x: sumX / darkCount,
+        y: sumY / darkCount,
+        blockW,
+        blockH,
+        fillRatio,
+        coverage: darkCount / pixelCount
     };
 }
 
@@ -1103,7 +1170,7 @@ function detectDocumentCorners() {
         return null;
     }
 
-    /* Even higher resolution for pixel-perfect accuracy */
+    /* Analysis resolution for accuracy */
     const analysisWidth = 480;
 
     const analysisHeight = Math.round(
@@ -1143,17 +1210,16 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    /* Optimized zones for better OMR corner detection */
-    const zoneWidth = Math.round(analysisWidth * 0.25);
+    /* Corner zones for registration block search */
+    const zoneWidth = Math.round(analysisWidth * 0.28);
 
-    const zoneHeight = Math.round(analysisHeight * 0.20);
+    const zoneHeight = Math.round(analysisHeight * 0.25);
 
-    /* Positions slightly inset from edges for better accuracy */
     const zones = [
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.78)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.78)],
+        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.01)],
+        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.01)],
+        [Math.round(analysisWidth * 0.01), Math.round(analysisHeight * 0.73)],
+        [Math.round(analysisWidth * 0.70), Math.round(analysisHeight * 0.73)],
     ];
 
     const measurements = zones.map(
@@ -1168,42 +1234,55 @@ function detectDocumentCorners() {
         )
     );
 
-    if (!measurements.every(({ coverage }) => coverage >= 0.02)) {
+    const validMeasurements = measurements.filter(m => m.valid);
 
+    /* Require at least 3 valid black registration corner blocks */
+    if (validMeasurements.length < 3) {
         return null;
+    }
+
+    /* Estimate missing 4th block location if 3 are present */
+    let points = measurements.map(m => m.valid ? { x: m.x, y: m.y } : null);
+
+    if (!points[0] && points[1] && points[2] && points[3]) {
+        points[0] = { x: points[1].x + points[2].x - points[3].x, y: points[1].y + points[2].y - points[3].y };
+    } else if (!points[1] && points[0] && points[2] && points[3]) {
+        points[1] = { x: points[0].x + points[3].x - points[2].x, y: points[0].y + points[3].y - points[2].y };
+    } else if (!points[2] && points[0] && points[1] && points[3]) {
+        points[2] = { x: points[0].x + points[3].x - points[1].x, y: points[0].y + points[3].y - points[1].y };
+    } else if (!points[3] && points[0] && points[1] && points[2]) {
+        points[3] = { x: points[1].x + points[2].x - points[0].x, y: points[1].y + points[2].y - points[0].y };
     }
 
     const displayWidth = cameraContainer.clientWidth;
 
     const displayHeight = cameraContainer.clientHeight;
 
-    const displayPoints = measurements.map(({ x, y }) => ({
+    const displayPoints = points.map(({ x, y }) => ({
         x: (x / analysisWidth) * displayWidth,
         y: (y / analysisHeight) * displayHeight,
     }));
 
-    const sourcePoints = measurements.map(({ x, y }) => ({
+    const sourcePoints = points.map(({ x, y }) => ({
         x: (x / analysisWidth) * videoWidth,
         y: (y / analysisHeight) * videoHeight,
     }));
 
-    /* Validate that corners are roughly in expected positions */
+    /* Validate that corners form a plausible sheet structure */
     const tl = sourcePoints[0];
     const tr = sourcePoints[1];
     const bl = sourcePoints[2];
     const br = sourcePoints[3];
 
-    /* Check basic quad properties */
     const topEdgeDist = Math.abs(tl.y - tr.y);
     const bottomEdgeDist = Math.abs(bl.y - br.y);
     const leftEdgeDist = Math.abs(tl.x - bl.x);
     const rightEdgeDist = Math.abs(tr.x - br.x);
 
-    /* All edges should be relatively parallel */
-    if (Math.max(topEdgeDist, bottomEdgeDist) > videoHeight * 0.15) {
+    if (Math.max(topEdgeDist, bottomEdgeDist) > videoHeight * 0.22) {
         return null;
     }
-    if (Math.max(leftEdgeDist, rightEdgeDist) > videoWidth * 0.15) {
+    if (Math.max(leftEdgeDist, rightEdgeDist) > videoWidth * 0.22) {
         return null;
     }
 
@@ -1236,28 +1315,24 @@ function monitorCornerBlocks(timestamp) {
         const videoWidth = camera.videoWidth;
         const videoHeight = camera.videoHeight;
 
-        /*
-            Check if positioned correctly for auto-capture.
-        */
+        /* Check if positioned correctly and stably for auto-capture */
         const readinessCheck = isReadyForAutoCapture(
             detection,
             videoWidth,
-            videoHeight
+            videoHeight,
+            stableCornerChecks,
+            previousDetection
         );
 
         let statusMessage = null;
 
         if (readinessCheck.ready && !autoCaptureTriggered) {
-            /*
-                Sheet is correctly positioned. Capture immediately.
-            */
             autoCaptureTriggered = true;
             setCornerDetectionState(
                 true,
                 "Capturing…"
             );
 
-            /* Minimal delay for UI update */
             setTimeout(() => {
                 captureCameraImage(true);
             }, 50);
@@ -1267,24 +1342,21 @@ function monitorCornerBlocks(timestamp) {
             );
             return;
         } else if (readinessCheck.ready) {
-            /* Capture already triggered */
             statusMessage = "Capturing…";
-        } else if (!readinessCheck.ready && detection) {
-            /* Corners detected but not properly positioned */
+        } else if (detection) {
             statusMessage = readinessCheck.reason;
         } else {
-            /* No detection yet */
-            statusMessage = null;
+            statusMessage = "Position the complete OMR inside the frame";
         }
 
         setCornerDetectionState(
-            stableCornerChecks >= 1 && detection,
+            stableCornerChecks >= 1 && detection !== null,
             statusMessage
         );
 
         drawDocumentBoundary(
             detection?.displayPoints,
-            stableCornerChecks >= 1 && detection
+            stableCornerChecks >= 1 && detection !== null
         );
 
         if (stableCornerChecks >= 1 && detection) {
@@ -1292,9 +1364,6 @@ function monitorCornerBlocks(timestamp) {
             detectedDocumentBounds = detection.sourcePoints;
         }
 
-        /*
-            Track previous frame for movement detection.
-        */
         previousDetection = detection;
     }
 
