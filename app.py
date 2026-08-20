@@ -37,6 +37,7 @@ from database import (
     save_omr_result_to_db,
     get_omr_results_from_db,
     get_omr_result_by_id_from_db,
+    get_omr_result_by_scan_id_from_db,
     is_db_configured,
 )
 
@@ -1263,9 +1264,14 @@ def get_result(
 
     target_id = safe_filename(target_id)
 
-    # 1. Database Lookup
+    # 1. Database lookup.  Accept both the database result ID and the
+    # stable scan UUID used by result links.  The scan UUID is resolved
+    # through scans.image_reference -> omr_result_id, which works across
+    # serverless/Vercel instances where local result files are ephemeral.
     if is_db_configured():
         db_res = get_omr_result_by_id_from_db(target_id)
+        if not db_res:
+            db_res = get_omr_result_by_scan_id_from_db(target_id)
         if db_res:
             return sanitize_optional_result_assets(db_res)
 

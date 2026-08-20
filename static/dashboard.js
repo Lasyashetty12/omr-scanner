@@ -92,7 +92,7 @@ async function fetchAndRenderDashboard() {
                 <td>${escapeHtml(row.blank ?? 0)}</td>
                 <td>${formatDate(row.date)}</td>
                 <td>
-                    <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.id)}">
+                    <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.scan_id || row.id)}">
                         View Result
                     </button>
                 </td>

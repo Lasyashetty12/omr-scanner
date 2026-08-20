@@ -155,7 +155,7 @@ async function loadResult() {
     }
 
     try {
-        const resp = await fetch(`/api/omr-results/${resultId}`);
+        const resp = await fetch(`/api/omr-results/${encodeURIComponent(resultId)}`);
         if (!resp.ok) {
             throw new Error("Result not found.");
         }

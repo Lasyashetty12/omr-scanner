@@ -215,8 +215,20 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
             paper_code = e_data.get("paper_code") or e_data.get("paper_series") or "A1"
             created_at = r.get("created_at") or datetime.utcnow().isoformat()
 
+            # Keep the scan UUID available to the frontend.  It is the stable
+            # public result key and can be resolved through the scans table even
+            # when serverless local files are not on the same Vercel instance.
+            scan_id = None
+            if r.get("raw_result_json"):
+                try:
+                    raw_data = json.loads(r["raw_result_json"])
+                    scan_id = raw_data.get("scan_id")
+                except Exception:
+                    scan_id = None
+
             results.append({
                 "id": r["id"],
+                "scan_id": scan_id,
                 "student_name": student_name,
                 "roll_number": roll_number,
                 "class": class_name,
@@ -240,6 +252,30 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
     except Exception as e:
         print("Database list error:", e)
         return []
+
+
+def get_omr_result_by_scan_id_from_db(scan_id):
+    """Resolve a scan UUID through scans.image_reference and return its OMR result."""
+    if not is_db_configured() or not scan_id:
+        return None
+
+    try:
+        encoded_scan_id = urllib.parse.quote(str(scan_id), safe="")
+        scan_records = _supabase_request(
+            f"scans?image_reference=eq.{encoded_scan_id}&select=omr_result_id&limit=1",
+            method="GET",
+        ) or []
+        if not scan_records:
+            return None
+
+        omr_result_id = scan_records[0].get("omr_result_id")
+        if omr_result_id is None:
+            return None
+
+        return get_omr_result_by_id_from_db(omr_result_id)
+    except Exception as e:
+        print("Database get by scan id error:", e)
+        return None
 
 
 def get_omr_result_by_id_from_db(result_id):

@@ -554,7 +554,7 @@ async function fetchAndRenderDashboard() {
                     <td>${r.blank}</td>
                     <td>${formattedDate}</td>
                     <td>
-                        <button type="button" class="action-view-btn" data-id="${r.id}">
+                        <button type="button" class="action-view-btn" data-id="${r.scan_id || r.id}">
                             View
                         </button>
                     </td>
@@ -585,9 +585,9 @@ async function fetchAndRenderDashboard() {
     }
 }
 
-function openIndividualResult(resultId) {
-    if (!resultId) return;
-    window.location.href = `/result.html?id=${resultId}`;
+function openIndividualResult(resultKey) {
+    if (!resultKey) return;
+    window.location.href = `/result.html?id=${encodeURIComponent(resultKey)}`;
 }
 
 
@@ -2425,7 +2425,7 @@ async function scanOMR() {
                 response
             );
 
-        latestResultId = data?.id || data?.scan_id || null;
+        latestResultId = data?.scan_id || data?.id || null;
 
         displayResult(
             data,
