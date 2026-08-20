@@ -122,11 +122,20 @@ function displayResultData(data) {
 
     const bubbleDebugUrl = result.bubble_debug_image_url || data.bubble_debug_image_url;
     if (bubbleDebugUrl && bubbleDebugPreview) {
+        bubbleDebugPreview.onerror = () => {
+            bubbleDebugPreview.removeAttribute("src");
+            if (bubbleAnalysisCard) {
+                bubbleAnalysisCard.hidden = true;
+                bubbleAnalysisCard.classList.add("hidden");
+            }
+        };
+        bubbleDebugPreview.onload = () => {
+            if (bubbleAnalysisCard) {
+                bubbleAnalysisCard.hidden = false;
+                bubbleAnalysisCard.classList.remove("hidden");
+            }
+        };
         bubbleDebugPreview.src = bubbleDebugUrl + "?t=" + Date.now();
-        if (bubbleAnalysisCard) {
-            bubbleAnalysisCard.hidden = false;
-            bubbleAnalysisCard.classList.remove("hidden");
-        }
     }
 
     if (resultSection) {

@@ -88,6 +88,36 @@ def safe_filename(name):
     )
 
 
+def sanitize_optional_result_assets(result):
+    """Keep optional result-image URLs in sync with files on local storage.
+
+    Older local JSON records may not contain ``bubble_debug_image_url`` because
+    previous versions saved the JSON before adding image URLs.  Reconstruct the
+    URL when the scan-specific debug image is actually present, while still
+    suppressing stale URLs whose files no longer exist.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    scan_id = safe_filename(result.get("scan_id") or result.get("id") or "")
+    debug_url = result.get("bubble_debug_image_url")
+
+    if scan_id:
+        debug_filename = f"{scan_id}_bubble_debug.jpg"
+        debug_path = os.path.join(RESULT_DIR, debug_filename)
+        if os.path.exists(debug_path):
+            result["bubble_debug_image_url"] = f"/results/{debug_filename}"
+        elif isinstance(debug_url, str) and debug_url.startswith("/results/"):
+            result["bubble_debug_image_url"] = None
+    elif isinstance(debug_url, str) and debug_url.startswith("/results/"):
+        debug_filename = safe_filename(debug_url.split("?", 1)[0])
+        debug_path = os.path.join(RESULT_DIR, debug_filename)
+        if not os.path.exists(debug_path):
+            result["bubble_debug_image_url"] = None
+
+    return result
+
+
 def save_json(
     path,
     data,
@@ -176,8 +206,12 @@ def save_debug_images(
 
     def _fast_write(path, img):
         if img is None:
-            return
-        cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        written = cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        if not written or not os.path.exists(path):
+            raise OSError(f"Could not write debug image: {path}")
+        return True
 
     corrected = processing.get("corrected")
     if corrected is not None:
@@ -213,6 +247,31 @@ def home():
         "status": "ok",
         "message": "OMR Scanner API is running",
     }
+
+
+# ============================================================
+# TEACHER DASHBOARD PAGE
+# ============================================================
+
+@app.get("/dashboard")
+@app.get("/dashboard.html")
+def dashboard_page():
+
+    dashboard_path = os.path.join(
+        STATIC_DIR,
+        "dashboard.html",
+    )
+
+    if os.path.exists(dashboard_path):
+        return FileResponse(
+            dashboard_path,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Teacher dashboard page not found.",
+    )
 
 
 # ============================================================
@@ -1018,6 +1077,26 @@ async def scan_omr(
 
 
     # ========================================================
+    # RESULT IMAGE URLS
+    # ========================================================
+
+    # Add image URLs BEFORE persisting the result JSON.  The individual
+    # result page reloads this JSON when no external database is configured;
+    # saving first used to make the bubble debug image disappear on View Result.
+    result["original_image_url"] = f"/uploads/{upload_filename}"
+    result["corrected_image_url"] = f"/uploads/{upload_filename}"
+
+    bubble_debug_path = os.path.join(
+        RESULT_DIR,
+        f"{scan_id}_bubble_debug.jpg",
+    )
+    result["bubble_debug_image_url"] = (
+        f"/results/{scan_id}_bubble_debug.jpg"
+        if os.path.exists(bubble_debug_path)
+        else None
+    )
+
+    # ========================================================
     # SAVE RESULT
     # ========================================================
 
@@ -1026,25 +1105,16 @@ async def scan_omr(
         f"{scan_id}.json",
     )
 
-
     try:
-
         save_json(
             result_path,
             result,
         )
-
     except Exception as error:
-
         print(
             "Result save warning:",
             error,
         )
-
-
-    result["original_image_url"] = f"/uploads/{upload_filename}"
-    result["corrected_image_url"] = f"/uploads/{upload_filename}"
-    result["bubble_debug_image_url"] = f"/results/{scan_id}_bubble_debug.jpg"
 
     # ========================================================
     # SAVE TO DATABASE
@@ -1197,7 +1267,7 @@ def get_result(
     if is_db_configured():
         db_res = get_omr_result_by_id_from_db(target_id)
         if db_res:
-            return db_res
+            return sanitize_optional_result_assets(db_res)
 
     # 2. Local Fallback JSON Lookup
     result_path = os.path.join(
@@ -1208,7 +1278,7 @@ def get_result(
     if os.path.exists(result_path):
         try:
             with open(result_path, "r", encoding="utf-8") as file:
-                return json.load(file)
+                return sanitize_optional_result_assets(json.load(file))
         except Exception:
             pass
 

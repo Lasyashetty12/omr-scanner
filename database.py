@@ -324,7 +324,10 @@ def get_omr_result_by_id_from_db(result_id):
             "question_results": q_dict if q_dict else raw_data.get("question_results", {}),
             "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",
             "corrected_image_url": raw_data.get("corrected_image_url") or f"/uploads/{scan_id}.jpg",
-            "bubble_debug_image_url": raw_data.get("bubble_debug_image_url") or f"/results/{scan_id}_bubble_debug.jpg"
+            # Debug images are optional and may not exist (especially on
+            # ephemeral/serverless storage). Never invent a URL for a file
+            # that was not actually recorded with the result.
+            "bubble_debug_image_url": raw_data.get("bubble_debug_image_url")
         }
 
         return result_obj

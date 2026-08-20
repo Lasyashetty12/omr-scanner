@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Dashboard — Manchester Technologies</title>
+    <meta name="description" content="Teacher dashboard for evaluated OMR student results.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=4.1">
+</head>
+<body>
+    <div class="page-container dashboard-page-container">
+        <header class="main-header">
+            <div class="brand-info">
+                <img src="/static/logo.jpg?v=3.5" alt="Manchester Technologies Logo" class="brand-logo-img">
+                <div>
+                    <h1>Manchester Technologies</h1>
+                    <p>Teacher OMR Dashboard</p>
+                </div>
+            </div>
+            <a href="/" class="back-to-dashboard-btn dashboard-back-link">← Back to Scanner</a>
+        </header>
+
+        <main class="main-card dashboard-main-card">
+            <section class="dashboard-panel">
+                <div class="dashboard-header">
+                    <div>
+                        <p class="eyebrow">Teacher Dashboard</p>
+                        <h3>All Evaluated Students</h3>
+                    </div>
+                    <div class="dashboard-filters">
+                        <label>
+                            <span>Class</span>
+                            <select id="classFilter">
+                                <option value="all">All Classes</option>
+                                <option value="10">Class 10</option>
+                                <option value="11">Class 11</option>
+                                <option value="12">Class 12</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Section</span>
+                            <select id="sectionFilter">
+                                <option value="all">All Sections</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="C">C</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Exam</span>
+                            <select id="examDashboardFilter">
+                                <option value="all">All Exams</option>
+                                <option value="NEET">NEET</option>
+                                <option value="KCET">KCET</option>
+                                <option value="JEE">JEE</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="dashboardSummary" class="dashboard-summary"></div>
+                <div class="dashboard-table-wrap">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr>
+                                <th>Student</th>
+                                <th>Roll No.</th>
+                                <th>Class</th>
+                                <th>Section</th>
+                                <th>Exam</th>
+                                <th>Paper Code</th>
+                                <th>Score</th>
+                                <th>Correct</th>
+                                <th>Wrong</th>
+                                <th>Blank</th>
+                                <th>Date</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboardTableBody">
+                            <tr>
+                                <td colspan="12" class="dashboard-message-cell">Loading student results…</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="/static/dashboard.js?v=1.0"></script>
+</body>
+</html>

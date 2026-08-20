@@ -295,6 +295,8 @@ let selectedStream = "pcmb";
 
 let dashboardRows = [];
 
+let latestResultId = null;
+
 
 
 
@@ -369,8 +371,8 @@ const JPEG_QUALITY =
     0.92;
 
 
-// Instant auto-capture when the sheet is fully visible.
-const AUTO_CAPTURE_STABLE_CHECKS = 1;
+// Require repeated, stable marker recognition before auto-capture.
+const AUTO_CAPTURE_STABLE_CHECKS = 4;
 
 
 /* ==========================================================
@@ -853,7 +855,7 @@ function hasExcessiveMovement(
     const videoWidth = camera.videoWidth;
     const videoHeight = camera.videoHeight;
 
-    const maxMotion = Math.max(videoWidth, videoHeight) * 0.10;
+    const maxMotion = Math.max(videoWidth, videoHeight) * 0.025;
 
     const maxDistance = Math.max(
         ...currentDetection.sourcePoints.map((current, idx) => {
@@ -874,20 +876,48 @@ function isReadyForAutoCapture(
     videoHeight
 ) {
     /*
-        Auto-capture should trigger when the black corner registration blocks
-        are detected, not when the whole sheet geometry is perfectly aligned.
+        Camera auto-capture is registration-marker gated.  A white page,
+        printed text, bubbles, or a steady camera must never be enough.
     */
 
-    if (!detection || !detection.sourcePoints) {
+    if (!detection || !detection.sourcePoints || detection.markerCount !== 4) {
         return {
             ready: false,
-            reason: "No black corner boxes detected"
+            reason: "Align the OMR sheet — four black corner markers required"
+        };
+    }
+
+    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Four markers found — move the OMR sheet closer"
+        };
+    }
+
+    if (!isCompleteSheetInFrame(detection.sourcePoints, videoWidth, videoHeight)) {
+        return {
+            ready: false,
+            reason: "Four markers found — keep the complete sheet inside the frame"
+        };
+    }
+
+    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
+        return {
+            ready: false,
+            reason: "Four markers found — straighten the OMR sheet"
+        };
+    }
+
+    if (hasExcessiveMovement(detection, previousDetection)) {
+        return {
+            ready: false,
+            reason: "Four markers found — hold the OMR sheet steady"
         };
     }
 
     return {
         ready: true,
-        reason: "Black corner boxes detected"
+        reason: "Four black corner markers recognized"
     };
 }
 
@@ -921,13 +951,13 @@ function setCornerDetectionState(
 
     if (captureButton) {
 
-        captureButton.disabled = false;
+        captureButton.disabled = !detected;
         captureButton.classList.remove("hidden");
     }
 }
 
 
-function cornerBlockMeasurement(
+function findSolidMarkerInZone(
     pixels,
     width,
     height,
@@ -936,69 +966,134 @@ function cornerBlockMeasurement(
     endX,
     endY
 ) {
+    /*
+        Find a compact, filled dark component rather than measuring the total
+        amount of dark ink in a large corner region.  This prevents headings,
+        table rules, bubbles and other printed content from impersonating a
+        registration block.
+    */
 
-    let darkPixels = 0;
+    const zoneWidth = Math.max(1, endX - startX);
+    const zoneHeight = Math.max(1, endY - startY);
+    const zoneArea = zoneWidth * zoneHeight;
 
-    let totalPixels = 0;
-
-    let weightedX = 0;
-
-    let weightedY = 0;
-
-    /* Adaptive brightness threshold based on region lighting */
     let brightnessSum = 0;
-    let pixelCount = 0;
-
     for (let y = startY; y < endY; y += 1) {
-
         for (let x = startX; x < endX; x += 1) {
-
             const offset = (y * width + x) * 4;
-
-            const brightness =
+            brightnessSum +=
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
-
-            brightnessSum += brightness;
-            pixelCount += 1;
-
-            totalPixels += 1;
         }
     }
 
-    /* Calculate average brightness and use as adaptive threshold */
-    const avgBrightness = brightnessSum / Math.max(pixelCount, 1);
-    const threshold = Math.min(avgBrightness * 0.5, 80);
+    const averageBrightness = brightnessSum / Math.max(zoneArea, 1);
+    const darkThreshold = Math.max(35, Math.min(105, averageBrightness * 0.48));
+    const darkMask = new Uint8Array(zoneArea);
 
-    /* Second pass: find dark pixels using adaptive threshold */
-    for (let y = startY; y < endY; y += 1) {
-
-        for (let x = startX; x < endX; x += 1) {
-
+    for (let zy = 0; zy < zoneHeight; zy += 1) {
+        const y = startY + zy;
+        for (let zx = 0; zx < zoneWidth; zx += 1) {
+            const x = startX + zx;
             const offset = (y * width + x) * 4;
-
             const brightness =
                 pixels[offset] * 0.299
                 + pixels[offset + 1] * 0.587
                 + pixels[offset + 2] * 0.114;
-
-            if (brightness < threshold) {
-
-                darkPixels += 1;
-
-                weightedX += x;
-
-                weightedY += y;
+            if (brightness <= darkThreshold) {
+                darkMask[zy * zoneWidth + zx] = 1;
             }
         }
     }
 
-    return {
-        coverage: darkPixels / Math.max(totalPixels, 1),
-        x: darkPixels ? weightedX / darkPixels : 0,
-        y: darkPixels ? weightedY / darkPixels : 0,
-    };
+    const visited = new Uint8Array(zoneArea);
+    const minComponentArea = Math.max(28, Math.round(zoneArea * 0.0015));
+    const maxComponentArea = Math.round(zoneArea * 0.30);
+    const minSide = Math.max(5, Math.round(Math.min(zoneWidth, zoneHeight) * 0.035));
+    const maxSide = Math.round(Math.max(zoneWidth, zoneHeight) * 0.48);
+
+    let best = null;
+
+    for (let index = 0; index < zoneArea; index += 1) {
+        if (!darkMask[index] || visited[index]) continue;
+
+        const stack = [index];
+        visited[index] = 1;
+
+        let area = 0;
+        let minX = zoneWidth;
+        let minY = zoneHeight;
+        let maxX = -1;
+        let maxY = -1;
+        let sumX = 0;
+        let sumY = 0;
+
+        while (stack.length) {
+            const current = stack.pop();
+            const cy = Math.floor(current / zoneWidth);
+            const cx = current - cy * zoneWidth;
+
+            area += 1;
+            sumX += cx;
+            sumY += cy;
+            if (cx < minX) minX = cx;
+            if (cx > maxX) maxX = cx;
+            if (cy < minY) minY = cy;
+            if (cy > maxY) maxY = cy;
+
+            const left = current - 1;
+            const right = current + 1;
+            const up = current - zoneWidth;
+            const down = current + zoneWidth;
+
+            if (cx > 0 && darkMask[left] && !visited[left]) {
+                visited[left] = 1;
+                stack.push(left);
+            }
+            if (cx + 1 < zoneWidth && darkMask[right] && !visited[right]) {
+                visited[right] = 1;
+                stack.push(right);
+            }
+            if (cy > 0 && darkMask[up] && !visited[up]) {
+                visited[up] = 1;
+                stack.push(up);
+            }
+            if (cy + 1 < zoneHeight && darkMask[down] && !visited[down]) {
+                visited[down] = 1;
+                stack.push(down);
+            }
+        }
+
+        if (area < minComponentArea || area > maxComponentArea) continue;
+
+        const componentWidth = maxX - minX + 1;
+        const componentHeight = maxY - minY + 1;
+        if (componentWidth < minSide || componentHeight < minSide) continue;
+        if (componentWidth > maxSide || componentHeight > maxSide) continue;
+
+        const aspect = componentWidth / Math.max(componentHeight, 1);
+        if (aspect < 0.45 || aspect > 2.2) continue;
+
+        const fill = area / Math.max(componentWidth * componentHeight, 1);
+        if (fill < 0.58) continue;
+
+        const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
+        const score = area * fill * (0.65 + 0.35 * squareScore);
+
+        if (!best || score > best.score) {
+            best = {
+                score,
+                area,
+                fill,
+                aspect,
+                x: startX + (sumX / area),
+                y: startY + (sumY / area),
+            };
+        }
+    }
+
+    return best;
 }
 
 
@@ -1095,23 +1190,18 @@ function drawDocumentBoundary(points, detected) {
 function detectDocumentCorners() {
 
     const videoWidth = camera.videoWidth;
-
     const videoHeight = camera.videoHeight;
 
     if (!videoWidth || !videoHeight) {
-
         return null;
     }
 
-    /* Even higher resolution for pixel-perfect accuracy */
     const analysisWidth = 480;
-
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
 
     markerAnalysisCanvas.width = analysisWidth;
-
     markerAnalysisCanvas.height = analysisHeight;
 
     const context = markerAnalysisCanvas.getContext(
@@ -1120,7 +1210,6 @@ function detectDocumentCorners() {
     );
 
     if (!context) {
-
         return null;
     }
 
@@ -1143,73 +1232,81 @@ function detectDocumentCorners() {
         analysisHeight
     ).data;
 
-    /* Optimized zones for better OMR corner detection */
-    const zoneWidth = Math.round(analysisWidth * 0.25);
+    /*
+        The Manchester templates use four solid registration blocks near the
+        sheet corners.  Search only the outer corner regions, then require one
+        compact filled component in every region.
+    */
+    const zoneWidth = Math.round(analysisWidth * 0.32);
+    const zoneHeight = Math.round(analysisHeight * 0.27);
 
-    const zoneHeight = Math.round(analysisHeight * 0.20);
-
-    /* Positions slightly inset from edges for better accuracy */
     const zones = [
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.02)],
-        [Math.round(analysisWidth * 0.02), Math.round(analysisHeight * 0.78)],
-        [Math.round(analysisWidth * 0.73), Math.round(analysisHeight * 0.78)],
+        [0, 0, zoneWidth, zoneHeight],
+        [analysisWidth - zoneWidth, 0, analysisWidth, zoneHeight],
+        [analysisWidth - zoneWidth, analysisHeight - zoneHeight, analysisWidth, analysisHeight],
+        [0, analysisHeight - zoneHeight, zoneWidth, analysisHeight],
     ];
 
-    const measurements = zones.map(
-        ([x, y]) => cornerBlockMeasurement(
+    const markers = zones.map(([sx, sy, ex, ey]) =>
+        findSolidMarkerInZone(
             pixels,
             analysisWidth,
             analysisHeight,
-            x,
-            y,
-            Math.min(x + zoneWidth, analysisWidth),
-            Math.min(y + zoneHeight, analysisHeight)
+            sx,
+            sy,
+            ex,
+            ey
         )
     );
 
-    if (!measurements.every(({ coverage }) => coverage >= 0.02)) {
-
+    if (!markers.every(Boolean)) {
         return null;
     }
 
-    const displayWidth = cameraContainer.clientWidth;
-
-    const displayHeight = cameraContainer.clientHeight;
-
-    const displayPoints = measurements.map(({ x, y }) => ({
-        x: (x / analysisWidth) * displayWidth,
-        y: (y / analysisHeight) * displayHeight,
-    }));
-
-    const sourcePoints = measurements.map(({ x, y }) => ({
+    const sourcePoints = markers.map(({ x, y }) => ({
         x: (x / analysisWidth) * videoWidth,
         y: (y / analysisHeight) * videoHeight,
     }));
 
-    /* Validate that corners are roughly in expected positions */
-    const tl = sourcePoints[0];
-    const tr = sourcePoints[1];
-    const bl = sourcePoints[2];
-    const br = sourcePoints[3];
+    // Ordered TL, TR, BR, BL.
+    const [tl, tr, br, bl] = sourcePoints;
 
-    /* Check basic quad properties */
-    const topEdgeDist = Math.abs(tl.y - tr.y);
-    const bottomEdgeDist = Math.abs(bl.y - br.y);
-    const leftEdgeDist = Math.abs(tl.x - bl.x);
-    const rightEdgeDist = Math.abs(tr.x - br.x);
+    const top = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+    const bottom = Math.hypot(br.x - bl.x, br.y - bl.y);
+    const left = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+    const right = Math.hypot(br.x - tr.x, br.y - tr.y);
 
-    /* All edges should be relatively parallel */
-    if (Math.max(topEdgeDist, bottomEdgeDist) > videoHeight * 0.15) {
+    if (Math.min(top, bottom) < videoWidth * 0.42) return null;
+    if (Math.min(left, right) < videoHeight * 0.42) return null;
+
+    if (Math.max(top, bottom) / Math.max(Math.min(top, bottom), 1) > 1.75) return null;
+    if (Math.max(left, right) / Math.max(Math.min(left, right), 1) > 1.75) return null;
+
+    // Keep the detected quadrilateral large enough to represent a full OMR.
+    const polygonArea = Math.abs(
+        (tl.x * tr.y - tr.x * tl.y)
+        + (tr.x * br.y - br.x * tr.y)
+        + (br.x * bl.y - bl.x * br.y)
+        + (bl.x * tl.y - tl.x * bl.y)
+    ) / 2;
+
+    if (polygonArea < videoWidth * videoHeight * 0.20) {
         return null;
     }
-    if (Math.max(leftEdgeDist, rightEdgeDist) > videoWidth * 0.15) {
-        return null;
-    }
+
+    const displayWidth = cameraContainer.clientWidth;
+    const displayHeight = cameraContainer.clientHeight;
+
+    const displayPoints = markers.map(({ x, y }) => ({
+        x: (x / analysisWidth) * displayWidth,
+        y: (y / analysisHeight) * displayHeight,
+    }));
 
     return {
         displayPoints,
         sourcePoints,
+        markerCount: 4,
+        markers,
     };
 }
 
@@ -1217,84 +1314,63 @@ function detectDocumentCorners() {
 function monitorCornerBlocks(timestamp) {
 
     if (!cameraStream || camera.hidden) {
-
         cornerDetectionFrame = null;
-
         return;
     }
 
     if (timestamp - lastCornerCheckAt >= 250) {
-
         lastCornerCheckAt = timestamp;
 
         const detection = detectDocumentCorners();
-
-        stableCornerChecks = detection
-            ? stableCornerChecks + 1
-            : 0;
-
         const videoWidth = camera.videoWidth;
         const videoHeight = camera.videoHeight;
 
-        /*
-            Check if positioned correctly for auto-capture.
-        */
         const readinessCheck = isReadyForAutoCapture(
             detection,
             videoWidth,
             videoHeight
         );
 
-        let statusMessage = null;
-
-        if (readinessCheck.ready && !autoCaptureTriggered) {
-            /*
-                Sheet is correctly positioned. Capture immediately.
-            */
-            autoCaptureTriggered = true;
-            setCornerDetectionState(
-                true,
-                "Capturing…"
-            );
-
-            /* Minimal delay for UI update */
-            setTimeout(() => {
-                captureCameraImage(true);
-            }, 50);
-
-            cornerDetectionFrame = requestAnimationFrame(
-                monitorCornerBlocks
-            );
-            return;
-        } else if (readinessCheck.ready) {
-            /* Capture already triggered */
-            statusMessage = "Capturing…";
-        } else if (!readinessCheck.ready && detection) {
-            /* Corners detected but not properly positioned */
-            statusMessage = readinessCheck.reason;
+        if (readinessCheck.ready) {
+            stableCornerChecks += 1;
         } else {
-            /* No detection yet */
-            statusMessage = null;
+            stableCornerChecks = 0;
+        }
+
+        const markersStable =
+            readinessCheck.ready
+            && stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS;
+
+        let statusMessage = readinessCheck.reason;
+
+        if (readinessCheck.ready && !markersStable) {
+            statusMessage =
+                `Four black corner markers recognized — hold steady (${stableCornerChecks}/${AUTO_CAPTURE_STABLE_CHECKS})`;
         }
 
         setCornerDetectionState(
-            stableCornerChecks >= 1 && detection,
-            statusMessage
+            Boolean(markersStable),
+            markersStable ? "OMR recognized — capturing…" : statusMessage
         );
 
         drawDocumentBoundary(
-            detection?.displayPoints,
-            stableCornerChecks >= 1 && detection
+            detection?.displayPoints || null,
+            Boolean(detection)
         );
 
-        if (stableCornerChecks >= 1 && detection) {
-
+        if (markersStable && detection) {
             detectedDocumentBounds = detection.sourcePoints;
+
+            if (!autoCaptureTriggered) {
+                autoCaptureTriggered = true;
+                setTimeout(() => {
+                    captureCameraImage(true);
+                }, 120);
+            }
+        } else {
+            detectedDocumentBounds = null;
         }
 
-        /*
-            Track previous frame for movement detection.
-        */
         previousDetection = detection;
     }
 
@@ -1429,7 +1505,7 @@ async function openCamera() {
         captureButton.classList.remove("hidden");
 
         captureButton.disabled =
-            false;
+            true;
 
 
         retakeButton.hidden =
@@ -1504,10 +1580,6 @@ function captureCameraImage(
         return;
     }
 
-    if (automatic) {
-        autoCaptureTriggered = true;
-    }
-
     clearError();
 
     hideResult();
@@ -1540,6 +1612,21 @@ function captureCameraImage(
         );
 
         return;
+    }
+
+    if (!pageCornersDetected) {
+        if (cornerDetectionStatus) {
+            cornerDetectionStatus.textContent =
+                "Align the OMR sheet — four black corner markers must be recognized before capture.";
+        }
+        showError(
+            "Capture blocked: all four black OMR corner markers must be recognized first."
+        );
+        return;
+    }
+
+    if (automatic) {
+        autoCaptureTriggered = true;
     }
 
     captureCanvas.width = videoWidth;
@@ -2191,15 +2278,25 @@ function displayResult(
         &&
         bubbleDebugPreview
     ) {
+        bubbleDebugPreview.onerror = () => {
+            bubbleDebugPreview.removeAttribute("src");
+            if (bubbleAnalysisCard) {
+                bubbleAnalysisCard.hidden = true;
+                bubbleAnalysisCard.classList.add("hidden");
+            }
+        };
+
+        bubbleDebugPreview.onload = () => {
+            if (bubbleAnalysisCard) {
+                bubbleAnalysisCard.hidden = false;
+                bubbleAnalysisCard.classList.remove("hidden");
+            }
+        };
+
         bubbleDebugPreview.src =
             bubbleDebugUrl
             + "?t="
             + Date.now();
-
-        if (bubbleAnalysisCard) {
-            bubbleAnalysisCard.hidden = false;
-            bubbleAnalysisCard.classList.remove("hidden");
-        }
     }
 
 
@@ -2328,6 +2425,7 @@ async function scanOMR() {
                 response
             );
 
+        latestResultId = data?.id || data?.scan_id || null;
 
         displayResult(
             data,
@@ -2471,11 +2569,19 @@ if (
 }
 
 if (viewResultButton) {
-    viewResultButton.addEventListener("click", openResultDashboard);
+    viewResultButton.addEventListener("click", () => {
+        if (!latestResultId) {
+            showError("Result ID is not available. Please scan the OMR sheet again.");
+            return;
+        }
+        openIndividualResult(latestResultId);
+    });
 }
 
 if (backToDashboardButton) {
-    backToDashboardButton.addEventListener("click", openResultDashboard);
+    backToDashboardButton.addEventListener("click", () => {
+        window.location.href = "/dashboard";
+    });
 }
 
 if (classFilter) {
