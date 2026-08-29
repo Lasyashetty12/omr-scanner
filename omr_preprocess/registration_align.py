@@ -680,6 +680,7 @@ def _validate_canonical_marker_positions(
     width: int,
     height: int,
     expected_markers: Optional[np.ndarray] = None,
+    strict: bool = True,
 ) -> Dict[str, Any]:
     """Reject an A4 warp whose internal registration blocks are implausible.
 
@@ -703,7 +704,7 @@ def _validate_canonical_marker_positions(
         "max_position_error": round(max_error, 2),
         "valid": valid,
     }
-    if not valid:
+    if not valid and strict:
         raise ValueError(
             "Unable to align the complete OMR sheet. Please place the entire "
             "A4 OMR inside the camera frame with all four corners visible and capture again."
@@ -2093,6 +2094,12 @@ def canonicalize_omr(
         width,
         height,
         expected_markers=reference_markers,
+        # The coarse homography maps the four validated source markers exactly
+        # to these reference points, and both optional refinements are already
+        # limited to a 24px corner displacement. A second contour pass can
+        # choose nearby border/text ink on dense JEE sheets; record that as
+        # diagnostic information instead of rejecting an otherwise valid page.
+        strict=False,
     )
     debug["registration"]["final_markers"] = final_marker_debug["markers"]
     debug["registration"]["final_canonical_position_validation"] = final_validation
