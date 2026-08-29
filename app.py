@@ -41,6 +41,12 @@ from database import (
     is_db_configured,
 )
 
+from cloudinary_storage import (
+    cloudinary_enabled,
+    upload_evaluation_json,
+    upload_scan_images,
+)
+
 
 
 # ============================================================
@@ -1140,7 +1146,7 @@ async def scan_omr(
     # result page reloads this JSON when no external database is configured;
     # saving first used to make the bubble debug image disappear on View Result.
     result["original_image_url"] = f"/uploads/{upload_filename}"
-    result["corrected_image_url"] = f"/uploads/{upload_filename}"
+    result["corrected_image_url"] = f"/results/{scan_id}_corrected.jpg"
 
     bubble_debug_path = os.path.join(
         RESULT_DIR,
@@ -1151,6 +1157,34 @@ async def scan_omr(
         if os.path.exists(bubble_debug_path)
         else None
     )
+
+    # Cloudinary is optional. When configured, persist every successful scan
+    # remotely and return durable URLs; local files remain a development and
+    # outage fallback.
+    if cloudinary_enabled():
+        try:
+            cloudinary_images = upload_scan_images(
+                scan_id=scan_id,
+                original_bytes=contents,
+                corrected_image=processing.get("corrected"),
+                evaluated_image=processing.get("debug"),
+            )
+            result["cloudinary"] = cloudinary_images
+            result["original_image_url"] = cloudinary_images["original"]["url"]
+            result["corrected_image_url"] = cloudinary_images["corrected"]["url"]
+            result["bubble_debug_image_url"] = cloudinary_images["evaluated"]["url"]
+
+            evaluation_asset = upload_evaluation_json(
+                scan_id=scan_id,
+                evaluation=result,
+            )
+            result["cloudinary"]["evaluation"] = evaluation_asset
+            result["evaluation_json_url"] = evaluation_asset["url"]
+        except Exception as error:
+            result["cloudinary_warning"] = (
+                "OMR evaluation completed, but Cloudinary upload failed: "
+                f"{str(error)}"
+            )
 
     # ========================================================
     # SAVE RESULT
