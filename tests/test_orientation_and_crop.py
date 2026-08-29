@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+import pytest
 from PIL import Image, ImageOps
 from scanner import load_image
 from omr_preprocess.registration_align import (
@@ -96,6 +97,29 @@ def test_canonical_registration_does_not_rotate_after_marker_warp(tmp_path):
 
     assert corrected.shape[:2] == (height, width)
     assert debug["orientation"]["selected_rotation"] == 0
-    assert debug["page_detection"]["method"] == "four_omr_registration_blocks"
+    assert debug["page_detection"]["method"] == "complete_a4_then_four_registration_blocks"
     # Red remains in the canonical top-left content region.
     assert corrected[325, 225, 2] > corrected[325, 225, 0]
+
+
+def test_incomplete_sheet_is_not_stretched_into_a_false_full_page(tmp_path):
+    height, width = 2200, 1600
+    sheet = np.full((height, width, 3), 245, dtype=np.uint8)
+    for x, y in ((81, 78), (1522, 78), (1523, 2124), (80, 2120)):
+        cv2.rectangle(sheet, (x - 20, y - 20), (x + 20, y + 20), (0, 0, 0), -1)
+
+    reference_path = tmp_path / "reference.png"
+    cv2.imwrite(str(reference_path), sheet)
+
+    # Simulate a variable camera crop that removes both lower registration
+    # boxes. The pipeline must reject it instead of inferring false corners
+    # from answer bubbles or other dark printing.
+    incomplete = sheet[:1750, :]
+    with pytest.raises(ValueError):
+        canonicalize_omr(
+            incomplete,
+            reference_path,
+            output_size=(width, height),
+            use_orb=False,
+            use_ecc=False,
+        )
