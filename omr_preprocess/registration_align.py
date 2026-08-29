@@ -24,6 +24,8 @@ from typing import Optional, Tuple, Dict, Any
 import cv2
 import numpy as np
 
+from .canonical import detect_document_quad, warp_document_quad
+
 
 
 DEFAULT_WIDTH = 1600
@@ -1950,28 +1952,54 @@ def canonicalize_omr(
         interpolation=cv2.INTER_AREA,
     )
 
-    reference_markers, reference_marker_debug = detect_registration_blocks(
-        reference
-    )
+    reference_markers, reference_marker_debug = detect_registration_blocks(reference)
 
-    # The printed corner blocks are the reliable OMR geometry signal.  Their
-    # destination coordinates are inset from the template edges, so this
-    # single homography preserves the full page margins rather than cropping
-    # block-to-block or treating blocks as page corners.
-    markers, marker_debug = detect_registration_blocks(image)
-    coarse, homography, orientation_debug = _warp_best_marker_correspondence(
-        image,
-        markers,
-        reference_markers,
+    # Establish the complete A4 boundary before using any internal marks. This
+    # guarantees that a nearby filled answer bubble can never become a guessed
+    # page corner and crop/elongate only part of the uploaded sheet.
+    page_input = image
+    capture_pre_rotation = 0
+    if image.shape[1] > image.shape[0]:
+        # Put a landscape sensor frame into portrait geometry before looking
+        # for an A4 boundary. Header matching below resolves which end is top.
+        page_input = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        capture_pre_rotation = 90
+
+    document_quad, document_quad_debug = detect_document_quad(
+        page_input,
+        expected_ratio=width / float(height),
+        return_debug=True,
+    )
+    full_page = warp_document_quad(page_input, document_quad, width, height)
+    oriented, orientation_debug = ensure_canonical_orientation(
+        full_page,
         reference,
         width,
         height,
     )
+    orientation_debug["selected_rotation"] = (
+        capture_pre_rotation + int(orientation_debug["selected_rotation"])
+    ) % 360
+    orientation_debug["capture_pre_rotation"] = capture_pre_rotation
 
-    # The marker-correspondence homography maps the complete source sheet
-    # directly to the upright template rectangle.  No rotate-then-resize step
-    # is applied after registration, so bubble coordinates remain stable.
-    oriented = coarse
+    # Registration boxes now perform a small geometry correction inside the
+    # already-complete page. All four must be genuinely present near their
+    # template locations; missing boxes are not inferred from response ink.
+    markers, marker_debug = detect_registration_blocks(oriented)
+    pre_registration_validation = _validate_canonical_marker_positions(
+        markers,
+        width,
+        height,
+        expected_markers=reference_markers,
+        strict=True,
+    )
+    coarse, homography = warp_from_registration_blocks(
+        oriented,
+        markers,
+        width,
+        height,
+        destination_markers=reference_markers,
+    )
 
     result = coarse
 
@@ -1991,17 +2019,21 @@ def canonicalize_omr(
                 ]
                 for name, point in zip(
                     ("top_left", "top_right", "bottom_right", "bottom_left"),
-                    markers,
+                    document_quad,
                 )
             },
             "perspective_correction_applied": True,
         },
 
         "page_detection": {
-            "method": "four_omr_registration_blocks",
-            "candidate_count": marker_debug["candidate_count"],
+            "method": "complete_a4_then_four_registration_blocks",
+            "candidate_count": document_quad_debug["candidate_count"],
+            "valid_candidate_count": document_quad_debug["valid_candidate_count"],
+            "page_area_ratio": document_quad_debug["page_area_ratio"],
             "selected_candidate": 1,
         },
+
+        "document_quad": document_quad.tolist(),
 
         "output_size": {
             "width":
@@ -2025,6 +2057,7 @@ def canonicalize_omr(
         "homography":
             homography,
     }
+    debug["registration"]["pre_registration_validation"] = pre_registration_validation
 
     debug[
         "document_detection"
@@ -2105,10 +2138,10 @@ def canonicalize_omr(
     debug["registration"]["final_canonical_position_validation"] = final_validation
 
     if debug_dir is not None:
-        page_debug_image = _draw_marker_debug(image, markers)
+        page_debug_image = page_input.copy()
         cv2.polylines(
             page_debug_image,
-            [markers.astype(np.int32).reshape(-1, 1, 2)],
+            [document_quad.astype(np.int32).reshape(-1, 1, 2)],
             True,
             (0, 0, 255),
             4,
@@ -2133,7 +2166,7 @@ def canonicalize_omr(
                 "00_registration_detection.jpg"
             ),
             _draw_marker_debug(
-                coarse,
+                oriented,
                 markers,
             ),
         )
