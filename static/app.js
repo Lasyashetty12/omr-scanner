@@ -964,7 +964,8 @@ function findSolidMarkerInZone(
     startX,
     startY,
     endX,
-    endY
+    endY,
+    corner
 ) {
     /*
         Find a compact, filled dark component rather than measuring the total
@@ -1008,10 +1009,13 @@ function findSolidMarkerInZone(
     }
 
     const visited = new Uint8Array(zoneArea);
-    const minComponentArea = Math.max(28, Math.round(zoneArea * 0.0015));
-    const maxComponentArea = Math.round(zoneArea * 0.30);
-    const minSide = Math.max(5, Math.round(Math.min(zoneWidth, zoneHeight) * 0.035));
-    const maxSide = Math.round(Math.max(zoneWidth, zoneHeight) * 0.48);
+    // Corner blocks become only 3-8 analysis pixels wide when an A4 portrait
+    // page is held inside a landscape phone-camera frame. Keep the lower
+    // limits scale-safe while rejecting large logos and headings.
+    const minComponentArea = Math.max(4, Math.round(zoneArea * 0.00003));
+    const maxComponentArea = Math.round(zoneArea * 0.08);
+    const minSide = 2;
+    const maxSide = Math.max(12, Math.round(Math.min(zoneWidth, zoneHeight) * 0.28));
 
     let best = null;
 
@@ -1076,10 +1080,28 @@ function findSolidMarkerInZone(
         if (aspect < 0.45 || aspect > 2.2) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.58) continue;
+        if (fill < 0.44) continue;
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
-        const score = area * fill * (0.65 + 0.35 * squareScore);
+        const centerX = startX + (sumX / area);
+        const centerY = startY + (sumY / area);
+        const target = {
+            TL: { x: 0, y: 0 },
+            TR: { x: width, y: 0 },
+            BR: { x: width, y: height },
+            BL: { x: 0, y: height },
+        }[corner];
+        const cornerDistance = Math.hypot(
+            (centerX - target.x) / Math.max(width, 1),
+            (centerY - target.y) / Math.max(height, 1)
+        );
+        const sizeQuality = Math.min(area, 225);
+        const score = (
+            sizeQuality
+            * fill
+            * (0.55 + 0.45 * squareScore)
+            / (0.08 + cornerDistance)
+        );
 
         if (!best || score > best.score) {
             best = {
@@ -1087,8 +1109,8 @@ function findSolidMarkerInZone(
                 area,
                 fill,
                 aspect,
-                x: startX + (sumX / area),
-                y: startY + (sumY / area),
+                x: centerX,
+                y: centerY,
             };
         }
     }
@@ -1196,7 +1218,10 @@ function detectDocumentCorners() {
         return null;
     }
 
-    const analysisWidth = 480;
+    // 480px made the printed corner blocks collapse to 1-2 pixels on common
+    // 16:9 mobile streams. 720px remains inexpensive at 4 checks/second and
+    // preserves enough block pixels for reliable connected-component checks.
+    const analysisWidth = Math.min(720, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1237,8 +1262,11 @@ function detectDocumentCorners() {
         sheet corners.  Search only the outer corner regions, then require one
         compact filled component in every region.
     */
-    const zoneWidth = Math.round(analysisWidth * 0.32);
-    const zoneHeight = Math.round(analysisHeight * 0.27);
+    // A portrait A4 page inside a landscape camera can start around 30% of
+    // the frame width. Search nearly the whole quadrant, then rank compact
+    // candidates toward its true frame corner.
+    const zoneWidth = Math.round(analysisWidth * 0.48);
+    const zoneHeight = Math.round(analysisHeight * 0.48);
 
     const zones = [
         [0, 0, zoneWidth, zoneHeight],
@@ -1247,7 +1275,8 @@ function detectDocumentCorners() {
         [0, analysisHeight - zoneHeight, zoneWidth, analysisHeight],
     ];
 
-    const markers = zones.map(([sx, sy, ex, ey]) =>
+    const cornerNames = ["TL", "TR", "BR", "BL"];
+    const markers = zones.map(([sx, sy, ex, ey], index) =>
         findSolidMarkerInZone(
             pixels,
             analysisWidth,
@@ -1255,7 +1284,8 @@ function detectDocumentCorners() {
             sx,
             sy,
             ex,
-            ey
+            ey,
+            cornerNames[index]
         )
     );
 
@@ -1519,6 +1549,14 @@ async function openCamera() {
 
 
         await camera.play();
+
+        // Match the preview/overlay box to the actual sensor frame. This
+        // prevents CSS from showing a cropped image while detection and the
+        // saved JPEG operate on the complete frame.
+        if (camera.videoWidth && camera.videoHeight) {
+            cameraContainer.style.aspectRatio =
+                `${camera.videoWidth} / ${camera.videoHeight}`;
+        }
 
         const videoTrack = cameraStream.getVideoTracks()[0];
         const torchSupported = await checkTorchSupport(videoTrack);
