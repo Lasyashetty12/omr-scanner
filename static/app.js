@@ -1080,7 +1080,38 @@ function findSolidMarkerInZone(
         if (aspect < 0.45 || aspect > 2.2) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.44) continue;
+        if (fill < 0.64) continue;
+
+        // A filled response bubble is circular: the four corners of its
+        // bounding box remain mostly white. A registration mark is a solid
+        // square and keeps dark ink in every bounding-box corner. This is the
+        // primary guard against bubbles or printed letters triggering capture.
+        const cornerSizeX = Math.max(1, Math.floor(componentWidth * 0.28));
+        const cornerSizeY = Math.max(1, Math.floor(componentHeight * 0.28));
+        const componentCorners = [
+            [minX, minY],
+            [maxX - cornerSizeX + 1, minY],
+            [maxX - cornerSizeX + 1, maxY - cornerSizeY + 1],
+            [minX, maxY - cornerSizeY + 1],
+        ];
+        const cornerOccupancies = componentCorners.map(([cornerX, cornerY]) => {
+            let dark = 0;
+            let total = 0;
+            for (let yy = cornerY; yy < cornerY + cornerSizeY; yy += 1) {
+                for (let xx = cornerX; xx < cornerX + cornerSizeX; xx += 1) {
+                    if (xx < 0 || xx >= zoneWidth || yy < 0 || yy >= zoneHeight) continue;
+                    dark += darkMask[yy * zoneWidth + xx] ? 1 : 0;
+                    total += 1;
+                }
+            }
+            return dark / Math.max(total, 1);
+        });
+        const minimumCornerOccupancy = Math.min(...cornerOccupancies);
+        const averageCornerOccupancy = (
+            cornerOccupancies.reduce((sum, value) => sum + value, 0)
+            / cornerOccupancies.length
+        );
+        if (minimumCornerOccupancy < 0.20 || averageCornerOccupancy < 0.48) continue;
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
         const centerX = startX + (sumX / area);
@@ -1109,6 +1140,9 @@ function findSolidMarkerInZone(
                 area,
                 fill,
                 aspect,
+                componentWidth,
+                componentHeight,
+                cornerOccupancy: averageCornerOccupancy,
                 x: centerX,
                 y: centerY,
             };
@@ -1301,6 +1335,18 @@ function detectDocumentCorners() {
     // Ordered TL, TR, BR, BL.
     const [tl, tr, br, bl] = sourcePoints;
 
+    // All four printed registration boxes use the same physical dimensions.
+    // Perspective can change their apparent size, but a bubble/text candidate
+    // mixed with real boxes produces a much larger inconsistency.
+    const markerSides = markers.map(marker =>
+        Math.sqrt(marker.componentWidth * marker.componentHeight)
+    );
+    const smallestMarkerSide = Math.min(...markerSides);
+    const largestMarkerSide = Math.max(...markerSides);
+    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 2.8) {
+        return null;
+    }
+
     const top = Math.hypot(tr.x - tl.x, tr.y - tl.y);
     const bottom = Math.hypot(br.x - bl.x, br.y - bl.y);
     const left = Math.hypot(bl.x - tl.x, bl.y - tl.y);
@@ -1321,6 +1367,16 @@ function detectDocumentCorners() {
     ) / 2;
 
     if (polygonArea < videoWidth * videoHeight * 0.20) {
+        return null;
+    }
+
+    const averageSheetWidth = (top + bottom) / 2;
+    const averageMarkerSide = (
+        markerSides.reduce((sum, value) => sum + value, 0)
+        / markerSides.length
+    ) * (videoWidth / analysisWidth);
+    const markerToSheetRatio = averageMarkerSide / Math.max(averageSheetWidth, 1);
+    if (markerToSheetRatio < 0.004 || markerToSheetRatio > 0.045) {
         return null;
     }
 
