@@ -1,172 +1,45 @@
 {
-    "template_name": "neet",
-    "exam_name": "NEET",
-    "version": 4,
-    "sheet_width": 1600,
-    "sheet_height": 2200,
-    "total_questions": 180,
-    "questions_per_column": 45,
-    "options": [
-        "A",
-        "B",
-        "C",
-        "D"
-    ],
-    "bubble_radius": 11,
-    "dark_pixel_threshold": 120,
-    "blank_threshold": 0.18,
-    "filled_threshold": 0.42,
-    "multiple_threshold": 0.42,
-    "columns": [
-        {
-            "A": 218,
-            "B": 257,
-            "C": 291,
-            "D": 326
-        },
-        {
-            "A": 583,
-            "B": 618,
-            "C": 654,
-            "D": 691
-        },
-        {
-            "A": 947,
-            "B": 983,
-            "C": 1020,
-            "D": 1054
-        },
-        {
-            "A": 1312,
-            "B": 1349,
-            "C": 1385,
-            "D": 1419
-        }
-    ],
-    "question_y_positions": [
-        824,
-        854,
-        881,
-        911,
-        940,
-        967,
-        997,
-        1026,
-        1054,
-        1084,
-        1113,
-        1140,
-        1170,
-        1199,
-        1227,
-        1256,
-        1286,
-        1313,
-        1342,
-        1371,
-        1400,
-        1429,
-        1458,
-        1485,
-        1515,
-        1544,
-        1572,
-        1602,
-        1629,
-        1658,
-        1688,
-        1716,
-        1745,
-        1774,
-        1801,
-        1831,
-        1860,
-        1888,
-        1918,
-        1947,
-        1974,
-        2003,
-        2033,
-        2061,
-        2090
-    ],
-    "paper_code": {
-        "enabled": true,
-        "filled_threshold": 0.35,
-        "minimum_confidence_gap": 0.03,
-        "characters": [
-            {
-                "type": "letter",
-                "values": [
-                    "A",
-                    "B",
-                    "C",
-                    "D",
-                    "E",
-                    "F",
-                    "G",
-                    "H",
-                    "I",
-                    "J"
-                ],
-                "x": 1323,
-                "start_y": 428,
-                "gap": 31
-            },
-            {
-                "type": "digit",
-                "values": [
-                    "0",
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "5",
-                    "6",
-                    "7",
-                    "8",
-                    "9"
-                ],
-                "x": 1361,
-                "start_y": 428,
-                "gap": 31
-            },
-            {
-                "type": "digit",
-                "values": [
-                    "0",
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "5",
-                    "6",
-                    "7",
-                    "8",
-                    "9"
-                ],
-                "x": 1400,
-                "start_y": 428,
-                "gap": 31
-            },
-            {
-                "type": "digit",
-                "values": [
-                    "0",
-                    "1",
-                    "2",
-                    "3",
-                    "4",
-                    "5",
-                    "6",
-                    "7",
-                    "8",
-                    "9"
-                ],
-                "x": 1439,
-                "start_y": 428,
-                "gap": 31
-            }
-        ]
+  "template_name": "neet",
+  "exam_name": "NEET",
+  "version": 8,
+  "reference_image": "neet_kcet_generated.png",
+  "sheet_width": 1600,
+  "sheet_height": 2263,
+  "total_questions": 208,
+  "questions_per_column": 52,
+  "options": ["A", "B", "C", "D"],
+  "bubble_radius": 11,
+  "ml_crop_radius": 12,
+  "grid_max_initial_match_distance": 12,
+  "grid_max_direct_pin_dy": 6,
+  "grid_max_final_dy_from_input": 6,
+  "dark_pixel_threshold": 120,
+  "blank_threshold": 0.18,
+  "filled_threshold": 0.42,
+  "multiple_threshold": 0.42,
+  "columns": [
+    {"A": 574, "B": 616, "C": 658, "D": 699},
+    {"A": 828, "B": 871, "C": 912, "D": 954},
+    {"A": 1090, "B": 1132, "C": 1174, "D": 1216},
+    {"A": 1350, "B": 1392, "C": 1434, "D": 1476}
+  ],
+  "question_y_positions": [
+    338, 370, 402, 436, 468, 500, 533, 566, 598, 630, 662, 694,
+    726, 758, 790, 822, 854, 886, 918, 950, 981, 1012, 1044, 1076,
+    1108, 1140, 1171, 1202, 1234, 1266, 1298, 1330, 1362, 1394,
+    1425, 1457, 1488, 1520, 1552, 1584, 1616, 1648, 1680, 1710,
+    1742, 1774, 1806, 1838, 1870, 1902, 1934, 1966
+  ],
+  "paper_code": {"enabled": false, "characters": []},
+  "series": {
+    "enabled": true,
+    "filled_threshold": 0.35,
+    "minimum_confidence_gap": 0.03,
+    "coordinates": {
+      "P": [132, 1610],
+      "Q": [226, 1610],
+      "R": [336, 1610],
+      "S": [428, 1610]
     }
+  }
 }

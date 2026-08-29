@@ -505,7 +505,7 @@ async def scan_omr(
 
         paper_code_data = (
             processing.get(
-                "paper_code"
+                "series"
             )
         )
 
@@ -514,8 +514,8 @@ async def scan_omr(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "NEET question paper "
-                    "code could not be detected."
+                    "NEET series (P/Q/R/S) "
+                    "could not be detected."
                 ),
             )
 
@@ -532,8 +532,7 @@ async def scan_omr(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "NEET question paper "
-                    "code is empty."
+                    "NEET series is empty."
                 ),
             )
 
@@ -577,6 +576,15 @@ async def scan_omr(
             )
         )
 
+        template_total = int(
+            processing.get("template", {}).get("total_questions", 208)
+        )
+        neet_answer_key = {
+            key: value
+            for key, value in answer_key_data["answers"].items()
+            if int(key) <= template_total
+        }
+
 
         marking = (
             answer_key_data.get(
@@ -592,9 +600,7 @@ async def scan_omr(
                 detected_answers,
 
             answer_key=
-                answer_key_data[
-                    "answers"
-                ],
+                neet_answer_key,
 
             correct_marks=
                 marking.get(
@@ -627,6 +633,9 @@ async def scan_omr(
             {
 
                 "paper_code":
+                    paper_code,
+
+                "series":
                     paper_code,
 
                 "paper_code_details":
@@ -682,7 +691,7 @@ async def scan_omr(
 
         paper_code_data = (
             processing.get(
-                "paper_code"
+                "series"
             )
         )
 
@@ -692,8 +701,8 @@ async def scan_omr(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "KCET question paper "
-                    "code could not be detected."
+                    "KCET series (P/Q/R/S) "
+                    "could not be detected."
                 ),
             )
 
@@ -710,8 +719,7 @@ async def scan_omr(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "KCET question paper "
-                    "code is empty."
+                    "KCET series is empty."
                 ),
             )
 
@@ -764,7 +772,14 @@ async def scan_omr(
         )
 
 
-        kcet_answer_key = answer_key_data["answers"]
+        template_total = int(
+            processing.get("template", {}).get("total_questions", 208)
+        )
+        kcet_answer_key = {
+            key: value
+            for key, value in answer_key_data["answers"].items()
+            if int(key) <= template_total
+        }
         if stream and stream.lower().strip() == "pcm":
             kcet_answer_key = {
                 k: v for k, v in kcet_answer_key.items()
@@ -813,6 +828,9 @@ async def scan_omr(
                     (stream or "PCMB").upper(),
 
                 "paper_code":
+                    paper_code,
+
+                "series":
                     paper_code,
 
                 "paper_code_details":
@@ -952,13 +970,50 @@ async def scan_omr(
 
         try:
 
+            configured_answers = answer_key_data.get(
+                "answers",
+                {},
+            )
+
+            if (
+                isinstance(configured_answers, dict)
+                and "mcq" in configured_answers
+                and "numerical" in configured_answers
+            ):
+                mcq_answer_key = configured_answers["mcq"]
+                numerical_answer_key = configured_answers["numerical"]
+            else:
+                numerical_numbers = {
+                    *range(21, 26),
+                    *range(46, 51),
+                    *range(71, 76),
+                }
+                mcq_answer_key = {}
+                numerical_answer_key = {}
+                for question_number, answer in configured_answers.items():
+                    target = (
+                        numerical_answer_key
+                        if int(question_number) in numerical_numbers
+                        else mcq_answer_key
+                    )
+                    target[str(question_number)] = answer
+
             score_data = calculate_jee_score(
 
-                detected_answers=
-                    detected,
+                detected_mcq=
+                    mcq_detected,
 
-                answer_key=
-                    answer_key_data,
+                detected_numerical=
+                    numerical_detected,
+
+                mcq_answer_key=
+                    mcq_answer_key,
+
+                numerical_answer_key=
+                    numerical_answer_key,
+
+                marking=
+                    answer_key_data.get("marking", {}),
 
             )
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_hybrid_reader_uses_the_template_row_count_for_final_row_handling():
-    """KCET's final rows are 60/120/180/240, not NEET's 45-row cadence."""
+    """Final-row handling is driven by the generated sheet's 52-row grid."""
     module = ast.parse(Path("ml_omr/hybrid_reader.py").read_text(encoding="utf-8"))
     scan_answers_ml = next(
         node
