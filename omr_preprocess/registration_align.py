@@ -219,6 +219,137 @@ def _candidate_black_blocks(
     return candidates
 
 
+def _candidate_corner_blocks(
+    image: np.ndarray,
+) -> list[Dict[str, Any]]:
+    """Find filled corner squares without being confused by page borders.
+
+    The generated NEET/KCET sheet joins each lower registration square to a
+    horizontal rule, while the JEE sheet places its squares almost on the
+    outer border.  Removing long horizontal and vertical strokes before
+    contour extraction separates the compact filled blocks from those rules.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+    )
+    height, width = mask.shape[:2]
+
+    horizontal = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (max(25, width // 25), 1),
+        ),
+    )
+    vertical = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (1, max(25, height // 25)),
+        ),
+    )
+    compact_mask = cv2.subtract(mask, cv2.bitwise_or(horizontal, vertical))
+    compact_mask = cv2.morphologyEx(
+        compact_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+    )
+
+    contours, _ = cv2.findContours(
+        compact_mask,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    image_area = float(width * height)
+    candidates: list[Dict[str, Any]] = []
+
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if not image_area * 0.00006 <= area <= image_area * 0.006:
+            continue
+
+        x, y, bw, bh = cv2.boundingRect(contour)
+        if bw < 8 or bh < 8:
+            continue
+
+        aspect = bw / float(bh)
+        if not 0.45 <= aspect <= 2.2:
+            continue
+
+        fill = area / max(float(bw * bh), 1.0)
+        if fill < 0.42:
+            continue
+
+        candidates.append(
+            {
+                "center": np.array(
+                    [x + bw / 2.0, y + bh / 2.0],
+                    dtype=np.float32,
+                ),
+                "bbox": (x, y, bw, bh),
+                "area": area,
+                "fill": fill,
+                "aspect": aspect,
+            }
+        )
+
+    return candidates
+
+
+def _pick_extreme_corner_candidate(
+    candidates: list[Dict[str, Any]],
+    corner: str,
+    width: int,
+    height: int,
+) -> Optional[Dict[str, Any]]:
+    """Pick the compact dark block nearest an image corner."""
+    target = {
+        "TL": np.array([0.0, 0.0], dtype=np.float32),
+        "TR": np.array([float(width), 0.0], dtype=np.float32),
+        "BR": np.array([float(width), float(height)], dtype=np.float32),
+        "BL": np.array([0.0, float(height)], dtype=np.float32),
+    }[corner]
+
+    selected: list[Tuple[float, Dict[str, Any]]] = []
+    for candidate in candidates:
+        cx, cy = candidate["center"]
+        nx = cx / max(float(width), 1.0)
+        ny = cy / max(float(height), 1.0)
+        if corner == "TL":
+            inside = nx < 0.45 and ny < 0.45
+        elif corner == "TR":
+            inside = nx > 0.55 and ny < 0.45
+        elif corner == "BR":
+            inside = nx > 0.55 and ny > 0.55
+        else:
+            inside = nx < 0.45 and ny > 0.55
+        if not inside:
+            continue
+
+        normalized = np.array(
+            [cx / max(float(width), 1.0), cy / max(float(height), 1.0)],
+            dtype=np.float32,
+        )
+        normalized_target = np.array(
+            [target[0] / max(float(width), 1.0), target[1] / max(float(height), 1.0)],
+            dtype=np.float32,
+        )
+        distance = float(np.linalg.norm(normalized - normalized_target))
+        square_penalty = abs(float(np.log(max(candidate["aspect"], 1e-6))))
+        score = distance + square_penalty * 0.025 - candidate["fill"] * 0.01
+        selected.append((score, candidate))
+
+    if not selected:
+        return None
+    return min(selected, key=lambda item: item[0])[1]
+
+
 def _corner_region_score(
     candidate: Dict[str, Any],
     corner: str,
@@ -373,13 +504,25 @@ def _detect_registration_blocks_internal(
     small: np.ndarray,
 ) -> Tuple[Dict[str, np.ndarray], list[Dict[str, Any]]]:
     h, w = small.shape[:2]
-    candidates = _candidate_black_blocks(small)
+    candidates = _candidate_corner_blocks(small)
 
     picked_dict = {}
     for corner in ("TL", "TR", "BR", "BL"):
-        cand = _pick_corner_candidate(candidates, corner, w, h)
+        cand = _pick_extreme_corner_candidate(candidates, corner, w, h)
         if cand is not None:
             picked_dict[corner] = cand["center"]
+
+    # Older sheets without isolated corner blocks retain the original broad
+    # filled-rectangle search as a compatibility fallback.
+    if len(picked_dict) < 4:
+        legacy_candidates = _candidate_black_blocks(small)
+        for corner in ("TL", "TR", "BR", "BL"):
+            if corner in picked_dict:
+                continue
+            cand = _pick_corner_candidate(legacy_candidates, corner, w, h)
+            if cand is not None:
+                picked_dict[corner] = cand["center"]
+        candidates.extend(legacy_candidates)
 
     # Fallback recovery for missing corner blocks
     if "TL" in picked_dict and "TR" in picked_dict:
@@ -536,6 +679,7 @@ def _validate_canonical_marker_positions(
     markers: np.ndarray,
     width: int,
     height: int,
+    expected_markers: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """Reject an A4 warp whose internal registration blocks are implausible.
 
@@ -543,7 +687,11 @@ def _validate_canonical_marker_positions(
     validation signal only; they are deliberately not used for another crop
     or page-boundary warp.
     """
-    expected = _canonical_marker_positions(width, height)
+    expected = (
+        order_points(expected_markers).astype(np.float32)
+        if expected_markers is not None
+        else _canonical_marker_positions(width, height)
+    )
     distances = np.linalg.norm(markers - expected, axis=1)
     mean_error = float(np.mean(distances))
     max_error = float(np.max(distances))
@@ -568,16 +716,16 @@ def warp_from_registration_blocks(
     source_markers: np.ndarray,
     width: int,
     height: int,
+    destination_markers: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     source = order_points(
         source_markers
     ).astype(np.float32)
 
     destination = (
-        _canonical_marker_positions(
-            width,
-            height,
-        )
+        order_points(destination_markers).astype(np.float32)
+        if destination_markers is not None
+        else _canonical_marker_positions(width, height)
     )
 
     matrix = cv2.getPerspectiveTransform(
@@ -602,6 +750,53 @@ def warp_from_registration_blocks(
     )
 
     return corrected, matrix
+
+
+def _warp_best_marker_correspondence(
+    image: np.ndarray,
+    source_markers: np.ndarray,
+    destination_markers: np.ndarray,
+    reference: np.ndarray,
+    width: int,
+    height: int,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Resolve 0/90/180/270 capture orientation during registration.
+
+    Geometric point ordering names the corners of the camera frame, not the
+    printed sheet.  Trying the four cyclic correspondences maps the actual
+    printed top-left marker to the reference top-left marker without rotating
+    and then stretching an already-canonical image.
+    """
+    source = order_points(source_markers).astype(np.float32)
+    destination = order_points(destination_markers).astype(np.float32)
+    candidates: list[Tuple[float, int, np.ndarray, np.ndarray]] = []
+
+    for shift in range(4):
+        shifted_source = np.roll(source, -shift, axis=0)
+        matrix = cv2.getPerspectiveTransform(shifted_source, destination)
+        corrected = cv2.warpPerspective(
+            image,
+            matrix,
+            (width, height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(255, 255, 255),
+        )
+        score = _header_structure_score(corrected, reference)
+        candidates.append((score, shift, corrected, matrix))
+
+    score, shift, corrected, matrix = max(candidates, key=lambda item: item[0])
+    rotation = (shift * 90) % 360
+    debug = {
+        "selected_rotation": int(rotation),
+        "orientation_method": "registration_marker_correspondence",
+        "orientation_correction_applied": bool(shift),
+        "orientation_scores": {
+            str((candidate_shift * 90) % 360): round(float(candidate_score), 3)
+            for candidate_score, candidate_shift, _, _ in candidates
+        },
+    }
+    return corrected, matrix, debug
 
 
 def _prepare_feature_image(
@@ -1754,29 +1949,28 @@ def canonicalize_omr(
         interpolation=cv2.INTER_AREA,
     )
 
+    reference_markers, reference_marker_debug = detect_registration_blocks(
+        reference
+    )
+
     # The printed corner blocks are the reliable OMR geometry signal.  Their
     # destination coordinates are inset from the template edges, so this
     # single homography preserves the full page margins rather than cropping
     # block-to-block or treating blocks as page corners.
     markers, marker_debug = detect_registration_blocks(image)
-    coarse, homography = warp_from_registration_blocks(
+    coarse, homography, orientation_debug = _warp_best_marker_correspondence(
         image,
         markers,
+        reference_markers,
+        reference,
         width,
         height,
     )
 
-    # The registration-block homography maps the complete source sheet
-    # directly to the template rectangle.  Applying a second cardinal
-    # rotation here (then resizing it back) changes the coordinate system and
-    # is the source of shifted bubble-debug overlays.  Input orientation is
-    # resolved by EXIF normalization and the ordered source markers.
+    # The marker-correspondence homography maps the complete source sheet
+    # directly to the upright template rectangle.  No rotate-then-resize step
+    # is applied after registration, so bubble coordinates remain stable.
     oriented = coarse
-    orientation_debug = {
-        "selected_rotation": 0,
-        "orientation_method": "registration_block_homography",
-        "orientation_correction_applied": False,
-    }
 
     result = coarse
 
@@ -1818,6 +2012,9 @@ def canonicalize_omr(
 
         "registration":
             marker_debug,
+
+        "reference_registration":
+            reference_marker_debug,
 
         "orientation":
             orientation_debug,
@@ -1895,6 +2092,7 @@ def canonicalize_omr(
         final_markers,
         width,
         height,
+        expected_markers=reference_markers,
     )
     debug["registration"]["final_markers"] = final_marker_debug["markers"]
     debug["registration"]["final_canonical_position_validation"] = final_validation

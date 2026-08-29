@@ -1,302 +1,103 @@
 {
-    "template_name": "jee",
-    "exam_name": "JEE",
-    "version": 2,
-    "sheet_width": 1054,
-    "sheet_height": 1492,
-    "coordinate_origin": "top-left",
-    "coordinate_unit": "pixel",
-    "bubble_radius": 7,
-    "dark_pixel_threshold": 120,
-    "blank_threshold": 0.18,
-    "filled_threshold": 0.42,
-    "multiple_threshold": 0.42,
-    "alignment_markers": {
-        "enabled": true,
-        "type": "solid_square",
-        "detection_order": [
-            "top_left",
-            "top_right",
-            "bottom_right",
-            "bottom_left"
-        ],
-        "markers": {
-            "top_left": {
-                "x": 33,
-                "y": 37,
-                "width": 38,
-                "height": 38
-            },
-            "top_right": {
-                "x": 978,
-                "y": 37,
-                "width": 38,
-                "height": 38
-            },
-            "bottom_left": {
-                "x": 33,
-                "y": 1371,
-                "width": 38,
-                "height": 38
-            },
-            "bottom_right": {
-                "x": 978,
-                "y": 1371,
-                "width": 38,
-                "height": 38
-            }
-        },
-        "minimum_area_px": 900,
-        "maximum_area_px": 2200
-    },
-    "options": [
-        "A",
-        "B",
-        "C",
-        "D"
-    ],
-    "sections": {
-        "section_1": {
-            "type": "mcq",
-            "subjects": {
-                "physics": {
-                    "start_question": 1,
-                    "end_question": 20,
-                    "columns": {
-                        "A": 340,
-                        "B": 361,
-                        "C": 382,
-                        "D": 403
-                    },
-                    "question_y_positions": [
-                        357.0,
-                        377.6,
-                        398.2,
-                        418.8,
-                        439.4,
-                        460.0,
-                        480.6,
-                        501.2,
-                        521.8,
-                        542.4,
-                        563.0,
-                        583.6,
-                        604.2,
-                        624.8,
-                        645.4,
-                        666.0,
-                        686.6,
-                        707.2,
-                        727.8,
-                        748.4
-                    ]
-                },
-                "chemistry": {
-                    "start_question": 26,
-                    "end_question": 45,
-                    "columns": {
-                        "A": 520,
-                        "B": 542,
-                        "C": 563,
-                        "D": 584
-                    },
-                    "question_y_positions": [
-                        357.0,
-                        377.6,
-                        398.2,
-                        418.8,
-                        439.4,
-                        460.0,
-                        480.6,
-                        501.2,
-                        521.8,
-                        542.4,
-                        563.0,
-                        583.6,
-                        604.2,
-                        624.8,
-                        645.4,
-                        666.0,
-                        686.6,
-                        707.2,
-                        727.8,
-                        748.4
-                    ]
-                },
-                "mathematics": {
-                    "start_question": 51,
-                    "end_question": 70,
-                    "columns": {
-                        "A": 777,
-                        "B": 798,
-                        "C": 819,
-                        "D": 840
-                    },
-                    "question_y_positions": [
-                        357.0,
-                        377.6,
-                        398.2,
-                        418.8,
-                        439.4,
-                        460.0,
-                        480.6,
-                        501.2,
-                        521.8,
-                        542.4,
-                        563.0,
-                        583.6,
-                        604.2,
-                        624.8,
-                        645.4,
-                        666.0,
-                        686.6,
-                        707.2,
-                        727.8,
-                        748.4
-                    ]
-                }
-            }
-        },
-        "section_2": {
-            "type": "numerical",
-            "subjects": {
-                "physics": {
-                    "start_question": 21,
-                    "end_question": 25,
-                    "question_y_positions": [
-                        629.0,
-                        679.5,
-                        730.0,
-                        780.5,
-                        831.0
-                    ]
-                },
-                "chemistry": {
-                    "start_question": 46,
-                    "end_question": 50,
-                    "question_y_positions": [
-                        885.0,
-                        935.5,
-                        986.0,
-                        1036.5,
-                        1087.0
-                    ]
-                },
-                "mathematics": {
-                    "start_question": 71,
-                    "end_question": 75,
-                    "question_y_positions": [
-                        1140.0,
-                        1190.5,
-                        1241.0,
-                        1291.5,
-                        1342.0
-                    ]
-                }
-            },
-            "digit_values": [
-                "0",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9"
-            ],
-            "columns": {
-                "sign": 112,
-                "digit_1": 130,
-                "digit_2": 151,
-                "digit_3": 172,
-                "digit_4": 193,
-                "digit_5": 214,
-                "digit_6": 235
-            },
-            "decimal": {
-                "enabled": true,
-                "decimal_point_x": 246,
-                "decimal_point_is_bubble": false
-            }
-        }
-    },
-    "paper_code": {
-        "enabled": true,
-        "type": "7_digit",
-        "values": [
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9"
-        ],
-        "columns": [
-            {
-                "x": 101,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 124,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 147,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 170,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 193,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 216,
-                "start_y": 157,
-                "gap": 17
-            },
-            {
-                "x": 239,
-                "start_y": 157,
-                "gap": 17
-            }
-        ]
-    },
-    "series": {
-        "enabled": true,
-        "values": [
-            "A",
-            "B",
-            "C",
-            "D",
-            "E",
-            "F",
-            "G",
-            "H"
-        ],
-        "x": 272,
-        "start_y": 157,
-        "gap": 20
-    },
-    "scan_guidance": {
-        "page_detection": "Use the four large solid corner squares as primary document anchors.",
-        "perspective_correction": true,
-        "expected_aspect_ratio": 0.706434,
-        "require_all_four_corners": true,
-        "marker_size_px": 38,
-        "marker_white_clearance_px": 12
+  "template_name": "jee",
+  "exam_name": "JEE",
+  "version": 3,
+  "reference_image": "jee_generated.png",
+  "sheet_width": 1600,
+  "sheet_height": 2263,
+  "coordinate_origin": "top-left",
+  "coordinate_unit": "pixel",
+  "bubble_radius": 10,
+  "dark_pixel_threshold": 120,
+  "blank_threshold": 0.72,
+  "filled_threshold": 0.75,
+  "multiple_threshold": 0.75,
+  "series": {
+    "enabled": true,
+    "filled_threshold": 0.65,
+    "minimum_confidence_gap": 0.03,
+    "coordinates": {
+      "P": [368, 186],
+      "Q": [370, 246],
+      "R": [364, 308],
+      "S": [368, 364]
     }
+  },
+  "mcq_sections": [
+    {
+      "subject": "physics",
+      "start_question": 1,
+      "total_questions": 10,
+      "option_x": {"A": 487, "B": 517, "C": 546, "D": 578},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    },
+    {
+      "subject": "physics",
+      "start_question": 11,
+      "total_questions": 10,
+      "option_x": {"A": 650, "B": 672, "C": 697, "D": 724},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    },
+    {
+      "subject": "chemistry",
+      "start_question": 26,
+      "total_questions": 10,
+      "option_x": {"A": 826, "B": 860, "C": 893, "D": 923},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    },
+    {
+      "subject": "chemistry",
+      "start_question": 36,
+      "total_questions": 10,
+      "option_x": {"A": 1007, "B": 1031, "C": 1058, "D": 1087},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    },
+    {
+      "subject": "mathematics",
+      "start_question": 51,
+      "total_questions": 10,
+      "option_x": {"A": 1216, "B": 1250, "C": 1276, "D": 1303},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    },
+    {
+      "subject": "mathematics",
+      "start_question": 61,
+      "total_questions": 10,
+      "option_x": {"A": 1388, "B": 1414, "C": 1443, "D": 1474},
+      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+    }
+  ],
+  "numerical_layout": {
+    "digit_offsets": [0, 26, 52, 78, 104, 130, 156],
+    "decimal_offsets": [26, 52, 78, 104, 130],
+    "decimal_after_columns": [1, 2, 3, 4, 5],
+    "sign_offset": 0,
+    "digit_values": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+  },
+  "numerical_sections": [
+    {
+      "subject": "physics",
+      "start_question": 21,
+      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "decimal_y": 864,
+      "digit_y_positions": [904, 932, 962, 990, 1018, 1046, 1074, 1102, 1131, 1158],
+      "sign_y": 1192
+    },
+    {
+      "subject": "chemistry",
+      "start_question": 46,
+      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "decimal_y": 1322,
+      "digit_y_positions": [1364, 1392, 1420, 1448, 1476, 1504, 1533, 1562, 1590, 1618],
+      "sign_y": 1652
+    },
+    {
+      "subject": "mathematics",
+      "start_question": 71,
+      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "decimal_y": 1782,
+      "digit_y_positions": [1822, 1850, 1879, 1908, 1936, 1964, 1992, 2020, 2048, 2076],
+      "sign_y": 2110
+    }
+  ]
 }

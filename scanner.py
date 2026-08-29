@@ -77,6 +77,15 @@ def ensure_ml_model_available():
 # TEMPLATE
 # ============================================================
 
+def safe_reference_name(name):
+    """Limit template-selected reference assets to the references folder."""
+    value = str(name or "").strip()
+    basename = os.path.basename(value)
+    if not basename or basename != value:
+        raise ValueError("Invalid template reference_image.")
+    return basename
+
+
 def load_template(template_path):
 
     try:
@@ -131,7 +140,7 @@ def load_template(template_path):
             "questions_per_column",
             "options",
             "columns",
-            "paper_code",
+            "series",
         ]
 
         for field in required:
@@ -142,10 +151,16 @@ def load_template(template_path):
 
     elif exam_name == "JEE":
 
-        if "series" not in template:
-            raise ValueError(
-                "JEE template requires 'series'."
-            )
+        for field in (
+            "series",
+            "mcq_sections",
+            "numerical_sections",
+            "numerical_layout",
+        ):
+            if field not in template:
+                raise ValueError(
+                    f"JEE template requires '{field}'."
+                )
 
     else:
         raise ValueError(
@@ -3788,17 +3803,19 @@ def scan_jee_mcq_sections(
             ]
         )
 
-        start_y = int(
-            section[
-                "start_y"
-            ]
+        y_positions = section.get(
+            "question_y_positions"
         )
 
-        row_gap = int(
-            section[
-                "row_gap"
-            ]
-        )
+        if y_positions is not None:
+            if len(y_positions) != total_questions:
+                raise ValueError(
+                    "JEE MCQ question_y_positions must match "
+                    "the section question count."
+                )
+        else:
+            start_y = int(section["start_y"])
+            row_gap = int(section["row_gap"])
 
         options = (
             section.get(
@@ -3828,13 +3845,10 @@ def scan_jee_mcq_sections(
                 row_index
             )
 
-            y = (
-                start_y
-                +
-                row_index
-                *
-                row_gap
-            )
+            if y_positions is not None:
+                y = int(y_positions[row_index])
+            else:
+                y = start_y + row_index * row_gap
 
             coordinates = {}
 
@@ -3908,18 +3922,6 @@ def detect_numerical_value(
             ]
         )
 
-        start_y = int(
-            column[
-                "start_y"
-            ]
-        )
-
-        gap = int(
-            column[
-                "gap"
-            ]
-        )
-
         values = (
             column.get(
                 "values",
@@ -3938,19 +3940,30 @@ def detect_numerical_value(
             )
         )
 
+        y_positions = column.get(
+            "y_positions"
+        )
+
+        if y_positions is not None:
+            if len(y_positions) != len(values):
+                raise ValueError(
+                    "JEE numerical digit y-position count does not "
+                    "match the configured values."
+                )
+        else:
+            start_y = int(column["start_y"])
+            gap = int(column["gap"])
+
         scores = {}
 
         for row_index, value in enumerate(
             values
         ):
 
-            y = (
-                start_y
-                +
-                row_index
-                *
-                gap
-            )
+            if y_positions is not None:
+                y = int(y_positions[row_index])
+            else:
+                y = start_y + row_index * gap
 
             scores[
                 str(value)
@@ -4067,6 +4080,54 @@ def detect_numerical_value(
             }
         )
 
+    decimal_details = []
+    selected_decimal = None
+    decimal_candidates = []
+
+    for decimal in question_config.get("decimal_points", []):
+        score = get_fill_ratio(
+            gray_image,
+            int(decimal["x"]),
+            int(decimal["y"]),
+            template,
+        )
+        detail = {
+            "after_column": int(decimal["after_column"]),
+            "score": round(float(score), 4),
+        }
+        decimal_details.append(detail)
+        if score >= float(
+            question_config.get(
+                "filled_threshold",
+                template.get("filled_threshold", 0.42),
+            )
+        ):
+            decimal_candidates.append(detail)
+
+    if len(decimal_candidates) == 1:
+        selected_decimal = decimal_candidates[0]["after_column"]
+
+    sign_detail = None
+    negative = False
+    sign_config = question_config.get("sign")
+    if sign_config:
+        sign_score = get_fill_ratio(
+            gray_image,
+            int(sign_config["x"]),
+            int(sign_config["y"]),
+            template,
+        )
+        negative = sign_score >= float(
+            question_config.get(
+                "filled_threshold",
+                template.get("filled_threshold", 0.42),
+            )
+        )
+        sign_detail = {
+            "value": "-" if negative else "",
+            "score": round(float(sign_score), 4),
+        }
+
     if all(
         value == ""
         for value in detected_digits
@@ -4077,15 +4138,32 @@ def detect_numerical_value(
     elif any(
         value == "?"
         for value in detected_digits
-    ):
+    ) or len(decimal_candidates) > 1:
 
         answer = "UNCERTAIN"
 
     else:
 
-        answer = "".join(
-            detected_digits
+        first = next(
+            index for index, value in enumerate(detected_digits) if value
         )
+        last = max(
+            index for index, value in enumerate(detected_digits) if value
+        )
+        used_digits = detected_digits[first:last + 1]
+
+        if any(value == "" for value in used_digits):
+            answer = "UNCERTAIN"
+        else:
+            answer = "".join(used_digits)
+            if selected_decimal is not None:
+                insertion = selected_decimal - first
+                if insertion <= 0 or insertion >= len(answer):
+                    answer = "UNCERTAIN"
+                else:
+                    answer = answer[:insertion] + "." + answer[insertion:]
+            if negative and answer != "UNCERTAIN":
+                answer = "-" + answer
 
     return {
         "answer":
@@ -4093,6 +4171,12 @@ def detect_numerical_value(
 
         "columns":
             column_details,
+
+        "decimal_points":
+            decimal_details,
+
+        "sign":
+            sign_detail,
     }
 
 
@@ -4114,14 +4198,54 @@ def scan_jee_numerical_sections(
 
     detected = {}
 
+    layout = template.get(
+        "numerical_layout",
+        {},
+    )
+
     for section in sections:
 
-        questions = (
-            section.get(
-                "questions",
-                []
-            )
-        )
+        questions = section.get("questions")
+
+        if questions is None:
+            start_question = int(section["start_question"])
+            digit_offsets = [int(value) for value in layout["digit_offsets"]]
+            decimal_offsets = [int(value) for value in layout["decimal_offsets"]]
+            decimal_after = [int(value) for value in layout["decimal_after_columns"]]
+            digit_values = [str(value) for value in layout["digit_values"]]
+            digit_y_positions = [int(value) for value in section["digit_y_positions"]]
+
+            questions = []
+            for index, base_x in enumerate(section["question_x_positions"]):
+                base_x = int(base_x)
+                questions.append(
+                    {
+                        "question": start_question + index,
+                        "columns": [
+                            {
+                                "x": base_x + offset,
+                                "y_positions": digit_y_positions,
+                                "values": digit_values,
+                            }
+                            for offset in digit_offsets
+                        ],
+                        "decimal_points": [
+                            {
+                                "x": base_x + offset,
+                                "y": int(section["decimal_y"]),
+                                "after_column": after_column,
+                            }
+                            for offset, after_column in zip(
+                                decimal_offsets,
+                                decimal_after,
+                            )
+                        ],
+                        "sign": {
+                            "x": base_x + int(layout.get("sign_offset", 0)),
+                            "y": int(section["sign_y"]),
+                        },
+                    }
+                )
 
         for question in questions:
 
@@ -4466,225 +4590,71 @@ def process_omr(
         .upper()
     )
 
-    # ========================================================
-    # NEET / KCET:
-    # PREPROCESS TO THE SAME CANONICAL GEOMETRY AS THE CLEAN
-    # REFERENCE SHEET BEFORE USING ANY JSON COORDINATES.
-    # ========================================================
-
-    if template_exam_name in [
-        "NEET",
-        "KCET",
-    ]:
-
-        project_dir = os.path.dirname(
-            os.path.abspath(__file__)
+    # Every generated sheet is registered against its own clean PDF render.
+    # This keeps fixed bubble coordinates stable across mobile and laptop
+    # captures and prevents one exam from inheriting another sheet's geometry.
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    reference_name = template.get("reference_image")
+    if not reference_name:
+        raise ValueError(
+            f"{template_exam_name} template is missing reference_image."
         )
 
-        reference_path = os.path.join(
-            project_dir,
-            "references",
-            "neet_reference.png",
-        )
+    reference_path = os.path.join(
+        project_dir,
+        "references",
+        safe_reference_name(reference_name),
+    )
+    local_debug_dir = (
+        os.path.join(project_dir, "alignment_debug", template["template_name"])
+        if not os.environ.get("VERCEL")
+        else None
+    )
 
-        local_debug_dir = (
-            os.path.join(
-                project_dir,
-                "alignment_debug",
-            )
-            if not os.environ.get("VERCEL")
-            else None
-        )
+    corrected, alignment_debug = canonicalize_omr(
+        image=image,
+        reference_path=reference_path,
+        output_size=(
+            int(template["sheet_width"]),
+            int(template["sheet_height"]),
+        ),
+        use_orb=True,
+        use_ecc=True,
+        debug_dir=local_debug_dir,
+    )
+    alignment_debug["input"] = input_debug
 
-        corrected, alignment_debug = (
-            canonicalize_omr(
-                image=image,
-                reference_path=reference_path,
-                output_size=(
-                    int(template["sheet_width"]),
-                    int(template["sheet_height"]),
-                ),
-                use_orb=True,
-                use_ecc=True,
-                ecc_minimum_score=0.75,
-                debug_dir=local_debug_dir,
-            )
-        )
-
-        alignment_debug["input"] = input_debug
-
-        # Keep two representations after canonical registration:
-        # - document_preview: enhanced for visual document-scan inspection
-        # - corrected: the conservative canonical image used by the frozen
-        #   recognition pipeline. This avoids changing bubble intensities.
-        (
-            document_preview,
-            _recognition_image,
-            document_mode_debug,
-        ) = prepare_omr_document_mode(
+    document_preview, _recognition_image, document_mode_debug = (
+        prepare_omr_document_mode(
             corrected,
             debug_dir=local_debug_dir,
         )
+    )
+    alignment_debug["document_mode"] = document_mode_debug
 
-        alignment_debug[
-            "document_mode"
-        ] = document_mode_debug
-
-        expected_width = int(
-            template["sheet_width"]
+    expected_width = int(template["sheet_width"])
+    expected_height = int(template["sheet_height"])
+    if corrected.shape[:2] != (expected_height, expected_width):
+        raise ValueError(
+            "Canonical OMR normalization failed. "
+            f"Expected {expected_width}x{expected_height}, "
+            f"got {corrected.shape[1]}x{corrected.shape[0]}."
         )
 
-        expected_height = int(
-            template["sheet_height"]
-        )
+    gray = normalize_grayscale(corrected)
+    crop_debug = {
+        "method": "canonical_reference_alignment",
+        "reference_image": reference_name,
+        "document_quad": alignment_debug.get("document_quad"),
+        "orb_applied": alignment_debug.get("orb_applied", False),
+        "orb_inliers": alignment_debug.get("orb_inliers", 0),
+        "ecc_applied": alignment_debug.get("ecc_applied", False),
+        "ecc_score": alignment_debug.get("ecc_score"),
+    }
 
-        actual_height, actual_width = (
-            corrected.shape[:2]
-        )
-
-        if (
-            actual_width != expected_width
-            or actual_height != expected_height
-        ):
-            corrected = cv2.resize(
-                corrected,
-                (
-                    expected_width,
-                    expected_height,
-                ),
-                interpolation=cv2.INTER_LINEAR,
-            )
-
-        if corrected.shape[:2] != (
-            expected_height,
-            expected_width,
-        ):
-            raise ValueError(
-                "Canonical OMR normalization failed. "
-                f"Expected {expected_width}x{expected_height}, "
-                f"got {corrected.shape[1]}x{corrected.shape[0]}."
-            )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "canonical_reference_alignment",
-
-            "document_bounds":
-                alignment_debug.get(
-                    "document_detection",
-                    {},
-                ).get(
-                    "bounds"
-                ),
-
-            "orb_applied":
-                alignment_debug.get(
-                    "orb_applied",
-                    False,
-                ),
-
-            "orb_inliers":
-                alignment_debug.get(
-                    "orb_inliers",
-                    0,
-                ),
-
-            "ecc_applied":
-                alignment_debug.get(
-                    "ecc_applied",
-                    False,
-                ),
-
-            "ecc_score":
-                alignment_debug.get(
-                    "ecc_score"
-                ),
-        }
-
-        if not os.environ.get(
-            "VERCEL"
-        ):
-            cv2.imwrite(
-                "corrected_omr.jpg",
-                corrected,
-            )
-
-            cv2.imwrite(
-                "document_mode_preview.jpg",
-                document_preview,
-            )
-
-    # ========================================================
-    # JEE:
-    # RETAIN EXISTING OUTER-PAGE CORRECTION
-    # ========================================================
-
-    else:
-
-        corners = (
-            detect_corner_markers(
-                image,
-                template,
-            )
-        )
-
-        corrected = (
-            perspective_transform(
-                image,
-                corners,
-                template,
-            )
-        )
-
-        gray = normalize_grayscale(
-            corrected
-        )
-
-        crop_debug = {
-            "method":
-                "white_page_contour",
-
-            "corners": [
-                [
-                    round(
-                        float(point[0]),
-                        2,
-                    ),
-                    round(
-                        float(point[1]),
-                        2,
-                    ),
-                ]
-                for point
-                in corners
-            ],
-        }
-
-        alignment_debug = {
-            "crop":
-                crop_debug,
-
-            "output_size": {
-                "width":
-                    int(
-                        template[
-                            "sheet_width"
-                        ]
-                    ),
-
-                "height":
-                    int(
-                        template[
-                            "sheet_height"
-                        ]
-                    ),
-            },
-        }
-        alignment_debug["input"] = input_debug
+    if not os.environ.get("VERCEL"):
+        cv2.imwrite("corrected_omr.jpg", corrected)
+        cv2.imwrite("document_mode_preview.jpg", document_preview)
 
 
     if debug_input_enabled and diagnostic_dir:
@@ -4767,6 +4737,7 @@ def process_omr(
     )
 
     paper_code = None
+    exam_series = None
     jee_series = None
 
     answers = {}
@@ -4779,15 +4750,16 @@ def process_omr(
 
         ensure_ml_model_available()
 
-        # Scan paper code first
-        paper_code = (
-            detect_paper_code(
+        # The generated combined sheet selects P/Q/R/S horizontally.
+        exam_series = (
+            detect_jee_series(
                 gray,
                 template,
             )
         )
+        paper_code = exam_series
 
-        # Then scan 180 answers
+        # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
                 corrected,
@@ -4819,15 +4791,15 @@ def process_omr(
 
         ensure_ml_model_available()
 
-        # Scan paper code first
-        paper_code = (
-            detect_paper_code(
+        exam_series = (
+            detect_jee_series(
                 gray,
                 template,
             )
         )
+        paper_code = exam_series
 
-        # Then scan 240 answers
+        # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
                 corrected,
@@ -4848,6 +4820,7 @@ def process_omr(
                 template,
             )
         )
+        exam_series = jee_series
 
         # Then scan JEE MCQ + numerical sections
         answers = (
@@ -4972,10 +4945,22 @@ def process_omr(
         doc_quad = alignment_debug.get("document_quad", [])
         stages = alignment_debug.get("document_mode", {}).get("stages", [])
 
-        num_blank = sum(1 for v in answers.values() if v is None or v == "BLANK")
-        num_multiple = sum(1 for v in answers.values() if v == "MULTIPLE")
-        num_uncertain = sum(1 for v in answers.values() if v == "UNCERTAIN")
-        num_evaluated = len(answers) * len(template.get("options", ["A", "B", "C", "D"])) if answers else 0
+        if exam_name == "JEE":
+            answer_rows = [
+                *answers.get("mcq", {}).values(),
+                *answers.get("numerical", {}).values(),
+            ]
+        else:
+            answer_rows = list(answers.values())
+
+        detected_values = [
+            row.get("answer", "BLANK") if isinstance(row, dict) else row
+            for row in answer_rows
+        ]
+        num_blank = sum(1 for value in detected_values if value in (None, "BLANK"))
+        num_multiple = sum(1 for value in detected_values if value == "MULTIPLE")
+        num_uncertain = sum(1 for value in detected_values if value == "UNCERTAIN")
+        num_evaluated = len(answer_rows)
 
         source = input_debug.get("source", "uploaded_bytes")
         image_width = int(input_debug.get("image_width", orig_w))
@@ -5025,6 +5010,9 @@ def process_omr(
 
         "paper_code":
             paper_code,
+
+        "series":
+            exam_series,
 
         "jee_series":
             jee_series,
