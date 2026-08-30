@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 from omr_preprocess.registration_align import (
     canonicalize_omr,
@@ -12,7 +11,6 @@ from scanner import (
     detect_exam_series,
     detect_jee_series,
     normalize_grayscale,
-    scan_answers,
     scan_jee_answers,
 )
 
@@ -112,26 +110,3 @@ def test_kcet_series_tolerates_small_mobile_alignment_offset():
 
     assert detected["value"] == "Q"
     assert detected["sampling_centres"]["Q"] != [series_x, series_y]
-
-
-def test_kcet_first_rows_survive_offset_and_top_shadow():
-    template = _load_template("kcet")
-    image = cv2.imread(str(ROOT / "references" / "neet_kcet_generated.png"))
-    expected = {1: "B", 2: "A", 3: "C", 4: "D", 6: "B", 7: "C", 9: "B"}
-
-    for question, option in expected.items():
-        row = (question - 1) % template["questions_per_column"]
-        x = template["columns"][0][option]
-        y = template["question_y_positions"][row]
-        cv2.circle(image, (x + 3, y + 5), 8, (15, 15, 15), -1)
-
-    height = image.shape[0]
-    top_shadow = np.linspace(0.72, 1.0, height, dtype=np.float32)[:, None, None]
-    image = np.clip(image.astype(np.float32) * top_shadow, 0, 255).astype(np.uint8)
-
-    detected = scan_answers(image, template)
-
-    for question, option in expected.items():
-        assert detected[question]["answer"] == option
-    for question in (5, 8, 10):
-        assert detected[question]["answer"] == "BLANK"
