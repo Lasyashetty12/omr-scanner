@@ -97,6 +97,7 @@ def test_canonical_registration_does_not_rotate_after_marker_warp(tmp_path):
 
     assert corrected.shape[:2] == (height, width)
     assert debug["orientation"]["selected_rotation"] == 0
+    assert debug["orientation"]["orientation_method"] == "header_structural_matching_0_180"
     assert debug["page_detection"]["method"] == "complete_a4_then_four_registration_blocks"
     # Red remains in the canonical top-left content region.
     assert corrected[325, 225, 2] > corrected[325, 225, 0]

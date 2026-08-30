@@ -7,7 +7,12 @@ from omr_preprocess.registration_align import (
     canonicalize_omr,
     detect_registration_blocks,
 )
-from scanner import detect_jee_series, normalize_grayscale, scan_jee_answers
+from scanner import (
+    detect_exam_series,
+    detect_jee_series,
+    normalize_grayscale,
+    scan_jee_answers,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,3 +94,19 @@ def test_generated_jee_bubbles_read_mcq_signed_decimal_and_series(tmp_path):
     assert answers["mcq"][70]["answer"] == "D"
     assert answers["numerical"][21]["answer"] == "-1.2"
     assert answers["numerical"][22]["answer"] == "BLANK"
+
+
+def test_kcet_series_tolerates_small_mobile_alignment_offset():
+    template = _load_template("kcet")
+    image = cv2.imread(str(ROOT / "references" / "neet_kcet_generated.png"))
+    series_x, series_y = template["series"]["coordinates"]["Q"]
+    cv2.circle(image, (series_x + 5, series_y - 4), 8, (0, 0, 0), -1)
+
+    detected = detect_exam_series(
+        normalize_grayscale(image),
+        template,
+        exam_name="KCET",
+    )
+
+    assert detected["value"] == "Q"
+    assert detected["sampling_centres"]["Q"] != [series_x, series_y]

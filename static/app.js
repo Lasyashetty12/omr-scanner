@@ -372,7 +372,8 @@ const JPEG_QUALITY =
 
 
 // Require repeated, stable marker recognition before auto-capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 5;
+const AUTO_CAPTURE_STABLE_CHECKS = 2;
+const AUTO_CAPTURE_CHECK_INTERVAL_MS = 120;
 
 
 /* ==========================================================
@@ -554,7 +555,7 @@ async function fetchAndRenderDashboard() {
                     <td>${r.blank}</td>
                     <td>${formattedDate}</td>
                     <td>
-                        <button type="button" class="action-view-btn" data-id="${r.scan_id || r.id}">
+                        <button type="button" class="action-view-btn" data-id="${r.id || r.scan_id}">
                             View
                         </button>
                     </td>
@@ -1207,9 +1208,9 @@ function findSolidSquareByContrast(
         BL: { x: 0, y: height },
     }[corner];
     const minSide = Math.max(4, Math.round(width * 0.006));
-    const maxSide = Math.max(12, Math.round(width * 0.040));
+    const maxSide = Math.max(12, Math.round(width * 0.030));
     const sideStep = Math.max(2, Math.round(width * 0.003));
-    const positionStep = 2;
+    const positionStep = 3;
     let best = null;
 
     for (let side = minSide; side <= maxSide; side += sideStep) {
@@ -1369,10 +1370,9 @@ function detectDocumentCorners() {
         return null;
     }
 
-    // 480px made the printed corner blocks collapse to 1-2 pixels on common
-    // 16:9 mobile streams. 960px remains inexpensive at 4 checks/second and
-    // preserves enough block pixels for reliable connected-component checks.
-    const analysisWidth = Math.min(960, videoWidth);
+    // 640px keeps corner squares large enough to distinguish from bubbles but
+    // avoids running a near-megapixel search for every live camera frame.
+    const analysisWidth = Math.min(640, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1416,8 +1416,8 @@ function detectDocumentCorners() {
     // A portrait A4 page inside a landscape camera can start around 30% of
     // the frame width. Search nearly the whole quadrant, then rank compact
     // candidates toward its true frame corner.
-    const zoneWidth = Math.round(analysisWidth * 0.48);
-    const zoneHeight = Math.round(analysisHeight * 0.48);
+    const zoneWidth = Math.round(analysisWidth * 0.46);
+    const zoneHeight = Math.round(analysisHeight * 0.46);
 
     const zones = [
         [0, 0, zoneWidth, zoneHeight],
@@ -1531,7 +1531,7 @@ function monitorCornerBlocks(timestamp) {
         return;
     }
 
-    if (timestamp - lastCornerCheckAt >= 250) {
+    if (timestamp - lastCornerCheckAt >= AUTO_CAPTURE_CHECK_INTERVAL_MS) {
         lastCornerCheckAt = timestamp;
 
         const detection = detectDocumentCorners();
@@ -1578,7 +1578,7 @@ function monitorCornerBlocks(timestamp) {
                 autoCaptureTriggered = true;
                 setTimeout(() => {
                     captureCameraImage(true);
-                }, 120);
+                }, 40);
             }
         } else {
             detectedDocumentBounds = null;
@@ -2646,7 +2646,25 @@ async function scanOMR() {
                 response
             );
 
-        latestResultId = data?.scan_id || data?.id || null;
+        // Prefer the durable database ID. The scan UUID remains a fallback for
+        // local development and deployments without a configured database.
+        latestResultId = data?.id || data?.scan_id || null;
+
+        // Serverless local files may not survive the next request. Keep the
+        // just-created result available to the individual-result page in this
+        // browser even when no durable database is configured.
+        try {
+            [data?.id, data?.scan_id]
+                .filter(Boolean)
+                .forEach((resultKey) => {
+                    localStorage.setItem(
+                        `omr-result:${resultKey}`,
+                        JSON.stringify(data)
+                    );
+                });
+        } catch (storageError) {
+            console.warn("Could not cache the OMR result locally:", storageError);
+        }
 
         displayResult(
             data,

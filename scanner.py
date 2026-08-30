@@ -3607,13 +3607,18 @@ def detect_paper_code(
 
 
 # ============================================================
-# JEE SERIES
+# EXAM SERIES (P/Q/R/S)
 # ============================================================
 
-def detect_jee_series(
+def detect_exam_series(
     gray_image,
     template,
+    exam_name=None,
 ):
+
+    exam_label = str(
+        exam_name or template.get("exam_name") or "OMR"
+    ).strip().upper()
 
     series_config = (
         template.get(
@@ -3623,7 +3628,7 @@ def detect_jee_series(
 
     if not series_config:
         raise ValueError(
-            "JEE series configuration is missing."
+            f"{exam_label} series configuration is missing."
         )
 
     if not series_config.get(
@@ -3631,7 +3636,7 @@ def detect_jee_series(
         False,
     ):
         raise ValueError(
-            "JEE series detection is disabled."
+            f"{exam_label} series detection is disabled."
         )
 
     coordinates = (
@@ -3643,10 +3648,19 @@ def detect_jee_series(
 
     if not coordinates:
         raise ValueError(
-            "JEE series coordinates are missing."
+            f"{exam_label} series coordinates are missing."
         )
 
     scores = {}
+    sampling_centres = {}
+    search_radius = int(
+        series_config.get(
+            "search_radius",
+            max(3, min(8, round(float(template.get("bubble_radius", 11)) * 0.55))),
+        )
+    )
+    search_step = max(1, int(series_config.get("search_step", 2)))
+    offsets = sorted(set(range(-search_radius, search_radius + 1, search_step)) | {0})
 
     for (
         series,
@@ -3661,19 +3675,28 @@ def detect_jee_series(
             or len(position) != 2
         ):
             raise ValueError(
-                f"Invalid coordinate for JEE series {series}."
+                f"Invalid coordinate for {exam_label} series {series}."
             )
 
         x, y = position
+        best_score = -1.0
+        best_centre = (int(x), int(y))
+        for dx in offsets:
+            for dy in offsets:
+                score = float(
+                    get_fill_ratio(
+                        gray_image,
+                        int(x) + dx,
+                        int(y) + dy,
+                        template,
+                    )
+                )
+                if score > best_score:
+                    best_score = score
+                    best_centre = (int(x) + dx, int(y) + dy)
 
-        scores[
-            str(series)
-        ] = get_fill_ratio(
-            gray_image,
-            int(x),
-            int(y),
-            template,
-        )
+        scores[str(series)] = best_score
+        sampling_centres[str(series)] = list(best_centre)
 
     ranked = sorted(
         scores.items(),
@@ -3684,7 +3707,7 @@ def detect_jee_series(
 
     if not ranked:
         raise ValueError(
-            "Unable to detect JEE series."
+            f"Unable to detect {exam_label} series."
         )
 
     selected_series = (
@@ -3718,25 +3741,30 @@ def detect_jee_series(
         )
     )
 
-    if (
-        selected_score
-        < threshold
-    ):
-        raise ValueError(
-            "Unable to detect JEE series."
-        )
-
     confidence_gap = (
         selected_score
         - second_score
     )
+
+    # A shaded/mobile capture can lower the absolute fill ratio while still
+    # leaving one clearly dominant P/Q/R/S bubble. Accept that strong relative
+    # signal, but never accept a weak or ambiguous row.
+    relaxed_threshold = threshold * 0.78
+    strong_gap = max(minimum_confidence_gap * 2.0, 0.08)
+    if selected_score < threshold and not (
+        selected_score >= relaxed_threshold
+        and confidence_gap >= strong_gap
+    ):
+        raise ValueError(
+            f"Unable to detect {exam_label} series."
+        )
 
     if (
         confidence_gap
         < minimum_confidence_gap
     ):
         raise ValueError(
-            "JEE series detection is ambiguous."
+            f"{exam_label} series detection is ambiguous."
         )
 
     return {
@@ -3764,7 +3792,14 @@ def detect_jee_series(
             for key, value
             in scores.items()
         },
+
+        "sampling_centres": sampling_centres,
     }
+
+
+def detect_jee_series(gray_image, template):
+    """Backward-compatible JEE-specific entry point used by existing callers."""
+    return detect_exam_series(gray_image, template, exam_name="JEE")
 
 
 # ============================================================
@@ -4757,9 +4792,10 @@ def process_omr(
 
         # The generated combined sheet selects P/Q/R/S horizontally.
         exam_series = (
-            detect_jee_series(
+            detect_exam_series(
                 gray,
                 template,
+                exam_name="NEET",
             )
         )
         paper_code = exam_series
@@ -4797,9 +4833,10 @@ def process_omr(
         ensure_ml_model_available()
 
         exam_series = (
-            detect_jee_series(
+            detect_exam_series(
                 gray,
                 template,
+                exam_name="KCET",
             )
         )
         paper_code = exam_series

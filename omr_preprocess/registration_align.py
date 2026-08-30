@@ -1922,43 +1922,33 @@ def ensure_canonical_orientation(
     reference: np.ndarray,
     width: int,
     height: int,
+    allowed_rotations: Tuple[int, ...] = (0, 90, 180, 270),
 ) -> tuple[np.ndarray, dict]:
     """
     Force the Manchester header to the TOP.
 
-    Evaluates 0°, 90°, 180°, and 270° rotations against the canonical reference header
-    to guarantee proper upright orientation regardless of photo capture orientation.
+    Evaluates the permitted cardinal rotations against the canonical reference
+    header. Production registration narrows this to 0°/180° after the sensor
+    frame has already been normalized to portrait.
     """
 
+    allowed = set(allowed_rotations)
+    rotations = tuple(
+        rotation
+        for rotation in (0, 90, 180, 270)
+        if rotation in allowed
+    )
+    if not rotations:
+        raise ValueError("At least one canonical orientation must be allowed.")
+
     candidates = {
-        0:
-            _rotate_to_candidate(
-                image,
-                0,
-                width,
-                height,
-            ),
-        90:
-            _rotate_to_candidate(
-                image,
-                90,
-                width,
-                height,
-            ),
-        180:
-            _rotate_to_candidate(
-                image,
-                180,
-                width,
-                height,
-            ),
-        270:
-            _rotate_to_candidate(
-                image,
-                270,
-                width,
-                height,
-            ),
+        rotation: _rotate_to_candidate(
+            image,
+            rotation,
+            width,
+            height,
+        )
+        for rotation in rotations
     }
 
     scores = {
@@ -1997,7 +1987,7 @@ def ensure_canonical_orientation(
         },
 
         "orientation_method":
-            "header_structural_matching_0_90_180_270",
+            "header_structural_matching_" + "_".join(map(str, rotations)),
     }
 
 
@@ -2080,6 +2070,11 @@ def canonicalize_omr(
         reference,
         width,
         height,
+        # The sensor frame has already been normalized to portrait. From this
+        # point the sheet can only be upright or upside-down. Excluding 90/270
+        # prevents a correctly uploaded portrait OMR from turning sideways due
+        # to repetitive bubble-grid structure.
+        allowed_rotations=(0, 180),
     )
     orientation_debug["selected_rotation"] = (
         capture_pre_rotation + int(orientation_debug["selected_rotation"])

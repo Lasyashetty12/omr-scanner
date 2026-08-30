@@ -49,6 +49,16 @@ function hideLoading() {
     loading.hidden = true;
 }
 
+function readCachedResult(resultId) {
+    try {
+        const cached = localStorage.getItem(`omr-result:${resultId}`);
+        return cached ? JSON.parse(cached) : null;
+    } catch (storageError) {
+        console.warn("Could not read cached OMR result:", storageError);
+        return null;
+    }
+}
+
 function renderQuestionTable(questionResults) {
     if (!questionTableBody) return;
     if (!questionResults || Object.keys(questionResults).length === 0) {
@@ -160,10 +170,21 @@ async function loadResult() {
             throw new Error("Result not found.");
         }
         const data = await resp.json();
+        try {
+            localStorage.setItem(`omr-result:${resultId}`, JSON.stringify(data));
+        } catch (storageError) {
+            console.warn("Could not cache fetched OMR result:", storageError);
+        }
         hideLoading();
         displayResultData(data);
     } catch (err) {
         console.error("Result fetch error:", err);
+        const cached = readCachedResult(resultId);
+        if (cached) {
+            hideLoading();
+            displayResultData(cached);
+            return;
+        }
         hideLoading();
         showError("Result not found.");
     }
