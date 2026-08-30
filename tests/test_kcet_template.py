@@ -19,5 +19,5 @@ def test_kcet_template_uses_its_own_identity_and_crop_geometry():
     assert template["ml_crop_radius"] == 12
     assert template["ml_crop_radius"] < 16
     assert template["grid_max_initial_match_distance"] == 12
-    assert template["grid_max_direct_pin_dy"] == 10
-    assert template["grid_max_final_dy_from_input"] == 16
+    assert template["grid_max_direct_pin_dy"] == 6
+    assert template["grid_max_final_dy_from_input"] == 6
