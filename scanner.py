@@ -4618,13 +4618,16 @@ def process_omr(
             int(template["sheet_width"]),
             int(template["sheet_height"]),
         ),
-        use_orb=True,
-        use_ecc=True,
+        # Geometry is established only from the complete page and its four
+        # registration boxes. Content-feature refinements can introduce a
+        # small mobile-dependent tilt/scale and are deliberately disabled.
+        use_orb=False,
+        use_ecc=False,
         debug_dir=local_debug_dir,
     )
     alignment_debug["input"] = input_debug
 
-    document_preview, _recognition_image, document_mode_debug = (
+    document_preview, recognition_image, document_mode_debug = (
         prepare_omr_document_mode(
             corrected,
             debug_dir=local_debug_dir,
@@ -4641,7 +4644,9 @@ def process_omr(
             f"got {corrected.shape[1]}x{corrected.shape[0]}."
         )
 
-    gray = normalize_grayscale(corrected)
+    # Bubble/series decisions use the colour-neutral, shadow-normalized image.
+    # It has exactly the same dimensions and coordinates as ``corrected``.
+    gray = normalize_grayscale(recognition_image)
     crop_debug = {
         "method": "canonical_reference_alignment",
         "reference_image": reference_name,
@@ -4762,7 +4767,7 @@ def process_omr(
         # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
-                corrected,
+                recognition_image,
                 template,
             )
         )
@@ -4802,7 +4807,7 @@ def process_omr(
         # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
-                corrected,
+                recognition_image,
                 template,
             )
         )
@@ -4825,7 +4830,7 @@ def process_omr(
         # Then scan JEE MCQ + numerical sections
         answers = (
             scan_jee_answers(
-                corrected,
+                recognition_image,
                 template,
             )
         )
@@ -4842,7 +4847,7 @@ def process_omr(
 
     threshold = (
         create_threshold_image(
-            corrected
+            recognition_image
         )
     )
 

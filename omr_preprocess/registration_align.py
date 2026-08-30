@@ -502,6 +502,137 @@ def _validate_marker_geometry(
         )
 
 
+def _validate_marker_corner_regions(
+    markers: np.ndarray,
+    width: int,
+    height: int,
+) -> Dict[str, Any]:
+    """Require four detected marks to occupy the outer page-corner regions.
+
+    Printed margins vary between OMR versions and camera page detection may
+    choose either the paper edge or the inset border.  Broad corner regions
+    accept both, while preventing response bubbles near the central grid from
+    serving as registration points.
+    """
+    tl, tr, br, bl = order_points(markers)
+    normalized = np.array(
+        [[x / max(float(width), 1.0), y / max(float(height), 1.0)] for x, y in (tl, tr, br, bl)],
+        dtype=np.float32,
+    )
+    valid = bool(
+        normalized[0, 0] < 0.30 and normalized[0, 1] < 0.30
+        and normalized[1, 0] > 0.70 and normalized[1, 1] < 0.30
+        and normalized[2, 0] > 0.70 and normalized[2, 1] > 0.70
+        and normalized[3, 0] < 0.30 and normalized[3, 1] > 0.70
+    )
+    debug = {
+        "valid": valid,
+        "normalized_markers": [
+            [round(float(x), 4), round(float(y), 4)] for x, y in normalized
+        ],
+    }
+    if not valid:
+        raise ValueError(
+            "Unable to align the complete OMR sheet. Four genuine corner "
+            "registration boxes were not found in the page-corner regions."
+        )
+    return debug
+
+
+def _detect_solid_corner_boxes_on_canonical_page(
+    image: np.ndarray,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Detect solid registration squares even when they touch page borders.
+
+    Long-line removal is useful on raw images, but a lower registration box
+    connected to the border can be removed with that border. On an already
+    flattened page we can safely search only the four outer corner regions and
+    select compact windows that are much darker than their surrounding ring.
+    Filled answer bubbles are outside these regions and do not qualify.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0).astype(np.float32)
+    height, width = gray.shape[:2]
+    min_side = max(8, int(round(width * 0.006)))
+    max_side = max(14, int(round(width * 0.040)))
+    step = max(2, int(round(width * 0.0025)))
+    regions = {
+        "TL": (0, int(width * 0.30), 0, int(height * 0.30), 0.0, 0.0),
+        "TR": (int(width * 0.70), width, 0, int(height * 0.30), float(width), 0.0),
+        "BR": (int(width * 0.70), width, int(height * 0.70), height, float(width), float(height)),
+        "BL": (0, int(width * 0.30), int(height * 0.70), height, 0.0, float(height)),
+    }
+    points: list[list[float]] = []
+    details: Dict[str, Any] = {}
+
+    for name in ("TL", "TR", "BR", "BL"):
+        x0, x1, y0, y1, target_x, target_y = regions[name]
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        distance = np.hypot(
+            (xx - target_x) / max(float(width), 1.0),
+            (yy - target_y) / max(float(height), 1.0),
+        )
+        best: Optional[Tuple[float, int, int, int, float, float]] = None
+
+        for side in range(min_side, max_side + 1, step):
+            inner = cv2.boxFilter(blurred, -1, (side, side), normalize=True)
+            outer_side = side * 2 + 1
+            outer = cv2.boxFilter(
+                blurred,
+                -1,
+                (outer_side, outer_side),
+                normalize=True,
+            )
+            inner_roi = inner[y0:y1, x0:x1]
+            contrast_roi = (outer - inner)[y0:y1, x0:x1]
+            scores = (
+                contrast_roi / 80.0
+                + (180.0 - np.minimum(inner_roi, 180.0)) / 180.0 * 0.25
+                - distance * 0.80
+            )
+            valid = (contrast_roi >= 8.0) & (inner_roi < 180.0)
+            scores = np.where(valid, scores, -9.0)
+            local_y, local_x = np.unravel_index(np.argmax(scores), scores.shape)
+            score = float(scores[local_y, local_x])
+            center_x = x0 + int(local_x)
+            center_y = y0 + int(local_y)
+            candidate = (
+                score,
+                center_x,
+                center_y,
+                side,
+                float(inner[center_y, center_x]),
+                float(contrast_roi[local_y, local_x]),
+            )
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+
+        if best is None or best[0] <= 0.20:
+            raise ValueError(
+                f"Could not detect {name} solid registration box on the complete page."
+            )
+
+        score, center_x, center_y, side, mean_gray, contrast = best
+        points.append([float(center_x), float(center_y)])
+        details[name] = {
+            "center": [center_x, center_y],
+            "side": side,
+            "mean_gray": round(mean_gray, 2),
+            "surrounding_contrast": round(contrast, 2),
+            "score": round(score, 4),
+        }
+
+    markers = order_points(np.array(points, dtype=np.float32))
+    _validate_marker_geometry(markers, width, height)
+    _validate_marker_corner_regions(markers, width, height)
+    return markers, {
+        "method": "solid_square_corner_contrast",
+        "candidate_count": 4,
+        "markers": [[round(float(x), 2), round(float(y), 2)] for x, y in markers],
+        "details": details,
+    }
+
+
 def _detect_registration_blocks_internal(
     small: np.ndarray,
 ) -> Tuple[Dict[str, np.ndarray], list[Dict[str, Any]]]:
@@ -525,33 +656,6 @@ def _detect_registration_blocks_internal(
             if cand is not None:
                 picked_dict[corner] = cand["center"]
         candidates.extend(legacy_candidates)
-
-    # Fallback recovery for missing corner blocks
-    if "TL" in picked_dict and "TR" in picked_dict:
-        tl = picked_dict["TL"]
-        tr = picked_dict["TR"]
-        dx = tr[0] - tl[0]
-        dy = tr[1] - tl[1]
-        perp_x = -dy * 1.375
-        perp_y = dx * 1.375
-
-        if "BL" not in picked_dict:
-            est_bl = np.array([tl[0] + perp_x, tl[1] + perp_y], dtype=np.float32)
-            sub_cands = [c for c in candidates if c["center"][0] < w * 0.48 and c["center"][1] > h * 0.60]
-            if sub_cands:
-                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_bl))
-                picked_dict["BL"] = best_cand["center"]
-            else:
-                picked_dict["BL"] = est_bl
-
-        if "BR" not in picked_dict:
-            est_br = np.array([tr[0] + perp_x, tr[1] + perp_y], dtype=np.float32)
-            sub_cands = [c for c in candidates if c["center"][0] > w * 0.52 and c["center"][1] > h * 0.60]
-            if sub_cands:
-                best_cand = min(sub_cands, key=lambda c: np.linalg.norm(c["center"] - est_br))
-                picked_dict["BR"] = best_cand["center"]
-            else:
-                picked_dict["BR"] = est_br
 
     return picked_dict, candidates
 
@@ -1985,13 +2089,20 @@ def canonicalize_omr(
     # Registration boxes now perform a small geometry correction inside the
     # already-complete page. All four must be genuinely present near their
     # template locations; missing boxes are not inferred from response ink.
-    markers, marker_debug = detect_registration_blocks(oriented)
+    markers, marker_debug = _detect_solid_corner_boxes_on_canonical_page(oriented)
     pre_registration_validation = _validate_canonical_marker_positions(
         markers,
         width,
         height,
         expected_markers=reference_markers,
-        strict=True,
+        # The full-page contour can follow either the physical paper edge or
+        # the inset printed border, so exact pre-warp marker margins vary.
+        strict=False,
+    )
+    pre_registration_validation["corner_regions"] = _validate_marker_corner_regions(
+        markers,
+        width,
+        height,
     )
     coarse, homography = warp_from_registration_blocks(
         oriented,

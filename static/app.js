@@ -372,7 +372,7 @@ const JPEG_QUALITY =
 
 
 // Require repeated, stable marker recognition before auto-capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 4;
+const AUTO_CAPTURE_STABLE_CHECKS = 5;
 
 
 /* ==========================================================
@@ -950,8 +950,9 @@ function setCornerDetectionState(
     }
 
     if (captureButton) {
-
-        captureButton.disabled = !detected;
+        // Manual capture must always remain available while the camera is
+        // active. Only automatic capture is registration-box gated.
+        captureButton.disabled = !cameraStream;
         captureButton.classList.remove("hidden");
     }
 }
@@ -1014,7 +1015,7 @@ function findSolidMarkerInZone(
     // limits scale-safe while rejecting large logos and headings.
     const minComponentArea = Math.max(4, Math.round(zoneArea * 0.00003));
     const maxComponentArea = Math.round(zoneArea * 0.08);
-    const minSide = 2;
+    const minSide = 4;
     const maxSide = Math.max(12, Math.round(Math.min(zoneWidth, zoneHeight) * 0.28));
 
     let best = null;
@@ -1077,10 +1078,10 @@ function findSolidMarkerInZone(
         if (componentWidth > maxSide || componentHeight > maxSide) continue;
 
         const aspect = componentWidth / Math.max(componentHeight, 1);
-        if (aspect < 0.45 || aspect > 2.2) continue;
+        if (aspect < 0.60 || aspect > 1.67) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.64) continue;
+        if (fill < 0.72) continue;
 
         // A filled response bubble is circular: the four corners of its
         // bounding box remain mostly white. A registration mark is a solid
@@ -1111,7 +1112,7 @@ function findSolidMarkerInZone(
             cornerOccupancies.reduce((sum, value) => sum + value, 0)
             / cornerOccupancies.length
         );
-        if (minimumCornerOccupancy < 0.20 || averageCornerOccupancy < 0.48) continue;
+        if (minimumCornerOccupancy < 0.35 || averageCornerOccupancy < 0.62) continue;
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
         const centerX = startX + (sumX / area);
@@ -1150,6 +1151,122 @@ function findSolidMarkerInZone(
     }
 
     return best;
+}
+
+
+function buildBrightnessIntegral(pixels, width, height) {
+    const stride = width + 1;
+    const integral = new Float64Array((width + 1) * (height + 1));
+    for (let y = 0; y < height; y += 1) {
+        let rowSum = 0;
+        for (let x = 0; x < width; x += 1) {
+            const offset = (y * width + x) * 4;
+            rowSum += (
+                pixels[offset] * 0.299
+                + pixels[offset + 1] * 0.587
+                + pixels[offset + 2] * 0.114
+            );
+            integral[(y + 1) * stride + x + 1] =
+                integral[y * stride + x + 1] + rowSum;
+        }
+    }
+    return { integral, stride, width, height };
+}
+
+
+function integralBoxMean(integralData, centerX, centerY, side) {
+    const { integral, stride, width, height } = integralData;
+    const half = Math.floor(side / 2);
+    const x0 = Math.max(0, centerX - half);
+    const y0 = Math.max(0, centerY - half);
+    const x1 = Math.min(width, centerX + side - half);
+    const y1 = Math.min(height, centerY + side - half);
+    const sum = (
+        integral[y1 * stride + x1]
+        - integral[y0 * stride + x1]
+        - integral[y1 * stride + x0]
+        + integral[y0 * stride + x0]
+    );
+    return sum / Math.max((x1 - x0) * (y1 - y0), 1);
+}
+
+
+function findSolidSquareByContrast(
+    integralData,
+    startX,
+    startY,
+    endX,
+    endY,
+    corner
+) {
+    const { width, height } = integralData;
+    const target = {
+        TL: { x: 0, y: 0 },
+        TR: { x: width, y: 0 },
+        BR: { x: width, y: height },
+        BL: { x: 0, y: height },
+    }[corner];
+    const minSide = Math.max(4, Math.round(width * 0.006));
+    const maxSide = Math.max(12, Math.round(width * 0.040));
+    const sideStep = Math.max(2, Math.round(width * 0.003));
+    const positionStep = 2;
+    let best = null;
+
+    for (let side = minSide; side <= maxSide; side += sideStep) {
+        const outerSide = side * 2 + 1;
+        const edgeMargin = Math.ceil(outerSide / 2);
+        for (
+            let y = Math.max(startY, edgeMargin);
+            y < Math.min(endY, height - edgeMargin);
+            y += positionStep
+        ) {
+            for (
+                let x = Math.max(startX, edgeMargin);
+                x < Math.min(endX, width - edgeMargin);
+                x += positionStep
+            ) {
+                const innerMean = integralBoxMean(integralData, x, y, side);
+                const outerMean = integralBoxMean(integralData, x, y, outerSide);
+                const contrast = outerMean - innerMean;
+                if (contrast < 8 || innerMean > 185) continue;
+
+                // Solid squares remain dark in all four inner corners. A
+                // circular filled bubble becomes bright in at least one.
+                const cornerOffset = Math.max(1, Math.round(side * 0.30));
+                const cornerSide = Math.max(2, Math.round(side * 0.28));
+                const cornerMeans = [
+                    integralBoxMean(integralData, x - cornerOffset, y - cornerOffset, cornerSide),
+                    integralBoxMean(integralData, x + cornerOffset, y - cornerOffset, cornerSide),
+                    integralBoxMean(integralData, x + cornerOffset, y + cornerOffset, cornerSide),
+                    integralBoxMean(integralData, x - cornerOffset, y + cornerOffset, cornerSide),
+                ];
+                if (Math.max(...cornerMeans) > innerMean + 52) continue;
+
+                const distance = Math.hypot(
+                    (x - target.x) / Math.max(width, 1),
+                    (y - target.y) / Math.max(height, 1)
+                );
+                const darkness = (180 - Math.min(innerMean, 180)) / 180;
+                const score = contrast / 80 + darkness * 0.25 - distance * 0.80;
+                if (!best || score > best.score) {
+                    best = {
+                        score,
+                        x,
+                        y,
+                        componentWidth: side,
+                        componentHeight: side,
+                        fill: 1,
+                        aspect: 1,
+                        cornerOccupancy: 1,
+                        contrast,
+                        meanBrightness: innerMean,
+                    };
+                }
+            }
+        }
+    }
+
+    return best && best.score > 0.20 ? best : null;
 }
 
 
@@ -1253,9 +1370,9 @@ function detectDocumentCorners() {
     }
 
     // 480px made the printed corner blocks collapse to 1-2 pixels on common
-    // 16:9 mobile streams. 720px remains inexpensive at 4 checks/second and
+    // 16:9 mobile streams. 960px remains inexpensive at 4 checks/second and
     // preserves enough block pixels for reliable connected-component checks.
-    const analysisWidth = Math.min(720, videoWidth);
+    const analysisWidth = Math.min(960, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1310,11 +1427,14 @@ function detectDocumentCorners() {
     ];
 
     const cornerNames = ["TL", "TR", "BR", "BL"];
+    const integralData = buildBrightnessIntegral(
+        pixels,
+        analysisWidth,
+        analysisHeight
+    );
     const markers = zones.map(([sx, sy, ex, ey], index) =>
-        findSolidMarkerInZone(
-            pixels,
-            analysisWidth,
-            analysisHeight,
+        findSolidSquareByContrast(
+            integralData,
             sx,
             sy,
             ex,
@@ -1357,6 +1477,13 @@ function detectDocumentCorners() {
 
     if (Math.max(top, bottom) / Math.max(Math.min(top, bottom), 1) > 1.75) return null;
     if (Math.max(left, right) / Math.max(Math.min(left, right), 1) > 1.75) return null;
+
+    const observedSheetRatio = (
+        (top + bottom) / Math.max(left + right, 1)
+    );
+    if (observedSheetRatio < 0.44 || observedSheetRatio > 1.02) {
+        return null;
+    }
 
     // Keep the detected quadrilateral large enough to represent a full OMR.
     const polygonArea = Math.abs(
@@ -1708,7 +1835,7 @@ function captureCameraImage(
         return;
     }
 
-    if (!pageCornersDetected) {
+    if (automatic && !pageCornersDetected) {
         if (cornerDetectionStatus) {
             cornerDetectionStatus.textContent =
                 "Align the OMR sheet — four black corner markers must be recognized before capture.";

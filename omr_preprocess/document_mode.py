@@ -41,15 +41,27 @@ def _gentle_illumination_correction(
 ) -> np.ndarray:
     """Flatten only broad lighting gradients; never create a binary mask."""
     short_side = min(gray.shape[:2])
-    sigma = float(np.clip(short_side / 28.0, 30.0, 75.0))
-    background = cv2.GaussianBlur(
+    kernel_side = int(np.clip(round(short_side / 28.0), 31, 71))
+    if kernel_side % 2 == 0:
+        kernel_side += 1
+    # Closing fills printed bubbles/characters before estimating illumination,
+    # so dense answer columns cannot become cloud-shaped false shadows.
+    background = cv2.morphologyEx(
         gray,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_side, kernel_side),
+        ),
+    )
+    background = cv2.GaussianBlur(
+        background,
         (0, 0),
-        sigmaX=sigma,
-        sigmaY=sigma,
+        sigmaX=max(5.0, kernel_side / 7.0),
+        sigmaY=max(5.0, kernel_side / 7.0),
     )
 
-    paper_level = max(float(np.percentile(background, 92.0)), 1.0)
+    paper_level = min(max(float(np.percentile(background, 92.0)), 1.0), 245.0)
     normalized = cv2.divide(
         gray,
         np.maximum(background, 1).astype(np.uint8),
@@ -58,9 +70,9 @@ def _gentle_illumination_correction(
 
     illumination_strength = float(
         np.clip(
-            0.28 + characteristics["illumination_range"] / 150.0,
-            0.28,
-            0.62,
+            0.48 + characteristics["illumination_range"] / 220.0,
+            0.50,
+            0.78,
         )
     )
 
@@ -115,13 +127,13 @@ def create_document_scan(
     """
     Create a scan-like OMR image without changing its geometry.
 
-    This intentionally uses no adaptive/global binarisation or morphological
-    background subtraction. Those operations are prone to erasing thin OMR
-    rings or producing artificial patches under uneven camera lighting.
+    This intentionally uses no adaptive/global binarisation and never changes
+    geometry. Broad illumination is estimated independently of foreground ink
+    so thin OMR rings and filled bubbles remain intact.
     """
-    if corrected_bgr is not None and corrected_bgr.ndim == 3:
-        corrected_bgr = enhance_color_saturation(corrected_bgr)
-
+    # Recognition is intentionally colour-neutral. Saturation enhancement can
+    # exaggerate coloured shadows/compression noise and must never influence
+    # whether a bubble is considered filled.
     original = _as_gray(corrected_bgr)
     characteristics = _image_characteristics(original)
     lighting = _gentle_illumination_correction(original, characteristics)
@@ -211,9 +223,9 @@ def prepare_omr_document_mode(
     height, width = document_image.shape[:2]
     debug = {
         "profile": "gentle_document_mode_v2",
-        "preview_only": True,
-        "recognition_image_modified": False,
-        "recognition_source": "canonical_registered",
+        "preview_only": False,
+        "recognition_image_modified": True,
+        "recognition_source": "shadow_normalized_grayscale_document",
         "geometry_changed": False,
         "adaptive_threshold_used": False,
         "document_width": int(width),
