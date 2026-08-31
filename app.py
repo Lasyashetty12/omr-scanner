@@ -1315,7 +1315,7 @@ def get_result_html():
 
 
 # ============================================================
-# TEACHER DASHBOARD API — LIST EVALUATED RESULTS
+# TEACHER DASHBOARD API â€” LIST EVALUATED RESULTS
 # ============================================================
 
 
