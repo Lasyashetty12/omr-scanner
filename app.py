@@ -1071,50 +1071,31 @@ async def scan_omr(
 
         else:
 
+            # Merge MCQ + numerical scoring so the result page and database
+            # receive the complete 75-question JEE breakdown.
+            jee_question_results = {}
+            jee_question_results.update(
+                score_data.get("mcq", {}).get("questions", {})
+            )
+            jee_question_results.update(
+                score_data.get("numerical", {}).get("questions", {})
+            )
+
             result.update(
                 {
-
-                    "series":
-                        series,
-
-                    "series_details":
-                        series_data,
-
-                    "score":
-                        score_data.get(
-                            "score"
-                        ),
-
-                    "correct":
-                        score_data.get(
-                            "correct"
-                        ),
-
-                    "wrong":
-                        score_data.get(
-                            "wrong"
-                        ),
-
-                    "blank":
-                        score_data.get(
-                            "blank"
-                        ),
-
-                    "multiple":
-                        score_data.get(
-                            "multiple",
-                            0,
-                        ),
-
-                    "mcq_answers":
-                        mcq_detected,
-
-                    "numerical_answers":
-                        numerical_detected,
-
-                    "score_details":
-                        score_data,
-
+                    "series": series,
+                    "paper_code": series,
+                    "series_details": series_data,
+                    "score": score_data.get("score"),
+                    "correct": score_data.get("correct"),
+                    "wrong": score_data.get("wrong"),
+                    "blank": score_data.get("blank"),
+                    "multiple": score_data.get("multiple", 0),
+                    "uncertain": score_data.get("uncertain", 0),
+                    "mcq_answers": mcq_detected,
+                    "numerical_answers": numerical_detected,
+                    "question_results": jee_question_results,
+                    "score_details": score_data,
                 }
             )
 

@@ -4507,6 +4507,558 @@ def draw_paper_code_debug(
     return debug
 
 
+def draw_jee_answer_analysis(corrected_image, template, answers):
+    # Draw JEE MCQ and numerical bubbles actually detected by the reader.
+    debug = corrected_image.copy()
+    gray = normalize_grayscale(corrected_image)
+
+    answers = answers or {}
+    mcq_answers = answers.get("mcq", {})
+    numerical_answers = answers.get("numerical", {})
+
+    radius = max(
+        10,
+        int(template.get("bubble_radius", 10)) + 4,
+    )
+    ring_thickness = 2
+    options_default = ["A", "B", "C", "D"]
+
+    def refine_center(
+        base_x,
+        base_y,
+        search_radius=4,
+        search_step=1,
+    ):
+        best = (
+            int(base_x),
+            int(base_y),
+        )
+        best_score = -1.0
+
+        for dx in range(
+            -search_radius,
+            search_radius + 1,
+            search_step,
+        ):
+            for dy in range(
+                -search_radius,
+                search_radius + 1,
+                search_step,
+            ):
+                x = int(base_x) + dx
+                y = int(base_y) + dy
+
+                score = float(
+                    get_fill_ratio(
+                        gray,
+                        x,
+                        y,
+                        template,
+                    )
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best = (x, y)
+
+        return best
+
+    for section in template.get(
+        "mcq_sections",
+        [],
+    ):
+        start_question = int(
+            section["start_question"]
+        )
+        total_questions = int(
+            section["total_questions"]
+        )
+        y_positions = section.get(
+            "question_y_positions"
+        )
+        options = section.get(
+            "options",
+            options_default,
+        )
+        option_x = section["option_x"]
+
+        search_radius = int(
+            section.get(
+                "search_radius",
+                4,
+            )
+        )
+        search_step = max(
+            1,
+            int(
+                section.get(
+                    "search_step",
+                    1,
+                )
+            ),
+        )
+
+        multiple_threshold = float(
+            section.get(
+                "multiple_threshold",
+                template.get(
+                    "multiple_threshold",
+                    template.get(
+                        "filled_threshold",
+                        0.50,
+                    ),
+                ),
+            )
+        )
+
+        for row_index in range(
+            total_questions
+        ):
+            question_number = (
+                start_question
+                + row_index
+            )
+
+            record = mcq_answers.get(
+                question_number,
+                mcq_answers.get(
+                    str(question_number),
+                    {},
+                ),
+            )
+
+            if not isinstance(
+                record,
+                dict,
+            ):
+                continue
+
+            if y_positions is not None:
+                y = int(
+                    y_positions[
+                        row_index
+                    ]
+                )
+            else:
+                y = (
+                    int(
+                        section[
+                            "start_y"
+                        ]
+                    )
+                    + row_index
+                    * int(
+                        section[
+                            "row_gap"
+                        ]
+                    )
+                )
+
+            detected = str(
+                record.get(
+                    "answer",
+                    "BLANK",
+                )
+            ).upper()
+
+            scores = (
+                record.get(
+                    "scores",
+                    {},
+                )
+                or {}
+            )
+
+            if detected in options:
+                selected_options = [
+                    detected
+                ]
+                ring_color = (
+                    0,
+                    200,
+                    0,
+                )
+
+            elif detected == "MULTIPLE":
+                selected_options = [
+                    option
+                    for option
+                    in options
+                    if float(
+                        scores.get(
+                            option,
+                            0.0,
+                        )
+                    )
+                    >= multiple_threshold
+                ]
+                ring_color = (
+                    0,
+                    0,
+                    255,
+                )
+
+            elif detected == "UNCERTAIN":
+                selected_options = (
+                    [
+                        max(
+                            options,
+                            key=lambda option:
+                            float(
+                                scores.get(
+                                    option,
+                                    0.0,
+                                )
+                            ),
+                        )
+                    ]
+                    if scores
+                    else []
+                )
+                ring_color = (
+                    0,
+                    215,
+                    255,
+                )
+
+            else:
+                selected_options = []
+
+            for option in selected_options:
+                center = refine_center(
+                    int(
+                        option_x[
+                            option
+                        ]
+                    ),
+                    y,
+                    search_radius=
+                        search_radius,
+                    search_step=
+                        search_step,
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    radius,
+                    ring_color,
+                    ring_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    2,
+                    ring_color,
+                    -1,
+                    lineType=cv2.LINE_AA,
+                )
+
+    layout = template.get(
+        "numerical_layout",
+        {},
+    )
+
+    digit_offsets = [
+        int(value)
+        for value
+        in layout.get(
+            "digit_offsets",
+            [],
+        )
+    ]
+
+    decimal_offsets = [
+        int(value)
+        for value
+        in layout.get(
+            "decimal_offsets",
+            [],
+        )
+    ]
+
+    decimal_after_columns = [
+        int(value)
+        for value
+        in layout.get(
+            "decimal_after_columns",
+            [],
+        )
+    ]
+
+    for section in template.get(
+        "numerical_sections",
+        [],
+    ):
+        start_question = int(
+            section[
+                "start_question"
+            ]
+        )
+
+        digit_y_positions = [
+            int(value)
+            for value
+            in section[
+                "digit_y_positions"
+            ]
+        ]
+
+        decimal_y = int(
+            section[
+                "decimal_y"
+            ]
+        )
+
+        sign_y = int(
+            section[
+                "sign_y"
+            ]
+        )
+
+        threshold = float(
+            template.get(
+                "filled_threshold",
+                0.50,
+            )
+        )
+
+        for index, base_x_value in enumerate(
+            section[
+                "question_x_positions"
+            ]
+        ):
+            question_number = (
+                start_question
+                + index
+            )
+
+            record = numerical_answers.get(
+                question_number,
+                numerical_answers.get(
+                    str(question_number),
+                    {},
+                ),
+            )
+
+            if not isinstance(
+                record,
+                dict,
+            ):
+                continue
+
+            base_x = int(
+                base_x_value
+            )
+
+            detected_answer = str(
+                record.get(
+                    "answer",
+                    "BLANK",
+                )
+            ).upper()
+
+            ring_color = (
+                (
+                    0,
+                    215,
+                    255,
+                )
+                if detected_answer
+                == "UNCERTAIN"
+                else (
+                    0,
+                    200,
+                    0,
+                )
+            )
+
+            for detail in record.get(
+                "columns",
+                [],
+            ):
+                value = str(
+                    detail.get(
+                        "value",
+                        "",
+                    )
+                )
+
+                column_index = (
+                    int(
+                        detail.get(
+                            "column",
+                            0,
+                        )
+                    )
+                    - 1
+                )
+
+                if (
+                    not value.isdigit()
+                    or column_index < 0
+                    or column_index
+                    >= len(
+                        digit_offsets
+                    )
+                ):
+                    continue
+
+                digit = int(
+                    value
+                )
+
+                if (
+                    digit < 0
+                    or digit
+                    >= len(
+                        digit_y_positions
+                    )
+                ):
+                    continue
+
+                center = (
+                    base_x
+                    + digit_offsets[
+                        column_index
+                    ],
+                    digit_y_positions[
+                        digit
+                    ],
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    radius,
+                    ring_color,
+                    ring_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    2,
+                    ring_color,
+                    -1,
+                    lineType=cv2.LINE_AA,
+                )
+
+            for detail in record.get(
+                "decimal_points",
+                [],
+            ):
+                if float(
+                    detail.get(
+                        "score",
+                        0.0,
+                    )
+                ) < threshold:
+                    continue
+
+                after_column = int(
+                    detail.get(
+                        "after_column",
+                        -1,
+                    )
+                )
+
+                if (
+                    after_column
+                    not in
+                    decimal_after_columns
+                ):
+                    continue
+
+                decimal_index = (
+                    decimal_after_columns
+                    .index(
+                        after_column
+                    )
+                )
+
+                if (
+                    decimal_index
+                    >= len(
+                        decimal_offsets
+                    )
+                ):
+                    continue
+
+                center = (
+                    base_x
+                    + decimal_offsets[
+                        decimal_index
+                    ],
+                    decimal_y,
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    radius,
+                    ring_color,
+                    ring_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+
+            sign_detail = (
+                record.get(
+                    "sign"
+                )
+                or {}
+            )
+
+            if (
+                sign_detail.get(
+                    "value"
+                )
+                == "-"
+            ):
+                center = (
+                    base_x
+                    + int(
+                        layout.get(
+                            "sign_offset",
+                            0,
+                        )
+                    ),
+                    sign_y,
+                )
+
+                cv2.circle(
+                    debug,
+                    center,
+                    radius,
+                    ring_color,
+                    ring_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+
+    cv2.putText(
+        debug,
+        "JEE DETECTED BUBBLES",
+        (
+            20,
+            40,
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (
+            0,
+            0,
+            255,
+        ),
+        2,
+        cv2.LINE_AA,
+    )
+
+    return debug
+
+
 # ============================================================
 # DEBUG IMAGE
 # ============================================================
@@ -4545,26 +5097,10 @@ def create_debug_image(
         )
 
     elif exam_name == "JEE":
-
-        # JEE debug drawing can be expanded
-        # once exact MCQ and numerical coordinates
-        # are calibrated.
-
-        cv2.putText(
-            debug,
-            "JEE TEMPLATE",
-            (
-                20,
-                40,
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (
-                0,
-                0,
-                255,
-            ),
-            2,
+        return draw_jee_answer_analysis(
+            corrected_image,
+            template,
+            answers,
         )
 
     return debug
