@@ -3878,17 +3878,89 @@ def scan_jee_mcq_sections(
 
             coordinates = {}
 
+            # JEE MCQ bubbles can move a few pixels after camera/page
+            # registration. Refine each configured bubble centre locally
+            # before applying the normal fill thresholds.
+            search_radius = int(
+                section.get(
+                    "search_radius",
+                    4,
+                )
+            )
+
+            search_step = max(
+                1,
+                int(
+                    section.get(
+                        "search_step",
+                        1,
+                    )
+                ),
+            )
+
             for option in options:
+
+                base_x = int(
+                    option_x[
+                        option
+                    ]
+                )
+
+                base_y = int(y)
+
+                best_x = base_x
+                best_y = base_y
+                best_score = -1.0
+
+                for dx in range(
+                    -search_radius,
+                    search_radius + 1,
+                    search_step,
+                ):
+                    for dy in range(
+                        -search_radius,
+                        search_radius + 1,
+                        search_step,
+                    ):
+
+                        candidate_x = (
+                            base_x + dx
+                        )
+
+                        candidate_y = (
+                            base_y + dy
+                        )
+
+                        candidate_score = (
+                            get_fill_ratio(
+                                gray,
+                                candidate_x,
+                                candidate_y,
+                                template,
+                            )
+                        )
+
+                        if (
+                            candidate_score
+                            > best_score
+                        ):
+                            best_score = (
+                                candidate_score
+                            )
+
+                            best_x = (
+                                candidate_x
+                            )
+
+                            best_y = (
+                                candidate_y
+                            )
 
                 coordinates[
                     option
                 ] = (
-                    int(
-                        option_x[
-                            option
-                        ]
-                    ),
-                    int(y),
+                    best_x,
+                    best_y,
                 )
 
             temporary_template = (
