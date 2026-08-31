@@ -39,7 +39,7 @@ def _quad_geometry_score(
     area = abs(float(cv2.contourArea(quad.reshape(-1, 1, 2))))
     coverage = area / max(image_area, 1.0)
 
-    if coverage < 0.25 or coverage > 0.995:
+    if coverage < 0.25:
         return None
 
     tl, tr, br, bl = quad
@@ -74,6 +74,17 @@ def _quad_geometry_score(
     brightness = float(np.mean(pixels)) / 255.0
     white_fraction = float(np.mean(pixels > 135))
 
+    # Uploaded/scanned OMR images may already be cropped almost exactly
+    # to the A4 page. Allow that case instead of rejecting >99.5% coverage.
+    # A nearly-full-frame candidate is accepted only when it still strongly
+    # resembles the expected bright portrait OMR sheet.
+    if coverage > 0.995:
+        if (
+            ratio_error > 0.08
+            or white_fraction < 0.55
+            or brightness < 0.55
+        ):
+            return None
     # Prefer a large bright portrait sheet with the expected ratio.
     return (
         coverage * 4.0
