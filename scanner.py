@@ -502,19 +502,9 @@ def validate_image_quality(image):
         image
     )
 
-    # Reject only genuinely unusable / nearly uniform frames.
-    # Do not reject a real OMR merely because the white paper makes
-    # the overall camera frame very bright.
-    nearly_uniform = contrast < 6.0
-    extreme_exposure = brightness < 20.0 or brightness > 252.0
-    no_usable_detail = nearly_uniform and (
-        extreme_exposure or blur < 12.0
-    )
-
-    if no_usable_detail:
-        raise ValueError(
-            "OMR sheet could not be detected clearly. Please place the complete sheet inside the camera frame and scan again."
-        )
+    # Pre-scan quality metrics are informational only.
+    # Actual OMR validity is decided by page/registration-marker detection.
+    # This avoids rejecting a valid white OMR sheet before corner detection.
 
     return {
         "blur": round(
