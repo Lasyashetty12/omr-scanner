@@ -10,13 +10,13 @@ def load(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_dummy_neet_and_kcet_keys_cover_the_physical_208_rows():
+def test_dummy_neet_and_kcet_keys_cover_the_physical_240_rows():
     for exam in ("neet", "kcet"):
         for series in SERIES:
             key = load(ROOT / "answer_keys" / exam / f"{series}.json")
             assert key["dummy"] is True
             assert key["series"] == series
-            assert len(key["answers"]) == 208
+            assert len(key["answers"]) == 240
             assert set(key["answers"].values()) == {"A", "B", "C", "D"}
 
 

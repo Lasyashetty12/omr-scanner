@@ -1,22 +1,28 @@
 # Generated OMR template calibration
 
-The scanner templates are calibrated against the generated Manchester OMR
-PDFs rendered to a canonical `1600 x 2263` pixel page.
+The scanner templates are calibrated against the Manchester OMR PDFs rendered
+to a canonical `1600 x 2263` pixel page.
 
 ## NEET / KCET
 
 - Reference: `references/neet_kcet_generated.png`
-- Four answer columns with 52 physical rows each
-- 208 physical answer rows in total
-- Options: A, B, C, D
+- Four answer columns with exactly 60 physical rows each
+- 240 physical answer rows in total
+- Printed ranges: `1-60`, `61-120`, `121-180`, `181-240`
+- Options are logically A, B, C, D in the scanner (the printed bubbles contain
+  1, 2, 3, 4 in the corresponding A, B, C, D positions)
 - Series selector: P, Q, R, S
+- Canonical answer-row centres run from y=326 through y=1979
 
-The supplied PDF does not contain 60 answer rows per column. Its printed
-question labels also include repeated/skipped numbers, so the scanner maps the
-physical rows sequentially from 1 through 208.
+The print sheet, canonical reference, KCET template and NEET template now share
+the same 60-row geometry.
 
 ## JEE
 
+JEE remains on its existing independent template and reference. Do not replace
+JEE geometry with the 240-question NEET/KCET grid.
+
+- Template: `templates/jee.json`
 - Reference: `references/jee_generated.png`
 - MCQ questions: 1-20, 26-45, 51-70
 - Numerical questions: 21-25, 46-50, 71-75
@@ -26,6 +32,6 @@ physical rows sequentially from 1 through 208.
 
 ## Answer keys
 
-Scoring requires an answer-key JSON whose filename matches the detected
-series, for example `answer_keys/jee/P.json`. The repository does not invent
-or translate answer keys between older codes and the new P/Q/R/S selector.
+Scoring requires an answer-key JSON whose filename matches the detected series.
+The P/Q/R/S files included in this patch are test-only dummy keys expanded to
+240 questions for NEET/KCET. Replace them with official keys in production.

@@ -24,19 +24,36 @@ def _load_template(name):
     return json.loads((ROOT / "templates" / f"{name}.json").read_text())
 
 
-def test_generated_neet_and_kcet_share_the_measured_208_row_grid():
+def test_generated_neet_and_kcet_share_the_true_240_row_grid():
     neet = _load_template("neet")
     kcet = _load_template("kcet")
+
+    expected_y = [
+        326, 354, 383, 410, 438, 467, 494, 522, 551, 578,
+        606, 635, 662, 690, 719, 746, 774, 803, 830, 858,
+        887, 914, 942, 971, 998, 1026, 1055, 1082, 1110, 1139,
+        1166, 1194, 1223, 1250, 1278, 1307, 1334, 1362, 1391, 1418,
+        1446, 1475, 1502, 1530, 1559, 1586, 1614, 1643, 1670, 1698,
+        1727, 1754, 1782, 1811, 1838, 1866, 1895, 1922, 1950, 1979,
+    ]
 
     for template in (neet, kcet):
         assert template["sheet_width"] == 1600
         assert template["sheet_height"] == 2263
-        assert template["total_questions"] == 208
-        assert template["questions_per_column"] == 52
+        assert template["total_questions"] == 240
+        assert template["questions_per_column"] == 60
         assert len(template["columns"]) == 4
-        assert len(template["question_y_positions"]) == 52
-        assert template["question_y_positions"][0] == 338
-        assert template["question_y_positions"][-1] == 1966
+        assert template["question_y_positions"] == expected_y
+
+        qpc = template["questions_per_column"]
+        assert (1 - 1) // qpc == 0
+        assert (60 - 1) // qpc == 0
+        assert (61 - 1) // qpc == 1
+        assert (120 - 1) // qpc == 1
+        assert (121 - 1) // qpc == 2
+        assert (180 - 1) // qpc == 2
+        assert (181 - 1) // qpc == 3
+        assert (240 - 1) // qpc == 3
 
 
 def test_reference_registration_blocks_are_the_actual_corner_boxes():
@@ -134,6 +151,39 @@ def test_kcet_series_tolerates_small_mobile_alignment_offset():
 
     assert detected["value"] == "Q"
     assert detected["sampling_centres"]["Q"] != [series_x, series_y]
+
+
+def test_kcet_first_middle_and_final_rows_follow_60_row_geometry():
+    template = _load_template("kcet")
+    image = cv2.imread(str(ROOT / "references" / "neet_kcet_generated.png"))
+
+    expected = {
+        1: "B",
+        30: "A",
+        60: "C",
+        61: "D",
+        90: "B",
+        120: "A",
+        121: "C",
+        150: "D",
+        180: "B",
+        181: "A",
+        210: "C",
+        240: "D",
+    }
+
+    for question, option in expected.items():
+        column_index = (question - 1) // template["questions_per_column"]
+        row = (question - 1) % template["questions_per_column"]
+        x = template["columns"][column_index][option]
+        y = template["question_y_positions"][row]
+        cv2.circle(image, (x, y), 8, (15, 15, 15), -1)
+
+    detected = scan_answers(image, template)
+
+    assert len(detected) == 240
+    for question, option in expected.items():
+        assert detected[question]["answer"] == option
 
 
 def test_kcet_first_rows_survive_offset_and_top_shadow():
