@@ -502,15 +502,16 @@ def validate_image_quality(image):
         image
     )
 
-    # Conservative non-blocking quality assessment.
-    # Borderline photos are permitted to proceed to document detection and
-    # canonical OMR processing as per Quality Gate requirements.
-    if brightness < 15.0 or brightness > 253.0:
-        raise ValueError(
-            "OMR sheet could not be detected clearly. Please place the complete sheet inside the camera frame and scan again."
-        )
+    # Reject only genuinely unusable / nearly uniform frames.
+    # Do not reject a real OMR merely because the white paper makes
+    # the overall camera frame very bright.
+    nearly_uniform = contrast < 6.0
+    extreme_exposure = brightness < 20.0 or brightness > 252.0
+    no_usable_detail = nearly_uniform and (
+        extreme_exposure or blur < 12.0
+    )
 
-    if contrast < 5.0 and blur < 10.0:
+    if no_usable_detail:
         raise ValueError(
             "OMR sheet could not be detected clearly. Please place the complete sheet inside the camera frame and scan again."
         )
