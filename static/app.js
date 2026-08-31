@@ -1010,19 +1010,37 @@ function findSolidMarkerInZone(
         }
     }
 
+    // Keep only pixels with a genuinely solid 3x3 neighbourhood. This erodes
+    // thin printed borders/letters and separates a corner square from the page
+    // border it touches, while preserving the square's filled interior.
+    const solidMask = new Uint8Array(zoneArea);
+    for (let zy = 1; zy + 1 < zoneHeight; zy += 1) {
+        for (let zx = 1; zx + 1 < zoneWidth; zx += 1) {
+            let darkNeighbours = 0;
+            for (let oy = -1; oy <= 1; oy += 1) {
+                for (let ox = -1; ox <= 1; ox += 1) {
+                    darkNeighbours += darkMask[(zy + oy) * zoneWidth + zx + ox];
+                }
+            }
+            if (darkNeighbours === 9) {
+                solidMask[zy * zoneWidth + zx] = 1;
+            }
+        }
+    }
+
     const visited = new Uint8Array(zoneArea);
     // Corner blocks become only 3-8 analysis pixels wide when an A4 portrait
     // page is held inside a landscape phone-camera frame. Keep the lower
     // limits scale-safe while rejecting large logos and headings.
     const minComponentArea = Math.max(4, Math.round(zoneArea * 0.00003));
     const maxComponentArea = Math.round(zoneArea * 0.08);
-    const minSide = 4;
+    const minSide = 3;
     const maxSide = Math.max(12, Math.round(Math.min(zoneWidth, zoneHeight) * 0.28));
 
     let best = null;
 
     for (let index = 0; index < zoneArea; index += 1) {
-        if (!darkMask[index] || visited[index]) continue;
+        if (!solidMask[index] || visited[index]) continue;
 
         const stack = [index];
         visited[index] = 1;
@@ -1053,19 +1071,19 @@ function findSolidMarkerInZone(
             const up = current - zoneWidth;
             const down = current + zoneWidth;
 
-            if (cx > 0 && darkMask[left] && !visited[left]) {
+            if (cx > 0 && solidMask[left] && !visited[left]) {
                 visited[left] = 1;
                 stack.push(left);
             }
-            if (cx + 1 < zoneWidth && darkMask[right] && !visited[right]) {
+            if (cx + 1 < zoneWidth && solidMask[right] && !visited[right]) {
                 visited[right] = 1;
                 stack.push(right);
             }
-            if (cy > 0 && darkMask[up] && !visited[up]) {
+            if (cy > 0 && solidMask[up] && !visited[up]) {
                 visited[up] = 1;
                 stack.push(up);
             }
-            if (cy + 1 < zoneHeight && darkMask[down] && !visited[down]) {
+            if (cy + 1 < zoneHeight && solidMask[down] && !visited[down]) {
                 visited[down] = 1;
                 stack.push(down);
             }
@@ -1102,7 +1120,7 @@ function findSolidMarkerInZone(
             for (let yy = cornerY; yy < cornerY + cornerSizeY; yy += 1) {
                 for (let xx = cornerX; xx < cornerX + cornerSizeX; xx += 1) {
                     if (xx < 0 || xx >= zoneWidth || yy < 0 || yy >= zoneHeight) continue;
-                    dark += darkMask[yy * zoneWidth + xx] ? 1 : 0;
+                    dark += solidMask[yy * zoneWidth + xx] ? 1 : 0;
                     total += 1;
                 }
             }
@@ -1113,7 +1131,7 @@ function findSolidMarkerInZone(
             cornerOccupancies.reduce((sum, value) => sum + value, 0)
             / cornerOccupancies.length
         );
-        if (minimumCornerOccupancy < 0.35 || averageCornerOccupancy < 0.62) continue;
+        if (minimumCornerOccupancy < 0.50 || averageCornerOccupancy < 0.72) continue;
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
         const centerX = startX + (sumX / area);
@@ -1427,14 +1445,11 @@ function detectDocumentCorners() {
     ];
 
     const cornerNames = ["TL", "TR", "BR", "BL"];
-    const integralData = buildBrightnessIntegral(
-        pixels,
-        analysisWidth,
-        analysisHeight
-    );
     const markers = zones.map(([sx, sy, ex, ey], index) =>
-        findSolidSquareByContrast(
-            integralData,
+        findSolidMarkerInZone(
+            pixels,
+            analysisWidth,
+            analysisHeight,
             sx,
             sy,
             ex,
@@ -1454,6 +1469,29 @@ function detectDocumentCorners() {
 
     // Ordered TL, TR, BR, BL.
     const [tl, tr, br, bl] = sourcePoints;
+
+    // Registration blocks must occupy the four *outer* page corners.  This
+    // geometry guard prevents four dark response bubbles, table cells, or
+    // logo fragments from forming a plausible but incorrect quadrilateral.
+    const outerCornerGeometry = (
+        tl.x <= videoWidth * 0.36
+        && bl.x <= videoWidth * 0.36
+        && tr.x >= videoWidth * 0.64
+        && br.x >= videoWidth * 0.64
+        && tl.y <= videoHeight * 0.30
+        && tr.y <= videoHeight * 0.30
+        && bl.y >= videoHeight * 0.70
+        && br.y >= videoHeight * 0.70
+    );
+    if (!outerCornerGeometry) return null;
+
+    // The two left markers and the two right markers must describe the same
+    // page edges.  Bubbles selected from different answer columns fail this
+    // test even when each individual component happens to look dark/square.
+    if (Math.abs(tl.x - bl.x) > videoWidth * 0.15) return null;
+    if (Math.abs(tr.x - br.x) > videoWidth * 0.15) return null;
+    if (Math.abs(tl.y - tr.y) > videoHeight * 0.12) return null;
+    if (Math.abs(bl.y - br.y) > videoHeight * 0.12) return null;
 
     // All four printed registration boxes use the same physical dimensions.
     // Perspective can change their apparent size, but a bubble/text candidate
@@ -1481,7 +1519,7 @@ function detectDocumentCorners() {
     const observedSheetRatio = (
         (top + bottom) / Math.max(left + right, 1)
     );
-    if (observedSheetRatio < 0.44 || observedSheetRatio > 1.02) {
+    if (observedSheetRatio < 0.50 || observedSheetRatio > 0.90) {
         return null;
     }
 

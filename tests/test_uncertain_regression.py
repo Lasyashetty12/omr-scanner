@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 
 from ml_omr.hybrid_reader import _decide_question, _postprocess_known_failure_classes
@@ -120,3 +121,40 @@ def test_strong_q180_mark_remains_answered():
 
     assert result["status"] == "answered"
     assert result["answer"] == "A"
+
+
+def test_kcet_offset_compact_fill_is_rescued_without_rescuing_outlines():
+    gray = np.full((220, 220), 245, dtype=np.uint8)
+    options = {}
+
+    for option, x in zip("ABCD", (50, 80, 110, 140)):
+        cv2.circle(gray, (x, 100), 10, 20, 1)
+        options[option] = {
+            "metrics": {
+                "center_darkness": 0.0,
+                "disk_dark_ratio": 0.0,
+                "core_dark_ratio": 0.0,
+            },
+            "ml_filled_probability": 0.0,
+            "micro_core_darkness": 0.0,
+            "crop_center": [x, 100],
+        }
+
+    # Perspective correction displaced the real B fill by four pixels in
+    # each axis.  The expected-center measurements above therefore missed it.
+    cv2.circle(gray, (84, 96), 9, 5, -1)
+
+    result = _postprocess_known_failure_classes(
+        2,
+        options,
+        {"status": "blank", "answer": None, "best_option": "B"},
+        gray,
+        questions_per_column=52,
+        crop_radius=12,
+    )
+
+    assert result["status"] == "answered"
+    assert result["answer"] == "B"
+    assert result["offset_compact_fill_rescue"]
+    assert result["offset_fill_dx"] == 4
+    assert result["offset_fill_dy"] == -4

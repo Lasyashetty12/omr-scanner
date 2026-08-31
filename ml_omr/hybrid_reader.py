@@ -2662,6 +2662,58 @@ def _postprocess_known_failure_classes(
         return decision
 
     # --------------------------------------------------------------
+    # OFFSET COMPACT-FILL RESCUE (KCET / SMALL BUBBLES)
+    # --------------------------------------------------------------
+    # A mobile perspective warp can leave the fitted grid a few pixels away
+    # from the ink even though the printed bubble lattice is otherwise
+    # correct.  The ordinary crop then sees a dark edge instead of the filled
+    # centre and may report BLANK.  Search only +/-4 px and accept a rescue
+    # only when one option is a compact, nearly full disk with a large visual
+    # lead over every other option.  Empty outlines and two marked bubbles do
+    # not satisfy these conditions.
+    if (
+        decision.get("status") in ("blank", "ambiguous")
+        and (questions_per_column == 60 or crop_radius <= 12)
+    ):
+        local_probe = _tight_local_shape_probe(gray, option_data)
+
+        if local_probe is not None:
+            ranked_probe = sorted(
+                options,
+                key=lambda option: local_probe[option]["best_broad"]["broad"],
+                reverse=True,
+            )
+            local_winner = ranked_probe[0]
+            local_best = local_probe[local_winner]["best_broad"]
+            local_second = local_probe[ranked_probe[1]]["best_broad"]
+
+            if (
+                local_best["broad"] >= 78.0
+                and local_best["broad"] - local_second["broad"] >= 28.0
+                and local_best["micro_darkness"] >= 165.0
+                and local_best["center_darkness"] >= 75.0
+                and local_best["core_dark_ratio"] >= 0.92
+                and local_best["disk_dark_ratio"] >= 0.72
+                and (
+                    local_best["disk_dark_ratio"]
+                    - local_second["disk_dark_ratio"]
+                    >= 0.18
+                )
+            ):
+                rescued = dict(decision)
+                rescued["answer"] = local_winner
+                rescued["status"] = "answered"
+                rescued["best_option"] = local_winner
+                rescued["offset_compact_fill_rescue"] = True
+                rescued["offset_fill_dx"] = int(local_best["dx"])
+                rescued["offset_fill_dy"] = int(local_best["dy"])
+                rescued["offset_fill_gap"] = round(
+                    float(local_best["broad"] - local_second["broad"]),
+                    3,
+                )
+                return rescued
+
+    # --------------------------------------------------------------
     # A) Correct a rare low-disk false SINGLE using only the tiny
     #    center measurement. This cannot alter strong/medium fills.
     # --------------------------------------------------------------
