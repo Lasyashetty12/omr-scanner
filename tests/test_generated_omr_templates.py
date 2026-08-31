@@ -71,6 +71,28 @@ def test_rotated_generated_jee_sheet_is_registered_upright():
     assert debug["ecc_score"] > 0.99
 
 
+def test_jee_corner_registration_does_not_use_filled_response_bubbles():
+    template = _load_template("jee")
+    reference_path = ROOT / "references" / "jee_generated.png"
+    image = cv2.imread(str(reference_path))
+    series_x, series_y = template["series"]["coordinates"]["P"]
+    cv2.circle(image, (series_x, series_y), 8, (0, 0, 0), -1)
+
+    corrected, debug = canonicalize_omr(
+        image,
+        reference_path,
+        output_size=(1600, 2263),
+        use_orb=False,
+        use_ecc=False,
+    )
+
+    detected = detect_jee_series(normalize_grayscale(corrected), template)
+
+    assert detected["value"] == "P"
+    assert detected["confidence_gap"] >= 0.10
+    assert debug["registration"]["pre_registration_validation"]["valid"]
+
+
 def test_generated_jee_bubbles_read_mcq_signed_decimal_and_series(tmp_path):
     template = _load_template("jee")
     image = cv2.imread(str(ROOT / "references" / "jee_generated.png"))

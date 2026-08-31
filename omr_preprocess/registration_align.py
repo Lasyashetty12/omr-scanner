@@ -541,6 +541,7 @@ def _validate_marker_corner_regions(
 
 def _detect_solid_corner_boxes_on_canonical_page(
     image: np.ndarray,
+    expected_markers: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Detect solid registration squares even when they touch page borders.
 
@@ -556,12 +557,26 @@ def _detect_solid_corner_boxes_on_canonical_page(
     min_side = max(8, int(round(width * 0.006)))
     max_side = max(14, int(round(width * 0.040)))
     step = max(2, int(round(width * 0.0025)))
-    regions = {
-        "TL": (0, int(width * 0.30), 0, int(height * 0.30), 0.0, 0.0),
-        "TR": (int(width * 0.70), width, 0, int(height * 0.30), float(width), 0.0),
-        "BR": (int(width * 0.70), width, int(height * 0.70), height, float(width), float(height)),
-        "BL": (0, int(width * 0.30), int(height * 0.70), height, 0.0, float(height)),
-    }
+    expected = (
+        order_points(expected_markers).astype(np.float32)
+        if expected_markers is not None
+        else _canonical_marker_positions(width, height)
+    )
+    search_half_width = max(28, int(round(width * 0.07)))
+    search_half_height = max(38, int(round(height * 0.07)))
+    regions = {}
+    for name, (expected_x, expected_y) in zip(
+        ("TL", "TR", "BR", "BL"),
+        expected,
+    ):
+        regions[name] = (
+            max(0, int(round(expected_x)) - search_half_width),
+            min(width, int(round(expected_x)) + search_half_width + 1),
+            max(0, int(round(expected_y)) - search_half_height),
+            min(height, int(round(expected_y)) + search_half_height + 1),
+            float(expected_x),
+            float(expected_y),
+        )
     points: list[list[float]] = []
     details: Dict[str, Any] = {}
 
@@ -569,8 +584,8 @@ def _detect_solid_corner_boxes_on_canonical_page(
         x0, x1, y0, y1, target_x, target_y = regions[name]
         yy, xx = np.mgrid[y0:y1, x0:x1]
         distance = np.hypot(
-            (xx - target_x) / max(float(width), 1.0),
-            (yy - target_y) / max(float(height), 1.0),
+            (xx - target_x) / max(float(search_half_width), 1.0),
+            (yy - target_y) / max(float(search_half_height), 1.0),
         )
         best: Optional[Tuple[float, int, int, int, float, float]] = None
 
@@ -588,7 +603,7 @@ def _detect_solid_corner_boxes_on_canonical_page(
             scores = (
                 contrast_roi / 80.0
                 + (180.0 - np.minimum(inner_roi, 180.0)) / 180.0 * 0.25
-                - distance * 0.80
+                - distance * 0.35
             )
             valid = (contrast_roi >= 8.0) & (inner_roi < 180.0)
             scores = np.where(valid, scores, -9.0)
@@ -2084,7 +2099,10 @@ def canonicalize_omr(
     # Registration boxes now perform a small geometry correction inside the
     # already-complete page. All four must be genuinely present near their
     # template locations; missing boxes are not inferred from response ink.
-    markers, marker_debug = _detect_solid_corner_boxes_on_canonical_page(oriented)
+    markers, marker_debug = _detect_solid_corner_boxes_on_canonical_page(
+        oriented,
+        expected_markers=reference_markers,
+    )
     pre_registration_validation = _validate_canonical_marker_positions(
         markers,
         width,
