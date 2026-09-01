@@ -3878,89 +3878,19 @@ def scan_jee_mcq_sections(
 
             coordinates = {}
 
-            # JEE MCQ bubbles can move a few pixels after camera/page
-            # registration. Refine each configured bubble centre locally
-            # before applying the normal fill thresholds.
-            search_radius = int(
-                section.get(
-                    "search_radius",
-                    4,
-                )
-            )
-
-            search_step = max(
-                1,
-                int(
-                    section.get(
-                        "search_step",
-                        1,
-                    )
-                ),
-            )
-
+            # JEE fine alignment is performed once for the complete sheet.
+            # Read every MCQ option at its configured canonical centre instead
+            # of independently searching each option for darkest nearby ink.
             for option in options:
-
-                base_x = int(
-                    option_x[
-                        option
-                    ]
-                )
-
-                base_y = int(y)
-
-                best_x = base_x
-                best_y = base_y
-                best_score = -1.0
-
-                for dx in range(
-                    -search_radius,
-                    search_radius + 1,
-                    search_step,
-                ):
-                    for dy in range(
-                        -search_radius,
-                        search_radius + 1,
-                        search_step,
-                    ):
-
-                        candidate_x = (
-                            base_x + dx
-                        )
-
-                        candidate_y = (
-                            base_y + dy
-                        )
-
-                        candidate_score = (
-                            get_fill_ratio(
-                                gray,
-                                candidate_x,
-                                candidate_y,
-                                template,
-                            )
-                        )
-
-                        if (
-                            candidate_score
-                            > best_score
-                        ):
-                            best_score = (
-                                candidate_score
-                            )
-
-                            best_x = (
-                                candidate_x
-                            )
-
-                            best_y = (
-                                candidate_y
-                            )
-
                 coordinates[
                     option
                 ] = (
-                    best_x,
-                    best_y,
+                    int(
+                        option_x[
+                            option
+                        ]
+                    ),
+                    int(y),
                 )
 
             temporary_template = (
@@ -4725,17 +4655,13 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 selected_options = []
 
             for option in selected_options:
-                center = refine_center(
+                center = (
                     int(
                         option_x[
                             option
                         ]
                     ),
-                    y,
-                    search_radius=
-                        search_radius,
-                    search_step=
-                        search_step,
+                    int(y),
                 )
 
                 cv2.circle(
@@ -5255,8 +5181,9 @@ def process_omr(
         # Geometry is established only from the complete page and its four
         # registration boxes. Content-feature refinements can introduce a
         # small mobile-dependent tilt/scale and are deliberately disabled.
-        use_orb=False,
-        use_ecc=False,
+        use_orb=(template_exam_name == "JEE"),
+        use_ecc=(template_exam_name == "JEE"),
+        ecc_minimum_score=0.80,
         debug_dir=local_debug_dir,
     )
     alignment_debug["input"] = input_debug
