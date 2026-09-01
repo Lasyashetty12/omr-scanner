@@ -3,7 +3,6 @@ from ml_omr.hybrid_reader import scan_answers_ml
 from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
-from jee_reader import scan_jee_answers_robust
 from identity_reader import detect_identity_fields
 import json
 import logging
@@ -3880,19 +3879,93 @@ def scan_jee_mcq_sections(
 
             coordinates = {}
 
-            # JEE fine alignment is performed once for the complete sheet.
-            # Read every MCQ option at its configured canonical centre instead
-            # of independently searching each option for darkest nearby ink.
+            # JEE MCQ bubbles can move a few pixels after camera/page
+            # registration. Refine each configured bubble centre locally
+            # before applying the normal fill thresholds.
+            #
+            # This is the production path that previously produced the
+            # validated 75/75 JEE result. The search is deliberately small
+            # enough that it cannot jump to the neighbouring option.
+            search_radius = int(
+                section.get(
+                    "search_radius",
+                    4,
+                )
+            )
+
+            search_step = max(
+                1,
+                int(
+                    section.get(
+                        "search_step",
+                        1,
+                    )
+                ),
+            )
+
             for option in options:
+
+                base_x = int(
+                    option_x[
+                        option
+                    ]
+                )
+
+                base_y = int(y)
+
+                best_x = base_x
+                best_y = base_y
+                best_score = -1.0
+
+                for dx in range(
+                    -search_radius,
+                    search_radius + 1,
+                    search_step,
+                ):
+                    for dy in range(
+                        -search_radius,
+                        search_radius + 1,
+                        search_step,
+                    ):
+
+                        candidate_x = (
+                            base_x + dx
+                        )
+
+                        candidate_y = (
+                            base_y + dy
+                        )
+
+                        candidate_score = (
+                            get_fill_ratio(
+                                gray,
+                                candidate_x,
+                                candidate_y,
+                                template,
+                            )
+                        )
+
+                        if (
+                            candidate_score
+                            > best_score
+                        ):
+                            best_score = (
+                                candidate_score
+                            )
+
+                            best_x = (
+                                candidate_x
+                            )
+
+                            best_y = (
+                                candidate_y
+                            )
+
                 coordinates[
                     option
                 ] = (
-                    int(
-                        option_x[
-                            option
-                        ]
-                    ),
-                    int(y),
+                    best_x,
+                    best_y,
                 )
 
             temporary_template = (
@@ -5533,10 +5606,14 @@ def process_omr(
         )
         exam_series = jee_series
 
-        # Then scan JEE MCQ + numerical sections. Each printed grid is
-        # calibrated from its own circle geometry before fill classification.
+        # Then scan JEE MCQ + numerical sections.
+        #
+        # IMPORTANT:
+        # Use the previously validated production reader. Its MCQ path
+        # performs only a small local centre correction and its numerical
+        # path uses the established JEE template coordinates.
         answers = (
-            scan_jee_answers_robust(
+            scan_jee_answers(
                 recognition_image,
                 template,
             )
