@@ -562,8 +562,13 @@ def _detect_solid_corner_boxes_on_canonical_page(
         if expected_markers is not None
         else _canonical_marker_positions(width, height)
     )
-    search_half_width = max(28, int(round(width * 0.07)))
-    search_half_height = max(38, int(round(height * 0.07)))
+    # A mobile page contour may follow either the physical paper edge or the
+    # inset printed border. That can move a real marker by more than the old
+    # seven-percent window after the first perspective warp, especially at BR.
+    # The wider window is still confined to a known template corner and every
+    # selected set must pass the four-marker geometry checks below.
+    search_half_width = max(36, int(round(width * 0.11)))
+    search_half_height = max(48, int(round(height * 0.11)))
     regions = {}
     for name, (expected_x, expected_y) in zip(
         ("TL", "TR", "BR", "BL"),

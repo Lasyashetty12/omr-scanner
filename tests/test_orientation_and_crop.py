@@ -5,10 +5,39 @@ import pytest
 from PIL import Image, ImageOps
 from scanner import load_image
 from omr_preprocess.registration_align import (
+    _detect_solid_corner_boxes_on_canonical_page,
     canonicalize_omr,
     ensure_canonical_orientation,
     detect_registration_blocks,
 )
+
+
+def test_canonical_corner_search_tolerates_mobile_br_displacement():
+    """A border-based page warp can move BR well beyond the old 7% window."""
+    height, width = 2263, 1600
+    image = np.full((height, width, 3), 245, dtype=np.uint8)
+    expected = np.float32(
+        [[80, 85], [1520, 85], [1520, 2175], [80, 2175]]
+    )
+    observed = expected.copy()
+    observed[2] = [1385, 1985]
+
+    for x, y in observed.astype(int):
+        cv2.rectangle(
+            image,
+            (x - 13, y - 13),
+            (x + 13, y + 13),
+            (5, 5, 5),
+            -1,
+        )
+
+    markers, debug = _detect_solid_corner_boxes_on_canonical_page(
+        image,
+        expected_markers=expected,
+    )
+
+    assert np.linalg.norm(markers[2] - observed[2]) <= 4
+    assert debug["details"]["BR"]["score"] > 0.20
 
 
 def test_exif_load_image_preserves_array(tmp_path):

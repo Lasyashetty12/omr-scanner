@@ -13,10 +13,11 @@ def test_manual_capture_is_not_registration_gated():
     assert "if (automatic && !pageCornersDetected)" in source
 
 
-def test_autocapture_is_single_fast_marker_check():
+def test_autocapture_uses_two_fast_marker_checks():
     source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
 
-    assert "const AUTO_CAPTURE_STABLE_CHECKS = 1;" in source
-    assert "const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;" in source
-    assert "const analysisWidth = Math.min(480, videoWidth);" in source
+    assert "const AUTO_CAPTURE_STABLE_CHECKS = 2;" in source
+    assert "const AUTO_CAPTURE_CHECK_INTERVAL_MS = 80;" in source
+    assert "const analysisWidth = Math.min(640, videoWidth);" in source
+    assert "findSolidSquareByContrast(" in source
     assert "setTimeout(() =>" not in source

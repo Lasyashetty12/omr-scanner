@@ -371,9 +371,10 @@ const JPEG_QUALITY =
     0.92;
 
 
-// Require repeated, stable marker recognition before auto-capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 1;
-const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
+// Two consecutive checks are still effectively instant for the user, while
+// preventing a single blurred frame from triggering capture.
+const AUTO_CAPTURE_STABLE_CHECKS = 2;
+const AUTO_CAPTURE_CHECK_INTERVAL_MS = 80;
 
 
 /* ==========================================================
@@ -1388,9 +1389,11 @@ function detectDocumentCorners() {
         return null;
     }
 
-    // 640px keeps corner squares large enough to distinguish from bubbles but
-    // avoids running a near-megapixel search for every live camera frame.
-    const analysisWidth = Math.min(480, videoWidth);
+    // At 480px a registration block can shrink below three pixels when a
+    // portrait sheet is viewed by a landscape phone sensor. 640px preserves
+    // enough of the square for reliable component/contrast detection while
+    // remaining small enough for live analysis on mobile devices.
+    const analysisWidth = Math.min(640, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1445,7 +1448,7 @@ function detectDocumentCorners() {
     ];
 
     const cornerNames = ["TL", "TR", "BR", "BL"];
-    const markers = zones.map(([sx, sy, ex, ey], index) =>
+    let markers = zones.map(([sx, sy, ex, ey], index) =>
         findSolidMarkerInZone(
             pixels,
             analysisWidth,
@@ -1457,6 +1460,30 @@ function detectDocumentCorners() {
             cornerNames[index]
         )
     );
+
+    // A lower marker can touch the printed page border. Connected-component
+    // detection then sees one long border instead of a compact square. Fall
+    // back only for missing corners to a local square-versus-surroundings
+    // contrast check; the full four-marker geometry below remains mandatory.
+    if (!markers.every(Boolean)) {
+        const integralData = buildBrightnessIntegral(
+            pixels,
+            analysisWidth,
+            analysisHeight
+        );
+        markers = markers.map((marker, index) => {
+            if (marker) return marker;
+            const [sx, sy, ex, ey] = zones[index];
+            return findSolidSquareByContrast(
+                integralData,
+                sx,
+                sy,
+                ex,
+                ey,
+                cornerNames[index]
+            );
+        });
+    }
 
     if (!markers.every(Boolean)) {
         return null;
