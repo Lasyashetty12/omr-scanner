@@ -110,6 +110,24 @@ def test_jee_corner_registration_does_not_use_filled_response_bubbles():
     assert debug["registration"]["pre_registration_validation"]["valid"]
 
 
+def test_jee_series_tolerates_mobile_header_offset():
+    template = _load_template("jee")
+    image = cv2.imread(str(ROOT / "references" / "jee_generated.png"))
+    series_x, series_y = template["series"]["coordinates"]["P"]
+
+    # Header content can retain a larger local displacement than the corner
+    # blocks after a close, oblique phone capture is flattened.
+    cv2.circle(image, (series_x + 14, series_y - 12), 8, (15, 15, 15), -1)
+
+    detected = detect_jee_series(normalize_grayscale(image), template)
+
+    assert detected["value"] == "P"
+    sampled_x, sampled_y = detected["sampling_centres"]["P"]
+    assert abs(sampled_x - (series_x + 14)) <= 3
+    assert abs(sampled_y - (series_y - 12)) <= 3
+    assert detected["confidence_gap"] >= 0.10
+
+
 def test_generated_jee_bubbles_read_mcq_signed_decimal_and_series(tmp_path):
     template = _load_template("jee")
     image = cv2.imread(str(ROOT / "references" / "jee_generated.png"))
