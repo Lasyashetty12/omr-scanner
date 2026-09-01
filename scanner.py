@@ -3,6 +3,8 @@ from ml_omr.hybrid_reader import scan_answers_ml
 from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
+from jee_reader import scan_jee_answers_robust
+from identity_reader import detect_identity_fields
 import json
 import logging
 import os
@@ -4655,14 +4657,54 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 selected_options = []
 
             for option in selected_options:
-                center = (
-                    int(
-                        option_x[
-                            option
-                        ]
-                    ),
-                    int(y),
+                calibrated_centres = (
+                    record.get(
+                        "option_centres",
+                        {},
+                    )
+                    if isinstance(
+                        record,
+                        dict,
+                    )
+                    else {}
                 )
+
+                calibrated_point = calibrated_centres.get(
+                    option
+                )
+
+                if (
+                    isinstance(
+                        calibrated_point,
+                        (list, tuple),
+                    )
+                    and len(calibrated_point) == 2
+                ):
+                    center = (
+                        int(
+                            round(
+                                float(
+                                    calibrated_point[0]
+                                )
+                            )
+                        ),
+                        int(
+                            round(
+                                float(
+                                    calibrated_point[1]
+                                )
+                            )
+                        ),
+                    )
+                else:
+                    center = (
+                        int(
+                            option_x[
+                                option
+                            ]
+                        ),
+                        int(y),
+                    )
 
                 cv2.circle(
                     debug,
@@ -4746,8 +4788,11 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
 
         threshold = float(
             template.get(
-                "filled_threshold",
-                0.50,
+                "jee_numeric_special_threshold",
+                template.get(
+                    "filled_threshold",
+                    0.50,
+                ),
             )
         )
 
@@ -4845,15 +4890,43 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 ):
                     continue
 
-                center = (
-                    base_x
-                    + digit_offsets[
-                        column_index
-                    ],
-                    digit_y_positions[
-                        digit
-                    ],
+                detected_center = detail.get(
+                    "center"
                 )
+
+                if (
+                    isinstance(
+                        detected_center,
+                        (list, tuple),
+                    )
+                    and len(detected_center) == 2
+                ):
+                    center = (
+                        int(
+                            round(
+                                float(
+                                    detected_center[0]
+                                )
+                            )
+                        ),
+                        int(
+                            round(
+                                float(
+                                    detected_center[1]
+                                )
+                            )
+                        ),
+                    )
+                else:
+                    center = (
+                        base_x
+                        + digit_offsets[
+                            column_index
+                        ],
+                        digit_y_positions[
+                            digit
+                        ],
+                    )
 
                 cv2.circle(
                     debug,
@@ -4914,13 +4987,41 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 ):
                     continue
 
-                center = (
-                    base_x
-                    + decimal_offsets[
-                        decimal_index
-                    ],
-                    decimal_y,
+                detected_center = detail.get(
+                    "center"
                 )
+
+                if (
+                    isinstance(
+                        detected_center,
+                        (list, tuple),
+                    )
+                    and len(detected_center) == 2
+                ):
+                    center = (
+                        int(
+                            round(
+                                float(
+                                    detected_center[0]
+                                )
+                            )
+                        ),
+                        int(
+                            round(
+                                float(
+                                    detected_center[1]
+                                )
+                            )
+                        ),
+                    )
+                else:
+                    center = (
+                        base_x
+                        + decimal_offsets[
+                            decimal_index
+                        ],
+                        decimal_y,
+                    )
 
                 cv2.circle(
                     debug,
@@ -4944,16 +5045,44 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 )
                 == "-"
             ):
-                center = (
-                    base_x
-                    + int(
-                        layout.get(
-                            "sign_offset",
-                            0,
-                        )
-                    ),
-                    sign_y,
+                detected_center = sign_detail.get(
+                    "center"
                 )
+
+                if (
+                    isinstance(
+                        detected_center,
+                        (list, tuple),
+                    )
+                    and len(detected_center) == 2
+                ):
+                    center = (
+                        int(
+                            round(
+                                float(
+                                    detected_center[0]
+                                )
+                            )
+                        ),
+                        int(
+                            round(
+                                float(
+                                    detected_center[1]
+                                )
+                            )
+                        ),
+                    )
+                else:
+                    center = (
+                        base_x
+                        + int(
+                            layout.get(
+                                "sign_offset",
+                                0,
+                            )
+                        ),
+                        sign_y,
+                    )
 
                 cv2.circle(
                     debug,
@@ -5181,9 +5310,11 @@ def process_omr(
         # Geometry is established only from the complete page and its four
         # registration boxes. Content-feature refinements can introduce a
         # small mobile-dependent tilt/scale and are deliberately disabled.
-        use_orb=(template_exam_name == "JEE"),
-        use_ecc=(template_exam_name == "JEE"),
-        ecc_minimum_score=0.80,
+        # Four registration boxes establish the canonical page geometry.
+        # JEE answer grids are calibrated locally by the robust reader below,
+        # so feature/ECC warps are deliberately disabled for every exam.
+        use_orb=False,
+        use_ecc=False,
         debug_dir=local_debug_dir,
     )
     alignment_debug["input"] = input_debug
@@ -5306,6 +5437,18 @@ def process_omr(
     exam_series = None
     jee_series = None
 
+    # Read printed identity bubbles from the same canonical image used for
+    # answer recognition. Identity is informative and must never block scoring.
+    try:
+        identity = detect_identity_fields(
+            recognition_image,
+            template,
+        )
+    except Exception as identity_error:
+        identity = {
+            "warning": str(identity_error),
+        }
+
     answers = {}
 
     # ========================================================
@@ -5390,9 +5533,10 @@ def process_omr(
         )
         exam_series = jee_series
 
-        # Then scan JEE MCQ + numerical sections
+        # Then scan JEE MCQ + numerical sections. Each printed grid is
+        # calibrated from its own circle geometry before fill classification.
         answers = (
-            scan_jee_answers(
+            scan_jee_answers_robust(
                 recognition_image,
                 template,
             )
@@ -5584,6 +5728,9 @@ def process_omr(
 
         "jee_series":
             jee_series,
+
+        "identity":
+            identity,
 
         "answers":
             answers,

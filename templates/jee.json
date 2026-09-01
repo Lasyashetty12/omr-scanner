@@ -1,7 +1,7 @@
 {
   "template_name": "jee",
   "exam_name": "JEE",
-  "version": 3,
+  "version": 4,
   "reference_image": "jee_generated.png",
   "sheet_width": 1600,
   "sheet_height": 2263,
@@ -17,10 +17,22 @@
     "filled_threshold": 0.65,
     "minimum_confidence_gap": 0.03,
     "coordinates": {
-      "P": [368, 186],
-      "Q": [370, 246],
-      "R": [364, 308],
-      "S": [368, 364]
+      "P": [
+        368,
+        186
+      ],
+      "Q": [
+        370,
+        246
+      ],
+      "R": [
+        364,
+        308
+      ],
+      "S": [
+        368,
+        364
+      ]
     }
   },
   "mcq_sections": [
@@ -28,76 +40,310 @@
       "subject": "physics",
       "start_question": 1,
       "total_questions": 10,
-      "option_x": {"A": 487, "B": 517, "C": 546, "D": 578},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 487,
+        "B": 517,
+        "C": 546,
+        "D": 578
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     },
     {
       "subject": "physics",
       "start_question": 11,
       "total_questions": 10,
-      "option_x": {"A": 650, "B": 672, "C": 697, "D": 724},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 650,
+        "B": 672,
+        "C": 697,
+        "D": 724
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     },
     {
       "subject": "chemistry",
       "start_question": 26,
       "total_questions": 10,
-      "option_x": {"A": 826, "B": 860, "C": 893, "D": 923},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 826,
+        "B": 860,
+        "C": 893,
+        "D": 923
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     },
     {
       "subject": "chemistry",
       "start_question": 36,
       "total_questions": 10,
-      "option_x": {"A": 1007, "B": 1031, "C": 1058, "D": 1087},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 1007,
+        "B": 1031,
+        "C": 1058,
+        "D": 1087
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     },
     {
       "subject": "mathematics",
       "start_question": 51,
       "total_questions": 10,
-      "option_x": {"A": 1216, "B": 1250, "C": 1276, "D": 1303},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 1216,
+        "B": 1250,
+        "C": 1276,
+        "D": 1303
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     },
     {
       "subject": "mathematics",
       "start_question": 61,
       "total_questions": 10,
-      "option_x": {"A": 1388, "B": 1414, "C": 1443, "D": 1474},
-      "question_y_positions": [426, 460, 496, 530, 564, 598, 634, 666, 704, 738]
+      "option_x": {
+        "A": 1388,
+        "B": 1414,
+        "C": 1443,
+        "D": 1474
+      },
+      "question_y_positions": [
+        426,
+        460,
+        496,
+        530,
+        564,
+        598,
+        634,
+        666,
+        704,
+        738
+      ]
     }
   ],
   "numerical_layout": {
-    "digit_offsets": [0, 26, 52, 78, 104, 130, 156],
-    "decimal_offsets": [26, 52, 78, 104, 130],
-    "decimal_after_columns": [1, 2, 3, 4, 5],
+    "digit_offsets": [
+      0,
+      26,
+      52,
+      78,
+      104,
+      130,
+      156
+    ],
+    "decimal_offsets": [
+      26,
+      52,
+      78,
+      104,
+      130
+    ],
+    "decimal_after_columns": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
     "sign_offset": 0,
-    "digit_values": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    "digit_values": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9"
+    ]
   },
   "numerical_sections": [
     {
       "subject": "physics",
       "start_question": 21,
-      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "question_x_positions": [
+        182,
+        458,
+        736,
+        1012,
+        1288
+      ],
       "decimal_y": 864,
-      "digit_y_positions": [904, 932, 962, 990, 1018, 1046, 1074, 1102, 1131, 1158],
+      "digit_y_positions": [
+        904,
+        932,
+        962,
+        990,
+        1018,
+        1046,
+        1074,
+        1102,
+        1131,
+        1158
+      ],
       "sign_y": 1192
     },
     {
       "subject": "chemistry",
       "start_question": 46,
-      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "question_x_positions": [
+        182,
+        458,
+        736,
+        1012,
+        1288
+      ],
       "decimal_y": 1322,
-      "digit_y_positions": [1364, 1392, 1420, 1448, 1476, 1504, 1533, 1562, 1590, 1618],
+      "digit_y_positions": [
+        1364,
+        1392,
+        1420,
+        1448,
+        1476,
+        1504,
+        1533,
+        1562,
+        1590,
+        1618
+      ],
       "sign_y": 1652
     },
     {
       "subject": "mathematics",
       "start_question": 71,
-      "question_x_positions": [182, 458, 736, 1012, 1288],
+      "question_x_positions": [
+        182,
+        458,
+        736,
+        1012,
+        1288
+      ],
       "decimal_y": 1782,
-      "digit_y_positions": [1822, 1850, 1879, 1908, 1936, 1964, 1992, 2020, 2048, 2076],
+      "digit_y_positions": [
+        1822,
+        1850,
+        1879,
+        1908,
+        1936,
+        1964,
+        1992,
+        2020,
+        2048,
+        2076
+      ],
       "sign_y": 2110
     }
-  ]
+  ],
+  "jee_grid_hough_margin": 20,
+  "jee_grid_max_calibration_delta": 22,
+  "jee_core_radius": 6,
+  "jee_core_dark_threshold": 140,
+  "jee_core_blank_threshold": 0.66,
+  "jee_core_filled_threshold": 0.78,
+  "jee_core_minimum_gap": 0.1,
+  "jee_core_relaxed_threshold": 0.72,
+  "jee_core_strong_gap": 0.2,
+  "jee_numeric_blank_threshold": 0.56,
+  "jee_numeric_filled_threshold": 0.74,
+  "jee_numeric_minimum_gap": 0.12,
+  "jee_numeric_special_threshold": 0.68,
+  "identity": {
+    "roll_number": {
+      "x_positions": [
+        106,
+        136,
+        168,
+        200,
+        231,
+        262,
+        294
+      ],
+      "y_positions": [
+        161,
+        197,
+        233,
+        267,
+        302,
+        337,
+        371,
+        406,
+        440,
+        473
+      ],
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "hough_margin": 20,
+      "max_calibration_delta": 22,
+      "core_radius": 6,
+      "dark_threshold": 140,
+      "filled_threshold": 0.76,
+      "minimum_confidence_gap": 0.12
+    }
+  }
 }

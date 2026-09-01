@@ -372,8 +372,8 @@ const JPEG_QUALITY =
 
 
 // Require repeated, stable marker recognition before auto-capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 2;
-const AUTO_CAPTURE_CHECK_INTERVAL_MS = 120;
+const AUTO_CAPTURE_STABLE_CHECKS = 1;
+const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
 
 
 /* ==========================================================
@@ -451,8 +451,8 @@ function renderQuestionTable(questionResults) {
     questionTableBody.innerHTML = qNumbers.map((qNum) => {
         const item = questionResults[qNum] || {};
         const qNo = item.question_number ?? qNum;
-        const studentAns = item.detected || item.student_answer || item.answer || "—";
-        const correctAns = item.correct_answer || item.correct || "—";
+        const studentAns = item.detected || item.student_answer || item.answer || "Ã¢â‚¬â€";
+        const correctAns = item.correct_answer || item.correct || "Ã¢â‚¬â€";
         const rawStatus = (item.status || "Uncertain").toString();
         const statusLower = rawStatus.toLowerCase();
 
@@ -478,7 +478,7 @@ async function fetchAndRenderDashboard() {
     dashboardTableBody.innerHTML = `
         <tr>
             <td colspan="12" style="text-align: center; padding: 24px; color: var(--muted);">
-                ⚡ Loading evaluated student records from database...
+                Ã¢Å¡Â¡ Loading evaluated student records from database...
             </td>
         </tr>
     `;
@@ -743,7 +743,7 @@ function updateTorchUI(active, supported = true) {
     torchButton.setAttribute("aria-pressed", active ? "true" : "false");
     const icon = torchButton.querySelector(".torch-icon");
     if (icon) {
-        icon.textContent = active ? "⚡ Torch ON" : "⚡ Torch OFF";
+        icon.textContent = active ? "Ã¢Å¡Â¡ Torch ON" : "Ã¢Å¡Â¡ Torch OFF";
     }
 }
 
@@ -884,35 +884,35 @@ function isReadyForAutoCapture(
     if (!detection || !detection.sourcePoints || detection.markerCount !== 4) {
         return {
             ready: false,
-            reason: "Align the OMR sheet — four black corner markers required"
+            reason: "Align the OMR sheet Ã¢â‚¬â€ four black corner markers required"
         };
     }
 
     if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
         return {
             ready: false,
-            reason: "Four markers found — move the OMR sheet closer"
+            reason: "Four markers found Ã¢â‚¬â€ move the OMR sheet closer"
         };
     }
 
     if (!isCompleteSheetInFrame(detection.sourcePoints, videoWidth, videoHeight)) {
         return {
             ready: false,
-            reason: "Four markers found — keep the complete sheet inside the frame"
+            reason: "Four markers found Ã¢â‚¬â€ keep the complete sheet inside the frame"
         };
     }
 
     if (!isSheetReasonablyAligned(detection.sourcePoints)) {
         return {
             ready: false,
-            reason: "Four markers found — straighten the OMR sheet"
+            reason: "Four markers found Ã¢â‚¬â€ straighten the OMR sheet"
         };
     }
 
     if (hasExcessiveMovement(detection, previousDetection)) {
         return {
             ready: false,
-            reason: "Four markers found — hold the OMR sheet steady"
+            reason: "Four markers found Ã¢â‚¬â€ hold the OMR sheet steady"
         };
     }
 
@@ -945,7 +945,7 @@ function setCornerDetectionState(
             cornerDetectionStatus.textContent = statusMessage;
         } else {
             cornerDetectionStatus.textContent = detected
-                ? "OMR detected — hold steady"
+                ? "OMR detected Ã¢â‚¬â€ hold steady"
                 : "Position the complete OMR inside the frame";
         }
     }
@@ -1390,7 +1390,7 @@ function detectDocumentCorners() {
 
     // 640px keeps corner squares large enough to distinguish from bubbles but
     // avoids running a near-megapixel search for every live camera frame.
-    const analysisWidth = Math.min(640, videoWidth);
+    const analysisWidth = Math.min(480, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1596,12 +1596,12 @@ function monitorCornerBlocks(timestamp) {
 
         if (readinessCheck.ready && !markersStable) {
             statusMessage =
-                `Four black corner markers recognized — hold steady (${stableCornerChecks}/${AUTO_CAPTURE_STABLE_CHECKS})`;
+                `Four black corner markers recognized Ã¢â‚¬â€ hold steady (${stableCornerChecks}/${AUTO_CAPTURE_STABLE_CHECKS})`;
         }
 
         setCornerDetectionState(
             Boolean(markersStable),
-            markersStable ? "OMR recognized — capturing…" : statusMessage
+            markersStable ? "OMR recognized Ã¢â‚¬â€ capturingÃ¢â‚¬Â¦" : statusMessage
         );
 
         drawDocumentBoundary(
@@ -1614,9 +1614,7 @@ function monitorCornerBlocks(timestamp) {
 
             if (!autoCaptureTriggered) {
                 autoCaptureTriggered = true;
-                setTimeout(() => {
-                    captureCameraImage(true);
-                }, 40);
+                captureCameraImage(true);
             }
         } else {
             detectedDocumentBounds = null;
@@ -1876,7 +1874,7 @@ function captureCameraImage(
     if (automatic && !pageCornersDetected) {
         if (cornerDetectionStatus) {
             cornerDetectionStatus.textContent =
-                "Align the OMR sheet — four black corner markers must be recognized before capture.";
+                "Align the OMR sheet Ã¢â‚¬â€ four black corner markers must be recognized before capture.";
         }
         showError(
             "Capture blocked: all four black OMR corner markers must be recognized first."
@@ -2629,7 +2627,7 @@ async function scanOMR() {
     }
 
     showLoading(
-        "⚡ Scanning & Evaluating OMR Sheet... Analyzing Bubbles... Please Wait..."
+        "Ã¢Å¡Â¡ Scanning & Evaluating OMR Sheet... Analyzing Bubbles... Please Wait..."
     );
 
     if (loading) {
@@ -2770,7 +2768,7 @@ if (
 
     captureButton.addEventListener(
         "click",
-        captureCameraImage
+        () => captureCameraImage(false)
     );
 }
 
@@ -2936,7 +2934,7 @@ function downloadWord() {
     th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
     th { background-color: #f1f5f9; }
     </style></head><body>
-    <h2>OMR Evaluation Report — Manchester Technologies</h2>
+    <h2>OMR Evaluation Report Ã¢â‚¬â€ Manchester Technologies</h2>
     <hr/>
     <h3>Student Information</h3>
     <p><b>Student Name:</b> ${resStudentName?.textContent || '-'}</p>

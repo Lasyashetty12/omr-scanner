@@ -1,7 +1,7 @@
 {
   "template_name": "neet",
   "exam_name": "NEET",
-  "version": 9,
+  "version": 10,
   "reference_image": "neet_kcet_generated.png",
   "sheet_width": 1600,
   "sheet_height": 2263,
@@ -135,6 +135,90 @@
         428,
         1610
       ]
+    }
+  },
+  "identity": {
+    "roll_number": {
+      "x_positions": [
+        110,
+        154,
+        199,
+        244,
+        290,
+        334,
+        380,
+        424
+      ],
+      "y_positions": [
+        964,
+        1009,
+        1054,
+        1099,
+        1143,
+        1187,
+        1233,
+        1277,
+        1322,
+        1368
+      ],
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "hough_margin": 20,
+      "max_calibration_delta": 22,
+      "core_radius": 6,
+      "dark_threshold": 140,
+      "filled_threshold": 0.76,
+      "minimum_confidence_gap": 0.12
+    },
+    "class": {
+      "choices": {
+        "I": [
+          178,
+          1499
+        ],
+        "II": [
+          279,
+          1499
+        ],
+        "LT": [
+          389,
+          1499
+        ]
+      },
+      "hough_margin": 22,
+      "max_calibration_delta": 24,
+      "core_radius": 6,
+      "dark_threshold": 140,
+      "filled_threshold": 0.68,
+      "minimum_confidence_gap": 0.12
+    },
+    "exam": {
+      "choices": {
+        "NEET": [
+          217,
+          1716
+        ],
+        "KCET": [
+          388,
+          1716
+        ]
+      },
+      "hough_margin": 24,
+      "max_calibration_delta": 26,
+      "core_radius": 6,
+      "dark_threshold": 140,
+      "filled_threshold": 0.68,
+      "minimum_confidence_gap": 0.12
     }
   }
 }

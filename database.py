@@ -78,14 +78,27 @@ def save_omr_result_to_db(result_data, student_info=None):
         return None
 
     try:
-        # Default student info if not provided
+        # Default student info if not provided. Prefer identity bubbles read
+        # from the OMR itself before falling back to generated placeholders.
         if not student_info:
             student_info = {}
 
+        identity_data = result_data.get("identity") or {}
+
         student_payload = {
             "name": student_info.get("name") or "Student Candidate",
-            "roll_number": student_info.get("roll_number") or f"ROLL-{result_data.get('scan_id', '000')[:6]}",
-            "class_name": str(student_info.get("class_name") or "12"),
+            "roll_number": (
+                student_info.get("roll_number")
+                or identity_data.get("roll_number")
+                or result_data.get("roll_number")
+                or f"ROLL-{result_data.get('scan_id', '000')[:6]}"
+            ),
+            "class_name": str(
+                student_info.get("class_name")
+                or identity_data.get("class")
+                or result_data.get("class")
+                or "12"
+            ),
             "section": str(student_info.get("section") or "A"),
             "batch": str(student_info.get("batch") or "2026")
         }

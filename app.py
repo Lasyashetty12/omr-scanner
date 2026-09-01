@@ -500,7 +500,66 @@ async def scan_omr(
 
         "input": processing.get("input_debug"),
 
+        "identity":
+            processing.get(
+                "identity",
+                {},
+            ),
+
     }
+
+    identity_data = (
+        result.get(
+            "identity"
+        )
+        or {}
+    )
+
+    if identity_data.get(
+        "roll_number"
+    ):
+        result["roll_number"] = (
+            identity_data[
+                "roll_number"
+            ]
+        )
+
+    if identity_data.get(
+        "class"
+    ):
+        result["class"] = (
+            identity_data[
+                "class"
+            ]
+        )
+
+    if identity_data.get(
+        "exam"
+    ):
+        result["detected_exam"] = (
+            identity_data[
+                "exam"
+            ]
+        )
+
+        if (
+            str(
+                identity_data[
+                    "exam"
+                ]
+            ).strip().upper()
+            !=
+            str(
+                result.get(
+                    "exam",
+                    ""
+                )
+            ).strip().upper()
+        ):
+            result["identity_warning"] = (
+                "Printed exam bubble does not match "
+                "the exam selected in the scanner."
+            )
 
 
     # ========================================================
