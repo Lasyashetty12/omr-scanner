@@ -567,8 +567,12 @@ def _detect_solid_corner_boxes_on_canonical_page(
     # seven-percent window after the first perspective warp, especially at BR.
     # The wider window is still confined to a known template corner and every
     # selected set must pass the four-marker geometry checks below.
-    search_half_width = max(36, int(round(width * 0.11)))
-    search_half_height = max(48, int(round(height * 0.11)))
+    search_half_width = max(36, int(round(width * 0.13)))
+    # Mobile document contours sometimes include a large blank paper margin
+    # below the printed OMR frame. In that case the lower blocks can sit about
+    # 16% above their canonical y-coordinate even though the complete sheet is
+    # visible. Keep the x search tighter, but allow that vertical displacement.
+    search_half_height = max(48, int(round(height * 0.20)))
     regions = {}
     for name, (expected_x, expected_y) in zip(
         ("TL", "TR", "BR", "BL"),
@@ -610,7 +614,19 @@ def _detect_solid_corner_boxes_on_canonical_page(
                 + (180.0 - np.minimum(inner_roi, 180.0)) / 180.0 * 0.25
                 - distance * 0.35
             )
-            valid = (contrast_roi >= 8.0) & (inner_roi < 180.0)
+            # boxFilter extrapolates image borders. Without this guard, the
+            # physical page edge can look like a high-contrast square at x=0
+            # or y=height-1 and impersonate BL/BR. Require the complete outer
+            # comparison ring to be present inside the image.
+            edge_margin = side + 1
+            valid = (
+                (contrast_roi >= 8.0)
+                & (inner_roi < 180.0)
+                & (xx >= edge_margin)
+                & (xx < width - edge_margin)
+                & (yy >= edge_margin)
+                & (yy < height - edge_margin)
+            )
             scores = np.where(valid, scores, -9.0)
             local_y, local_x = np.unravel_index(np.argmax(scores), scores.shape)
             score = float(scores[local_y, local_x])

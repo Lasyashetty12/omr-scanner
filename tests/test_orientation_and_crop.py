@@ -40,6 +40,33 @@ def test_canonical_corner_search_tolerates_mobile_br_displacement():
     assert debug["details"]["BR"]["score"] > 0.20
 
 
+def test_corner_search_ignores_image_edge_with_large_bottom_margin():
+    """Real lower blocks win over a dark physical edge after an oblique warp."""
+    height, width = 2263, 1600
+    image = np.full((height, width, 3), 242, dtype=np.uint8)
+    expected = np.float32(
+        [[51, 44], [1549, 44], [1549, 2213], [51, 2214]]
+    )
+    observed = np.float32(
+        [[145, 125], [1480, 135], [1510, 1970], [95, 1845]]
+    )
+
+    # A dark camera/page boundary must never become BL or BR.
+    cv2.line(image, (0, height - 2), (width - 1, height - 2), (0, 0, 0), 4)
+    for x, y in observed.astype(int):
+        cv2.rectangle(image, (x - 13, y - 13), (x + 13, y + 13), (5, 5, 5), -1)
+
+    markers, _ = _detect_solid_corner_boxes_on_canonical_page(
+        image,
+        expected_markers=expected,
+    )
+
+    for detected, actual in zip(markers, observed):
+        assert np.linalg.norm(detected - actual) <= 5
+    assert float(markers[2, 1]) < height - 100
+    assert float(markers[3, 1]) < height - 100
+
+
 def test_exif_load_image_preserves_array(tmp_path):
     # Create a small dummy image
     test_img = np.full((100, 80, 3), 200, dtype=np.uint8)
