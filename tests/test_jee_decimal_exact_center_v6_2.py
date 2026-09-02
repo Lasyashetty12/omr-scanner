@@ -63,30 +63,55 @@ def test_blank_decimal_row_has_no_false_fills():
         assert filled == []
 
 
-def test_71_72_only_first_and_third_decimal_when_marked():
-    from jee_reader import scan_jee_numerical_sections_robust
+def test_71_first_and_72_third_decimal_when_marked():
+    from jee_reader import (
+        scan_jee_numerical_sections_robust,
+    )
 
     template, image = _load()
 
-    for question in (71, 72):
+    expected = {
+        71: [1],
+        72: [3],
+    }
+
+    for question, wanted in expected.items():
         positions = {
             after: (x, y)
-            for after, x, y in _decimal_positions(template, question)
+            for after, x, y
+            in _decimal_positions(
+                template,
+                question,
+            )
         }
-        for after in (1, 3):
+
+        for after in wanted:
             x, y = positions[after]
-            _fill(image, x, y)
 
-    detected, _debug = scan_jee_numerical_sections_robust(image, template)
+            _fill(
+                image,
+                x,
+                y,
+            )
 
-    for question in (71, 72):
+    detected, _debug = (
+        scan_jee_numerical_sections_robust(
+            image,
+            template,
+        )
+    )
+
+    for question, wanted in expected.items():
         filled = sorted(
-            int(item["after_column"])
-            for item in detected[question]["decimal_points"]
+            int(
+                item["after_column"]
+            )
+            for item
+            in detected[question]["decimal_points"]
             if item.get("filled")
         )
-        assert filled == [1, 3]
 
+        assert filled == wanted
 
 def test_74_multiple_real_decimal_fills_remain_detected():
     from jee_reader import scan_jee_numerical_sections_robust
