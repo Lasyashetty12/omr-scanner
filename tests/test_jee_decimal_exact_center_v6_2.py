@@ -147,6 +147,8 @@ def test_v6_2_contract():
         (ROOT / "templates" / "jee.json").read_text(encoding="utf-8")
     )
 
-    assert "decimal_exact_center_v6_2" in reader
+    # v6.3 supersedes the v6.2 exact-centre decimal reader.
+    assert "decimal_annulus_fill_v6_3" in reader
+    assert "individual_hough_center_v6_3" in reader
     assert template["jee_numeric_decimal_local_search"] == 0
     assert "decimal_color = (0, 255, 0)" in scanner

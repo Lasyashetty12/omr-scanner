@@ -133,11 +133,10 @@ def test_uniform_core_v6_contract():
         / "jee_reader.py"
     ).read_text(encoding="utf-8")
 
+    # Digit-column classification remains uniform-core v6.
     assert "uniform_core_v6" in source
-    assert "actual_decimal_y" in source
 
-    # v6.1 intentionally replaced decimal p90 classification with
-    # direct decimal core-fill scoring.
-    assert "decimal_core_fill_v6_1" in source
-    assert "jee_numeric_decimal_core_threshold" in source
-    assert "jee_numeric_decimal_p90_max" not in source
+    # Decimal recognition has advanced to the v6.3 annulus reader.
+    assert "decimal_annulus_fill_v6_3" in source
+    assert "individual_hough_center_v6_3" in source
+    assert "def _decimal_annulus_fill_ratio(" in source

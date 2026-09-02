@@ -654,52 +654,66 @@ def _calibrate_numerical_question(
         new_column["y_positions"] = [float(v) for v in actual_y]
         updated["columns"].append(new_column)
 
-    # Calibrate decimal row from detected circles, but only when all five
-    # expected decimal circles are clearly present.
-    actual_decimal_x = list(expected_decimal_x)
-    actual_decimal_y = float(decimal_y)
-
-    decimal_candidates = [
-        point
-        for point in circles
-        if abs(point[1] - decimal_y) <= 15
-    ]
-
-    if expected_decimal_x and len(decimal_candidates) >= len(expected_decimal_x):
-        clustered_decimal_x = _cluster_1d(
-            [point[0] for point in decimal_candidates],
-            len(expected_decimal_x),
+    # v6.3: calibrate every decimal bubble independently to the
+    # nearest detected circle. This keeps the sampling centre away from
+    # both the printed center dot and the outer circle outline.
+    decimal_match_radius = float(
+        template.get(
+            "jee_numeric_decimal_match_radius",
+            14.0,
         )
+    )
 
-        if _validate_cluster_centres(
-            clustered_decimal_x,
-            expected_decimal_x,
-            max_delta,
-        ):
-            actual_decimal_x = list(clustered_decimal_x)
+    calibrated_decimal_points = []
 
-            candidate_y = float(
-                np.median(
-                    np.asarray(
-                        [point[1] for point in decimal_candidates],
-                        dtype=np.float32,
-                    )
-                )
+    for decimal in decimal_points:
+        expected_dx = float(decimal["x"])
+        expected_dy = float(decimal["y"])
+
+        nearby = [
+            point
+            for point in circles
+            if (
+                abs(float(point[0]) - expected_dx)
+                <= decimal_match_radius
+                and abs(float(point[1]) - expected_dy)
+                <= decimal_match_radius
+            )
+        ]
+
+        if nearby:
+            selected_decimal_circle = min(
+                nearby,
+                key=lambda point:
+                    (
+                        (float(point[0]) - expected_dx) ** 2
+                        + (float(point[1]) - expected_dy) ** 2
+                    ),
             )
 
-            if abs(candidate_y - decimal_y) <= max_delta:
-                actual_decimal_y = candidate_y
+            actual_dx = float(
+                selected_decimal_circle[0]
+            )
 
-    updated["decimal_points"] = [
-        {
-            **decimal,
-            "reference_x": float(decimal["x"]),
-            "reference_y": float(decimal["y"]),
-            "x": float(actual_decimal_x[index]),
-            "y": float(actual_decimal_y),
-        }
-        for index, decimal in enumerate(decimal_points)
-    ]
+            actual_dy = float(
+                selected_decimal_circle[1]
+            )
+
+        else:
+            actual_dx = expected_dx
+            actual_dy = expected_dy
+
+        calibrated_decimal_points.append(
+            {
+                **decimal,
+                "reference_x": expected_dx,
+                "reference_y": expected_dy,
+                "x": actual_dx,
+                "y": actual_dy,
+            }
+        )
+
+    updated["decimal_points"] = calibrated_decimal_points
 
     if sign:
         sign_candidates = [
@@ -808,6 +822,61 @@ def _solid_core_metrics(
         "p95": p95,
         "spread": max(0.0, p90 - mean),
     }
+
+
+def _decimal_annulus_fill_ratio(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    *,
+    inner_radius: int = 2,
+    outer_radius: int = 5,
+    dark_threshold: int = 150,
+) -> float:
+    x = int(round(float(x)))
+    y = int(round(float(y)))
+
+    inner_radius = max(0, int(inner_radius))
+    outer_radius = max(inner_radius + 1, int(outer_radius))
+
+    h, w = gray.shape[:2]
+
+    x0 = max(0, x - outer_radius)
+    x1 = min(w, x + outer_radius + 1)
+    y0 = max(0, y - outer_radius)
+    y1 = min(h, y + outer_radius + 1)
+
+    roi = gray[y0:y1, x0:x1]
+
+    if roi.size == 0:
+        return 0.0
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+
+    distance_sq = (
+        (xx - x) ** 2
+        + (yy - y) ** 2
+    )
+
+    mask = (
+        (distance_sq >= inner_radius ** 2)
+        & (distance_sq <= outer_radius ** 2)
+    )
+
+    count = int(np.count_nonzero(mask))
+
+    if count <= 0:
+        return 0.0
+
+    dark = int(
+        np.count_nonzero(
+            (roi < dark_threshold)
+            & mask
+        )
+    )
+
+    return float(dark) / float(count)
+
 
 
 def _classify_numerical_column(
@@ -1059,10 +1128,17 @@ def detect_numerical_value_robust(
     decimal_details = []
     filled_decimals = []
 
-    decimal_core_radius = int(
+    decimal_inner_radius = int(
         template.get(
-            "jee_numeric_decimal_core_radius",
-            4,
+            "jee_numeric_decimal_annulus_inner_radius",
+            2,
+        )
+    )
+
+    decimal_outer_radius = int(
+        template.get(
+            "jee_numeric_decimal_annulus_outer_radius",
+            5,
         )
     )
 
@@ -1075,8 +1151,8 @@ def detect_numerical_value_robust(
 
     decimal_filled_threshold = float(
         template.get(
-            "jee_numeric_decimal_core_threshold",
-            0.52,
+            "jee_numeric_decimal_annulus_threshold",
+            0.62,
         )
     )
 
@@ -1087,32 +1163,42 @@ def detect_numerical_value_robust(
         base_x = float(decimal["x"])
         base_y = float(decimal["y"])
 
-        # v6.2: sample only the calibrated decimal centre.
-        # Do not search for the darkest nearby point; on a blank circle
-        # that can drift onto the printed outline and create a false fill.
         score = float(
-            _core_fill_ratio(
+            _decimal_annulus_fill_ratio(
                 gray,
                 base_x,
                 base_y,
-                radius=decimal_core_radius,
+                inner_radius=decimal_inner_radius,
+                outer_radius=decimal_outer_radius,
                 dark_threshold=decimal_dark_threshold,
             )
         )
 
-        filled = score >= decimal_filled_threshold
+        filled = (
+            score
+            >= decimal_filled_threshold
+        )
 
         detail = {
-            "after_column": int(decimal["after_column"]),
+            "after_column":
+                int(decimal["after_column"]),
+
             "center": [
                 int(round(base_x)),
                 int(round(base_y)),
             ],
-            "filled": bool(filled),
-            "score": round(score, 4),
-            # Keep v6.1 tag so earlier regression tests remain valid.
-            "score_mode": "decimal_core_fill_v6_1",
-            "sampling_mode": "decimal_exact_center_v6_2",
+
+            "filled":
+                bool(filled),
+
+            "score":
+                round(score, 4),
+
+            "score_mode":
+                "decimal_annulus_fill_v6_3",
+
+            "sampling_mode":
+                "individual_hough_center_v6_3",
         }
 
         decimal_details.append(detail)

@@ -183,16 +183,9 @@ def test_decimal_core_v6_1_contract():
     source = (
         ROOT
         / "jee_reader.py"
-    ).read_text(
-        encoding="utf-8"
-    )
+    ).read_text(encoding="utf-8")
 
-    assert (
-        "decimal_core_fill_v6_1"
-        in source
-    )
-
-    assert (
-        "jee_numeric_decimal_core_threshold"
-        in source
-    )
+    # v6.3 replaces center-core decimal scoring with annulus scoring.
+    assert "decimal_annulus_fill_v6_3" in source
+    assert "individual_hough_center_v6_3" in source
+    assert "def _decimal_annulus_fill_ratio(" in source
