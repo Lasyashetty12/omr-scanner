@@ -1080,106 +1080,45 @@ def detect_numerical_value_robust(
         )
     )
 
-    decimal_local_search = int(
-        template.get(
-            "jee_numeric_decimal_local_search",
-            1,
-        )
-    )
-
     for decimal in question.get(
         "decimal_points",
         [],
     ):
-        base_x = float(
-            decimal["x"]
+        base_x = float(decimal["x"])
+        base_y = float(decimal["y"])
+
+        # v6.2: sample only the calibrated decimal centre.
+        # Do not search for the darkest nearby point; on a blank circle
+        # that can drift onto the printed outline and create a false fill.
+        score = float(
+            _core_fill_ratio(
+                gray,
+                base_x,
+                base_y,
+                radius=decimal_core_radius,
+                dark_threshold=decimal_dark_threshold,
+            )
         )
 
-        base_y = float(
-            decimal["y"]
-        )
-
-        best_score = -1.0
-        best_center = (
-            int(round(base_x)),
-            int(round(base_y)),
-        )
-
-        for dx in range(
-            -decimal_local_search,
-            decimal_local_search + 1,
-        ):
-            for dy in range(
-                -decimal_local_search,
-                decimal_local_search + 1,
-            ):
-                if (
-                    dx * dx + dy * dy
-                    > decimal_local_search
-                    * decimal_local_search
-                ):
-                    continue
-
-                cx = base_x + dx
-                cy = base_y + dy
-
-                score = _core_fill_ratio(
-                    gray,
-                    cx,
-                    cy,
-                    radius=decimal_core_radius,
-                    dark_threshold=decimal_dark_threshold,
-                )
-
-                if score > best_score:
-                    best_score = float(
-                        score
-                    )
-
-                    best_center = (
-                        int(round(cx)),
-                        int(round(cy)),
-                    )
-
-        filled = (
-            best_score
-            >= decimal_filled_threshold
-        )
+        filled = score >= decimal_filled_threshold
 
         detail = {
-            "after_column":
-                int(
-                    decimal[
-                        "after_column"
-                    ]
-                ),
-
+            "after_column": int(decimal["after_column"]),
             "center": [
-                int(best_center[0]),
-                int(best_center[1]),
+                int(round(base_x)),
+                int(round(base_y)),
             ],
-
-            "filled":
-                bool(filled),
-
-            "score":
-                round(
-                    float(best_score),
-                    4,
-                ),
-
-            "score_mode":
-                "decimal_core_fill_v6_1",
+            "filled": bool(filled),
+            "score": round(score, 4),
+            # Keep v6.1 tag so earlier regression tests remain valid.
+            "score_mode": "decimal_core_fill_v6_1",
+            "sampling_mode": "decimal_exact_center_v6_2",
         }
 
-        decimal_details.append(
-            detail
-        )
+        decimal_details.append(detail)
 
         if filled:
-            filled_decimals.append(
-                detail
-            )
+            filled_decimals.append(detail)
 
     selected_decimal = (
         int(

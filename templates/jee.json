@@ -394,5 +394,5 @@
   "jee_numeric_decimal_core_radius": 4,
   "jee_numeric_decimal_dark_threshold": 150,
   "jee_numeric_decimal_core_threshold": 0.52,
-  "jee_numeric_decimal_local_search": 1
+  "jee_numeric_decimal_local_search": 0
 }

@@ -5103,21 +5103,9 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 )
             ]
 
-            decimal_color = (
-                (
-                    0,
-                    215,
-                    255,
-                )
-                if len(
-                    filled_decimal_points
-                ) >= 2
-                else (
-                    0,
-                    200,
-                    0,
-                )
-            )
+            # Every physically detected filled decimal is green.
+            # MULTIPLE/UNCERTAIN remains question-level only.
+            decimal_color = (0, 255, 0)
 
             for detail in filled_decimal_points:
                 after_column = int(
