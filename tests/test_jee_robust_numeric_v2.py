@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,9 +68,11 @@ def test_v5_numeric_controls_exist():
         ).read_text(encoding="utf-8")
     )
 
+    # v6 intentionally expanded the numerical core from 3 px to 5 px
+    # so printed digits are rejected using wider centre uniformity.
     assert template[
         "jee_numeric_solid_core_radius"
-    ] == 3
+    ] == 5
 
     assert template[
         "jee_numeric_solid_mean_ratio"

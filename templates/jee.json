@@ -381,8 +381,18 @@
   "jee_numeric_adaptive_decimal_signal": 0.045,
   "jee_numeric_adaptive_decimal_gap": 0.01,
   "jee_numeric_adaptive_sign_signal": 0.05,
-  "jee_numeric_solid_core_radius": 3,
+  "jee_numeric_solid_core_radius": 5,
   "jee_numeric_solid_mean_ratio": 0.55,
   "jee_numeric_solid_spread_ratio": 0.35,
-  "jee_numeric_special_mean_ratio": 0.55
+  "jee_numeric_special_mean_ratio": 0.55,
+  "jee_numeric_uniform_p90_ratio": 0.62,
+  "jee_numeric_uniform_std_ratio": 0.5,
+  "jee_numeric_uniform_std_max": 22.0,
+  "jee_numeric_decimal_p90_ratio": 0.6,
+  "jee_numeric_decimal_p90_max": 110.0,
+  "jee_numeric_decimal_std_max": 28.0,
+  "jee_numeric_decimal_core_radius": 4,
+  "jee_numeric_decimal_dark_threshold": 150,
+  "jee_numeric_decimal_core_threshold": 0.52,
+  "jee_numeric_decimal_local_search": 1
 }

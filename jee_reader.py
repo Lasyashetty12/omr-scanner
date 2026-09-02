@@ -657,6 +657,8 @@ def _calibrate_numerical_question(
     # Calibrate decimal row from detected circles, but only when all five
     # expected decimal circles are clearly present.
     actual_decimal_x = list(expected_decimal_x)
+    actual_decimal_y = float(decimal_y)
+
     decimal_candidates = [
         point
         for point in circles
@@ -668,6 +670,7 @@ def _calibrate_numerical_question(
             [point[0] for point in decimal_candidates],
             len(expected_decimal_x),
         )
+
         if _validate_cluster_centres(
             clustered_decimal_x,
             expected_decimal_x,
@@ -675,13 +678,25 @@ def _calibrate_numerical_question(
         ):
             actual_decimal_x = list(clustered_decimal_x)
 
+            candidate_y = float(
+                np.median(
+                    np.asarray(
+                        [point[1] for point in decimal_candidates],
+                        dtype=np.float32,
+                    )
+                )
+            )
+
+            if abs(candidate_y - decimal_y) <= max_delta:
+                actual_decimal_y = candidate_y
+
     updated["decimal_points"] = [
         {
             **decimal,
             "reference_x": float(decimal["x"]),
             "reference_y": float(decimal["y"]),
             "x": float(actual_decimal_x[index]),
-            "y": float(decimal_y),
+            "y": float(actual_decimal_y),
         }
         for index, decimal in enumerate(decimal_points)
     ]
@@ -734,7 +749,7 @@ def _solid_core_metrics(
     radius = int(
         template.get(
             "jee_numeric_solid_core_radius",
-            3,
+            5,
         )
     )
 
@@ -755,6 +770,8 @@ def _solid_core_metrics(
             "mean": 255.0,
             "std": 0.0,
             "p80": 255.0,
+            "p90": 255.0,
+            "p95": 255.0,
             "spread": 0.0,
         }
 
@@ -773,17 +790,23 @@ def _solid_core_metrics(
             "mean": 255.0,
             "std": 0.0,
             "p80": 255.0,
+            "p90": 255.0,
+            "p95": 255.0,
             "spread": 0.0,
         }
 
     mean = float(np.mean(values))
     p80 = float(np.percentile(values, 80))
+    p90 = float(np.percentile(values, 90))
+    p95 = float(np.percentile(values, 95))
 
     return {
         "mean": mean,
         "std": float(np.std(values)),
         "p80": p80,
-        "spread": max(0.0, p80 - mean),
+        "p90": p90,
+        "p95": p95,
+        "spread": max(0.0, p90 - mean),
     }
 
 
@@ -828,52 +851,60 @@ def _classify_numerical_column(
             }
         )
 
-    means = np.asarray(
-        [item["mean"] for item in metrics],
+    p90_values = np.asarray(
+        [item["p90"] for item in metrics],
         dtype=np.float32,
     )
 
-    spreads = np.asarray(
-        [item["spread"] for item in metrics],
+    std_values = np.asarray(
+        [item["std"] for item in metrics],
         dtype=np.float32,
     )
 
-    median_mean = float(np.median(means))
-    median_spread = float(np.median(spreads))
+    median_p90 = float(np.median(p90_values))
+    median_std = float(np.median(std_values))
 
-    mean_ratio_limit = float(
+    p90_ratio_limit = float(
         template.get(
-            "jee_numeric_solid_mean_ratio",
-            0.55,
+            "jee_numeric_uniform_p90_ratio",
+            0.62,
         )
     )
 
-    spread_ratio_limit = float(
+    std_ratio_limit = float(
         template.get(
-            "jee_numeric_solid_spread_ratio",
-            0.35,
+            "jee_numeric_uniform_std_ratio",
+            0.50,
+        )
+    )
+
+    std_max = float(
+        template.get(
+            "jee_numeric_uniform_std_max",
+            22.0,
         )
     )
 
     candidates = []
 
     for item in metrics:
-        mean_ratio = (
-            float(item["mean"])
-            / max(median_mean, 1.0)
+        p90_ratio = (
+            float(item["p90"])
+            / max(median_p90, 1.0)
         )
 
-        spread_ratio = (
-            float(item["spread"])
-            / max(median_spread, 1.0)
+        std_ratio = (
+            float(item["std"])
+            / max(median_std, 1.0)
         )
 
-        item["mean_ratio"] = mean_ratio
-        item["spread_ratio"] = spread_ratio
+        item["p90_ratio"] = p90_ratio
+        item["std_ratio"] = std_ratio
 
         if (
-            mean_ratio <= mean_ratio_limit
-            and spread_ratio <= spread_ratio_limit
+            p90_ratio <= p90_ratio_limit
+            and std_ratio <= std_ratio_limit
+            and float(item["std"]) <= std_max
         ):
             candidates.append(item)
 
@@ -882,12 +913,10 @@ def _classify_numerical_column(
         value = str(selected["value"])
         status = "FILLED"
         center = list(selected["center"])
-
     elif len(candidates) >= 2:
         value = "?"
         status = "MULTIPLE"
         center = None
-
     else:
         value = ""
         status = "BLANK"
@@ -897,50 +926,35 @@ def _classify_numerical_column(
         "value": value,
         "status": status,
         "center": center,
-        "median_mean": round(median_mean, 4),
-        "median_spread": round(median_spread, 4),
-
+        "median_p90": round(median_p90, 4),
+        "median_std": round(median_std, 4),
         "filled_candidates": [
             {
                 "value": str(item["value"]),
                 "center": list(item["center"]),
                 "mean": round(float(item["mean"]), 4),
-                "spread": round(float(item["spread"]), 4),
-                "mean_ratio": round(
-                    float(item["mean_ratio"]),
-                    4,
-                ),
-                "spread_ratio": round(
-                    float(item["spread_ratio"]),
-                    4,
-                ),
+                "std": round(float(item["std"]), 4),
+                "p90": round(float(item["p90"]), 4),
+                "p90_ratio": round(float(item["p90_ratio"]), 4),
+                "std_ratio": round(float(item["std_ratio"]), 4),
             }
             for item in candidates
         ],
-
         "metrics": {
             str(item["value"]): {
                 "mean": round(float(item["mean"]), 4),
                 "std": round(float(item["std"]), 4),
                 "p80": round(float(item["p80"]), 4),
-                "spread": round(
-                    float(item["spread"]),
-                    4,
-                ),
-                "mean_ratio": round(
-                    float(item["mean_ratio"]),
-                    4,
-                ),
-                "spread_ratio": round(
-                    float(item["spread_ratio"]),
-                    4,
-                ),
+                "p90": round(float(item["p90"]), 4),
+                "p95": round(float(item["p95"]), 4),
+                "spread": round(float(item["spread"]), 4),
+                "p90_ratio": round(float(item["p90_ratio"]), 4),
+                "std_ratio": round(float(item["std_ratio"]), 4),
             }
             for item in metrics
         },
-
-        "reader":
-            "jee_solid_core_column_v5",
+        "reader": "jee_solid_core_column_v5",
+        "classifier_version": "uniform_core_v6",
     }
 
 
@@ -1045,62 +1059,127 @@ def detect_numerical_value_robust(
     decimal_details = []
     filled_decimals = []
 
+    decimal_core_radius = int(
+        template.get(
+            "jee_numeric_decimal_core_radius",
+            4,
+        )
+    )
+
+    decimal_dark_threshold = int(
+        template.get(
+            "jee_numeric_decimal_dark_threshold",
+            150,
+        )
+    )
+
+    decimal_filled_threshold = float(
+        template.get(
+            "jee_numeric_decimal_core_threshold",
+            0.52,
+        )
+    )
+
+    decimal_local_search = int(
+        template.get(
+            "jee_numeric_decimal_local_search",
+            1,
+        )
+    )
+
     for decimal in question.get(
         "decimal_points",
         [],
     ):
-        measurement = _solid_core_metrics(
-            gray,
-            float(decimal["x"]),
-            float(decimal["y"]),
-            template,
+        base_x = float(
+            decimal["x"]
         )
 
-        mean_ratio = (
-            float(measurement["mean"])
-            / max(question_blank_mean, 1.0)
+        base_y = float(
+            decimal["y"]
         )
+
+        best_score = -1.0
+        best_center = (
+            int(round(base_x)),
+            int(round(base_y)),
+        )
+
+        for dx in range(
+            -decimal_local_search,
+            decimal_local_search + 1,
+        ):
+            for dy in range(
+                -decimal_local_search,
+                decimal_local_search + 1,
+            ):
+                if (
+                    dx * dx + dy * dy
+                    > decimal_local_search
+                    * decimal_local_search
+                ):
+                    continue
+
+                cx = base_x + dx
+                cy = base_y + dy
+
+                score = _core_fill_ratio(
+                    gray,
+                    cx,
+                    cy,
+                    radius=decimal_core_radius,
+                    dark_threshold=decimal_dark_threshold,
+                )
+
+                if score > best_score:
+                    best_score = float(
+                        score
+                    )
+
+                    best_center = (
+                        int(round(cx)),
+                        int(round(cy)),
+                    )
 
         filled = (
-            mean_ratio
-            <= special_mean_ratio
+            best_score
+            >= decimal_filled_threshold
         )
 
         detail = {
             "after_column":
-                int(decimal["after_column"]),
+                int(
+                    decimal[
+                        "after_column"
+                    ]
+                ),
 
             "center": [
-                int(round(float(decimal["x"]))),
-                int(round(float(decimal["y"]))),
+                int(best_center[0]),
+                int(best_center[1]),
             ],
 
             "filled":
                 bool(filled),
 
-            "mean":
+            "score":
                 round(
-                    float(measurement["mean"]),
+                    float(best_score),
                     4,
                 ),
 
-            "spread":
-                round(
-                    float(measurement["spread"]),
-                    4,
-                ),
-
-            "mean_ratio":
-                round(
-                    mean_ratio,
-                    4,
-                ),
+            "score_mode":
+                "decimal_core_fill_v6_1",
         }
 
-        decimal_details.append(detail)
+        decimal_details.append(
+            detail
+        )
 
         if filled:
-            filled_decimals.append(detail)
+            filled_decimals.append(
+                detail
+            )
 
     selected_decimal = (
         int(
@@ -1267,6 +1346,12 @@ def detect_numerical_value_robust(
             round(question_blank_mean, 4),
         "reader":
             "jee_solid_core_reader_v5",
+
+        "numeric_classifier_version":
+            "uniform_core_v6",
+
+        "decimal_classifier_version":
+            "decimal_core_v6_1",
     }
 
 
