@@ -398,5 +398,10 @@
   "jee_numeric_decimal_match_radius": 14.0,
   "jee_numeric_decimal_annulus_inner_radius": 2,
   "jee_numeric_decimal_annulus_outer_radius": 5,
-  "jee_numeric_decimal_annulus_threshold": 0.62
+  "jee_numeric_decimal_annulus_threshold": 0.62,
+  "jee_numeric_decimal_contrast_inner_radius": 4,
+  "jee_numeric_decimal_background_inner_radius": 12,
+  "jee_numeric_decimal_background_outer_radius": 15,
+  "jee_numeric_decimal_contrast_ratio": 0.68,
+  "jee_numeric_decimal_contrast_delta": 35.0
 }

@@ -879,6 +879,150 @@ def _decimal_annulus_fill_ratio(
 
 
 
+def _decimal_local_contrast_metrics(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    template: Dict[str, Any],
+) -> Dict[str, float]:
+    # Compare the decimal interior with its own nearby paper background.
+    # This makes the decision independent of overall mobile brightness.
+
+    inner_radius = int(
+        template.get(
+            "jee_numeric_decimal_contrast_inner_radius",
+            4,
+        )
+    )
+
+    background_inner = int(
+        template.get(
+            "jee_numeric_decimal_background_inner_radius",
+            12,
+        )
+    )
+
+    background_outer = int(
+        template.get(
+            "jee_numeric_decimal_background_outer_radius",
+            15,
+        )
+    )
+
+    x = int(round(float(x)))
+    y = int(round(float(y)))
+
+    h, w = gray.shape[:2]
+
+    radius = max(
+        background_outer,
+        inner_radius,
+    )
+
+    x0 = max(0, x - radius)
+    x1 = min(w, x + radius + 1)
+    y0 = max(0, y - radius)
+    y1 = min(h, y + radius + 1)
+
+    roi = gray[y0:y1, x0:x1]
+
+    if roi.size == 0:
+        return {
+            "inner_mean": 255.0,
+            "inner_p90": 255.0,
+            "background_median": 255.0,
+            "contrast_ratio": 1.0,
+            "contrast_delta": 0.0,
+        }
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+
+    distance_sq = (
+        (xx - x) ** 2
+        + (yy - y) ** 2
+    )
+
+    inner_mask = (
+        distance_sq
+        <= inner_radius ** 2
+    )
+
+    background_mask = (
+        (distance_sq >= background_inner ** 2)
+        & (distance_sq <= background_outer ** 2)
+    )
+
+    inner_values = roi[
+        inner_mask
+    ].astype(np.float32)
+
+    background_values = roi[
+        background_mask
+    ].astype(np.float32)
+
+    if (
+        inner_values.size == 0
+        or background_values.size == 0
+    ):
+        return {
+            "inner_mean": 255.0,
+            "inner_p90": 255.0,
+            "background_median": 255.0,
+            "contrast_ratio": 1.0,
+            "contrast_delta": 0.0,
+        }
+
+    inner_mean = float(
+        np.mean(
+            inner_values
+        )
+    )
+
+    inner_p90 = float(
+        np.percentile(
+            inner_values,
+            90,
+        )
+    )
+
+    background_median = float(
+        np.median(
+            background_values
+        )
+    )
+
+    contrast_ratio = (
+        inner_mean
+        / max(
+            background_median,
+            1.0,
+        )
+    )
+
+    contrast_delta = (
+        background_median
+        - inner_mean
+    )
+
+    return {
+        "inner_mean":
+            inner_mean,
+
+        "inner_p90":
+            inner_p90,
+
+        "background_median":
+            background_median,
+
+        "contrast_ratio":
+            float(contrast_ratio),
+
+        "contrast_delta":
+            float(contrast_delta),
+    }
+
+
+
 def _classify_numerical_column(
     gray: np.ndarray,
     column: Dict[str, Any],
@@ -1128,31 +1272,17 @@ def detect_numerical_value_robust(
     decimal_details = []
     filled_decimals = []
 
-    decimal_inner_radius = int(
+    contrast_ratio_limit = float(
         template.get(
-            "jee_numeric_decimal_annulus_inner_radius",
-            2,
+            "jee_numeric_decimal_contrast_ratio",
+            0.68,
         )
     )
 
-    decimal_outer_radius = int(
+    contrast_delta_min = float(
         template.get(
-            "jee_numeric_decimal_annulus_outer_radius",
-            5,
-        )
-    )
-
-    decimal_dark_threshold = int(
-        template.get(
-            "jee_numeric_decimal_dark_threshold",
-            150,
-        )
-    )
-
-    decimal_filled_threshold = float(
-        template.get(
-            "jee_numeric_decimal_annulus_threshold",
-            0.62,
+            "jee_numeric_decimal_contrast_delta",
+            35.0,
         )
     )
 
@@ -1160,28 +1290,49 @@ def detect_numerical_value_robust(
         "decimal_points",
         [],
     ):
-        base_x = float(decimal["x"])
-        base_y = float(decimal["y"])
+        base_x = float(
+            decimal["x"]
+        )
 
-        score = float(
-            _decimal_annulus_fill_ratio(
+        base_y = float(
+            decimal["y"]
+        )
+
+        measurement = (
+            _decimal_local_contrast_metrics(
                 gray,
                 base_x,
                 base_y,
-                inner_radius=decimal_inner_radius,
-                outer_radius=decimal_outer_radius,
-                dark_threshold=decimal_dark_threshold,
+                template,
             )
         )
 
+        contrast_ratio = float(
+            measurement[
+                "contrast_ratio"
+            ]
+        )
+
+        contrast_delta = float(
+            measurement[
+                "contrast_delta"
+            ]
+        )
+
         filled = (
-            score
-            >= decimal_filled_threshold
+            contrast_ratio
+            <= contrast_ratio_limit
+            and contrast_delta
+            >= contrast_delta_min
         )
 
         detail = {
             "after_column":
-                int(decimal["after_column"]),
+                int(
+                    decimal[
+                        "after_column"
+                    ]
+                ),
 
             "center": [
                 int(round(base_x)),
@@ -1191,20 +1342,69 @@ def detect_numerical_value_robust(
             "filled":
                 bool(filled),
 
-            "score":
-                round(score, 4),
+            "inner_mean":
+                round(
+                    float(
+                        measurement[
+                            "inner_mean"
+                        ]
+                    ),
+                    4,
+                ),
+
+            "inner_p90":
+                round(
+                    float(
+                        measurement[
+                            "inner_p90"
+                        ]
+                    ),
+                    4,
+                ),
+
+            "background_median":
+                round(
+                    float(
+                        measurement[
+                            "background_median"
+                        ]
+                    ),
+                    4,
+                ),
+
+            "contrast_ratio":
+                round(
+                    contrast_ratio,
+                    4,
+                ),
+
+            "contrast_delta":
+                round(
+                    contrast_delta,
+                    4,
+                ),
 
             "score_mode":
-                "decimal_annulus_fill_v6_3",
+                "decimal_local_contrast_v6_4",
 
             "sampling_mode":
+                "local_background_relative_v6_4",
+
+            "legacy_score_mode":
+                "decimal_annulus_fill_v6_3",
+
+            "legacy_sampling_mode":
                 "individual_hough_center_v6_3",
         }
 
-        decimal_details.append(detail)
+        decimal_details.append(
+            detail
+        )
 
         if filled:
-            filled_decimals.append(detail)
+            filled_decimals.append(
+                detail
+            )
 
     selected_decimal = (
         int(
