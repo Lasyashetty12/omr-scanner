@@ -16,8 +16,6 @@
     "enabled": true,
     "filled_threshold": 0.65,
     "minimum_confidence_gap": 0.03,
-    "search_radius": 18,
-    "search_step": 2,
     "coordinates": {
       "P": [
         368,

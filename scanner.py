@@ -5386,8 +5386,9 @@ def process_omr(
         # Four registration boxes establish the canonical page geometry.
         # JEE answer grids are calibrated locally by the robust reader below,
         # so feature/ECC warps are deliberately disabled for every exam.
-        use_orb=False,
-        use_ecc=False,
+        use_orb=(template_exam_name == "JEE"),
+        use_ecc=(template_exam_name == "JEE"),
+        ecc_minimum_score=0.80,
         debug_dir=local_debug_dir,
     )
     alignment_debug["input"] = input_debug
