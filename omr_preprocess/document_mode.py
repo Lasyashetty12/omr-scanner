@@ -138,13 +138,39 @@ def create_document_scan(
     characteristics = _image_characteristics(original)
     lighting = _gentle_illumination_correction(original, characteristics)
 
-    denoise_strength = float(
-        np.clip(14.0 + (34.0 - characteristics["contrast"]) * 0.28, 12.0, 22.0)
+    soft_input = (
+        float(
+            characteristics[
+                "blur_score"
+            ]
+        )
+        < 650.0
     )
+
+    if soft_input:
+        denoise_strength = float(
+            np.clip(
+                8.0
+                + (30.0 - characteristics["contrast"]) * 0.16,
+                8.0,
+                14.0,
+            )
+        )
+        denoise_d = 3
+    else:
+        denoise_strength = float(
+            np.clip(
+                14.0
+                + (34.0 - characteristics["contrast"]) * 0.28,
+                12.0,
+                22.0,
+            )
+        )
+        denoise_d = 5
 
     denoised = cv2.bilateralFilter(
         lighting,
-        d=5,
+        d=denoise_d,
         sigmaColor=denoise_strength,
         sigmaSpace=denoise_strength,
     )
@@ -163,9 +189,32 @@ def create_document_scan(
         sigmaX=0.65,
         sigmaY=0.65,
     )
-    sharpen_amount = float(
-        np.clip(0.12 + (110.0 - characteristics["blur_score"]) / 900.0, 0.10, 0.20)
-    )
+    if soft_input:
+        sharpen_amount = float(
+            np.clip(
+                0.22
+                + (
+                    650.0
+                    - characteristics["blur_score"]
+                )
+                / 3000.0,
+                0.22,
+                0.34,
+            )
+        )
+    else:
+        sharpen_amount = float(
+            np.clip(
+                0.12
+                + (
+                    110.0
+                    - characteristics["blur_score"]
+                )
+                / 900.0,
+                0.10,
+                0.20,
+            )
+        )
     sharpened = cv2.addWeighted(
         contrasted,
         1.0 + sharpen_amount,

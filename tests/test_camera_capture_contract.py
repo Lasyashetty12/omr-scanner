@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,19 +40,20 @@ def test_manual_capture_is_a_true_shutter():
     assert "cancelAnimationFrame(" in capture_function
 
 
-def test_autocapture_uses_one_fast_valid_marker_frame():
+def test_autocapture_is_fast_but_requires_two_good_frames():
     source = _source()
 
-    assert "const AUTO_CAPTURE_STABLE_CHECKS = 1;" in source
+    assert "const AUTO_CAPTURE_STABLE_CHECKS = 2;" in source
     assert "const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;" in source
-    assert "const analysisWidth = Math.min(480, videoWidth);" in source
+    assert "const analysisWidth = Math.min(640, videoWidth);" in source
+    assert "const AUTO_CAPTURE_MIN_SHARPNESS = 650;" in source
 
     assert "findSolidSquareByContrast(" in source
     assert "setTimeout(() =>" not in source
     assert "captureCameraImage(true);" in source
 
 
-def test_autocapture_readiness_is_four_marker_gated():
+def test_autocapture_readiness_requires_real_sheet_focus_and_stability():
     source = _source()
 
     start = source.index(
@@ -66,9 +67,18 @@ def test_autocapture_readiness_is_four_marker_gated():
     readiness = source[start:end]
 
     assert "detection.markerCount !== 4" in readiness
+    assert "isCompleteSheetInFrame(" in readiness
+    assert "isSheetLargeEnough(" in readiness
+    assert "isSheetReasonablyAligned(" in readiness
+    assert "hasExcessiveMovement(" in readiness
+    assert "AUTO_CAPTURE_MIN_SHARPNESS" in readiness
+    assert "waiting for camera focus" in readiness
     assert "ready: true" in readiness
 
-    assert "hasExcessiveMovement(" not in readiness
-    assert "isSheetLargeEnough(" not in readiness
-    assert "isCompleteSheetInFrame(" not in readiness
-    assert "isSheetReasonablyAligned(" not in readiness
+
+def test_live_detection_attaches_frame_sharpness():
+    source = _source()
+
+    assert "function estimateFrameSharpness(" in source
+    assert "sharpness = estimateFrameSharpness(" in source
+    assert "sharpness," in source

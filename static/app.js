@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 
 /* ==========================================================
@@ -373,8 +373,13 @@ const JPEG_QUALITY =
 
 // Two consecutive checks are still effectively instant for the user, while
 // preventing a single blurred frame from triggering capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 1;
+const AUTO_CAPTURE_STABLE_CHECKS = 2;
 const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
+
+// Downscaled live-frame Laplacian variance.
+// A blurred frame must never trigger automatic capture.
+const AUTO_CAPTURE_MIN_SHARPNESS = 650;
+
 
 
 /* ==========================================================
@@ -872,13 +877,108 @@ function hasExcessiveMovement(
 }
 
 
+function estimateFrameSharpness(
+    pixels,
+    width,
+    height
+) {
+    if (
+        !pixels
+        || width < 40
+        || height < 40
+    ) {
+        return 0;
+    }
+
+    const left = Math.max(
+        2,
+        Math.floor(width * 0.08)
+    );
+    const right = Math.min(
+        width - 3,
+        Math.ceil(width * 0.92)
+    );
+    const top = Math.max(
+        2,
+        Math.floor(height * 0.08)
+    );
+    const bottom = Math.min(
+        height - 3,
+        Math.ceil(height * 0.92)
+    );
+
+    function grayAt(x, y) {
+        const index = (
+            (y * width + x)
+            * 4
+        );
+
+        return (
+            pixels[index] * 0.299
+            + pixels[index + 1] * 0.587
+            + pixels[index + 2] * 0.114
+        );
+    }
+
+    let sum = 0;
+    let sumSquares = 0;
+    let count = 0;
+
+    for (
+        let y = top;
+        y <= bottom;
+        y += 2
+    ) {
+        for (
+            let x = left;
+            x <= right;
+            x += 2
+        ) {
+            const center = grayAt(x, y);
+
+            const laplacian = (
+                4 * center
+                - grayAt(x - 1, y)
+                - grayAt(x + 1, y)
+                - grayAt(x, y - 1)
+                - grayAt(x, y + 1)
+            );
+
+            sum += laplacian;
+            sumSquares += (
+                laplacian
+                * laplacian
+            );
+            count += 1;
+        }
+    }
+
+    if (!count) {
+        return 0;
+    }
+
+    const mean = (
+        sum
+        / count
+    );
+
+    return Math.max(
+        0,
+        (
+            sumSquares
+            / count
+        )
+        - mean * mean
+    );
+}
+
+
 function isReadyForAutoCapture(
     detection,
     videoWidth,
-    videoHeight
+    videoHeight,
+    priorDetection
 ) {
-    // detectDocumentCorners() already validates the four solid registration
-    // blocks and the page quadrilateral. One valid frame is enough.
     if (
         !detection
         || !detection.sourcePoints
@@ -886,15 +986,82 @@ function isReadyForAutoCapture(
     ) {
         return {
             ready: false,
-            reason: "Align the OMR sheet â€” show all four black corner blocks"
+            reason: "Align the OMR sheet — show all four black corner blocks"
+        };
+    }
+
+    if (
+        !isCompleteSheetInFrame(
+            detection.sourcePoints,
+            videoWidth,
+            videoHeight
+        )
+    ) {
+        return {
+            ready: false,
+            reason: "Move back slightly — keep the complete OMR and all four blocks inside the frame"
+        };
+    }
+
+    if (
+        !isSheetLargeEnough(
+            detection.sourcePoints,
+            videoWidth,
+            videoHeight
+        )
+    ) {
+        return {
+            ready: false,
+            reason: "Move closer — the OMR sheet is too small"
+        };
+    }
+
+    if (
+        !isSheetReasonablyAligned(
+            detection.sourcePoints
+        )
+    ) {
+        return {
+            ready: false,
+            reason: "Straighten the OMR sheet"
+        };
+    }
+
+    if (
+        priorDetection
+        && hasExcessiveMovement(
+            detection,
+            priorDetection
+        )
+    ) {
+        return {
+            ready: false,
+            reason: "Hold the phone steady"
+        };
+    }
+
+    const sharpness = Number(
+        detection.sharpness
+        || 0
+    );
+
+    if (
+        !Number.isFinite(sharpness)
+        || sharpness
+        < AUTO_CAPTURE_MIN_SHARPNESS
+    ) {
+        return {
+            ready: false,
+            reason: "Hold steady — waiting for camera focus"
         };
     }
 
     return {
         ready: true,
-        reason: "Four black corner markers recognized"
+        reason: "Four corner blocks locked and image focused"
     };
 }
+
 
 /* ==========================================================
    LIVE CORNER-BLOCK DETECTION
@@ -1365,7 +1532,7 @@ function detectDocumentCorners() {
     // portrait sheet is viewed by a landscape phone sensor. 640px preserves
     // enough of the square for reliable component/contrast detection while
     // remaining small enough for live analysis on mobile devices.
-    const analysisWidth = Math.min(480, videoWidth);
+    const analysisWidth = Math.min(640, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1552,11 +1719,18 @@ function detectDocumentCorners() {
         y: (y / analysisHeight) * displayHeight,
     }));
 
+    const sharpness = estimateFrameSharpness(
+        pixels,
+        analysisWidth,
+        analysisHeight
+    );
+
     return {
         displayPoints,
         sourcePoints,
         markerCount: 4,
         markers,
+        sharpness,
     };
 }
 
@@ -1578,7 +1752,8 @@ function monitorCornerBlocks(timestamp) {
         const readinessCheck = isReadyForAutoCapture(
             detection,
             videoWidth,
-            videoHeight
+            videoHeight,
+            previousDetection
         );
 
         if (readinessCheck.ready) {

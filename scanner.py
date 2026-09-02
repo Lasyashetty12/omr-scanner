@@ -5537,6 +5537,32 @@ def process_omr(
         "document_quality"
     ]
 
+    # Live auto-capture must be stricter than a manually uploaded image.
+    camera_capture = (
+        os.path.basename(
+            str(input_filename or "")
+        ).lower()
+        == "camera_omr.jpg"
+    )
+
+    camera_min_sharpness = 500.0
+
+    if (
+        camera_capture
+        and float(
+            document_quality.get(
+                "sharpness",
+                0.0,
+            )
+        )
+        < camera_min_sharpness
+    ):
+        raise ValueError(
+            "Camera image is still blurry. "
+            "Keep all four black corner blocks visible and hold the phone "
+            "steady until autofocus locks, then scan again."
+        )
+
     if not document_quality[
         "can_scan"
     ]:
