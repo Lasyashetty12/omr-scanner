@@ -725,6 +725,68 @@ def _calibrate_numerical_question(
     }
 
 
+def _solid_core_metrics(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    template: Dict[str, Any],
+) -> Dict[str, float]:
+    radius = int(
+        template.get(
+            "jee_numeric_solid_core_radius",
+            3,
+        )
+    )
+
+    x = int(round(float(x)))
+    y = int(round(float(y)))
+
+    h, w = gray.shape[:2]
+
+    x0 = max(0, x - radius)
+    x1 = min(w, x + radius + 1)
+    y0 = max(0, y - radius)
+    y1 = min(h, y + radius + 1)
+
+    roi = gray[y0:y1, x0:x1]
+
+    if roi.size == 0:
+        return {
+            "mean": 255.0,
+            "std": 0.0,
+            "p80": 255.0,
+            "spread": 0.0,
+        }
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+
+    mask = (
+        (xx - x) ** 2
+        + (yy - y) ** 2
+        <= radius ** 2
+    )
+
+    values = roi[mask].astype(np.float32)
+
+    if values.size == 0:
+        return {
+            "mean": 255.0,
+            "std": 0.0,
+            "p80": 255.0,
+            "spread": 0.0,
+        }
+
+    mean = float(np.mean(values))
+    p80 = float(np.percentile(values, 80))
+
+    return {
+        "mean": mean,
+        "std": float(np.std(values)),
+        "p80": p80,
+        "spread": max(0.0, p80 - mean),
+    }
+
+
 def _classify_numerical_column(
     gray: np.ndarray,
     column: Dict[str, Any],
@@ -740,272 +802,145 @@ def _classify_numerical_column(
 
     y_positions = [
         float(value)
-        for value in column[
-            "y_positions"
-        ]
+        for value in column["y_positions"]
     ]
 
-    reference_y_positions = [
-        float(value)
-        for value in column.get(
-            "reference_y_positions",
-            y_positions,
-        )
-    ]
+    x = float(column["x"])
 
-    x = float(
-        column["x"]
-    )
+    metrics = []
 
-    reference_x = float(
-        column.get(
-            "reference_x",
-            x,
-        )
-    )
-
-    reference_gray = (
-        _get_jee_reference_gray(
-            template
-        )
-    )
-
-    core_radius = int(
-        template.get(
-            "jee_numeric_delta_core_radius",
-            5,
-        )
-    )
-
-    outer_radius = int(
-        template.get(
-            "jee_numeric_delta_outer_radius",
-            9,
-        )
-    )
-
-    reference_search = int(
-        template.get(
-            "jee_numeric_reference_search",
-            2,
-        )
-    )
-
-    actual_search = int(
-        template.get(
-            "jee_numeric_actual_search",
-            2,
-        )
-    )
-
-    scores = {
-        value: _extra_ink_score(
+    for index, value in enumerate(values):
+        measurement = _solid_core_metrics(
             gray,
-            reference_gray,
             x,
             y_positions[index],
-            reference_x,
-            reference_y_positions[index],
-            core_radius=core_radius,
-            outer_radius=outer_radius,
-            reference_search=reference_search,
-            actual_search=actual_search,
+            template,
         )
-        for index, value
-        in enumerate(values)
-    }
 
-    ranked = sorted(
-        scores.items(),
-        key=lambda item:
-        item[1],
-        reverse=True,
-    )
+        metrics.append(
+            {
+                "value": value,
+                "center": [
+                    int(round(x)),
+                    int(round(y_positions[index])),
+                ],
+                **measurement,
+            }
+        )
 
-    top_value, top_score = (
-        ranked[0]
-    )
-
-    second_score = float(
-        ranked[1][1]
-        if len(ranked) > 1
-        else 0.0
-    )
-
-    score_values = np.asarray(
-        list(scores.values()),
+    means = np.asarray(
+        [item["mean"] for item in metrics],
         dtype=np.float32,
     )
 
-    column_baseline = float(
-        np.median(
-            score_values
-        )
+    spreads = np.asarray(
+        [item["spread"] for item in metrics],
+        dtype=np.float32,
     )
 
-    column_mad = float(
-        np.median(
-            np.abs(
-                score_values
-                - column_baseline
-            )
-        )
-    )
+    median_mean = float(np.median(means))
+    median_spread = float(np.median(spreads))
 
-    signal = float(
-        top_score
-        - column_baseline
-    )
-
-    gap = float(
-        top_score
-        - second_score
-    )
-
-    blank_signal = float(
+    mean_ratio_limit = float(
         template.get(
-            "jee_numeric_adaptive_blank_signal",
-            0.028,
+            "jee_numeric_solid_mean_ratio",
+            0.55,
         )
     )
 
-    filled_signal = float(
+    spread_ratio_limit = float(
         template.get(
-            "jee_numeric_adaptive_filled_signal",
-            0.070,
+            "jee_numeric_solid_spread_ratio",
+            0.35,
         )
     )
 
-    strong_signal = float(
-        template.get(
-            "jee_numeric_adaptive_strong_signal",
-            0.120,
-        )
-    )
+    candidates = []
 
-    minimum_gap = float(
-        template.get(
-            "jee_numeric_adaptive_minimum_gap",
-            0.014,
-        )
-    )
-
-    strong_minimum_gap = float(
-        template.get(
-            "jee_numeric_adaptive_strong_minimum_gap",
-            0.005,
-        )
-    )
-
-    dynamic_signal = max(
-        filled_signal,
-        column_mad
-        * float(
-            template.get(
-                "jee_numeric_adaptive_mad_multiplier",
-                3.0,
-            )
-        ),
-    )
-
-    if signal < blank_signal:
-        detected_value = ""
-
-    elif (
-        signal >= strong_signal
-        and gap
-        >= strong_minimum_gap
-    ):
-        detected_value = (
-            top_value
+    for item in metrics:
+        mean_ratio = (
+            float(item["mean"])
+            / max(median_mean, 1.0)
         )
 
-    elif (
-        signal >= dynamic_signal
-        and gap >= minimum_gap
-    ):
-        detected_value = (
-            top_value
+        spread_ratio = (
+            float(item["spread"])
+            / max(median_spread, 1.0)
         )
+
+        item["mean_ratio"] = mean_ratio
+        item["spread_ratio"] = spread_ratio
+
+        if (
+            mean_ratio <= mean_ratio_limit
+            and spread_ratio <= spread_ratio_limit
+        ):
+            candidates.append(item)
+
+    if len(candidates) == 1:
+        selected = candidates[0]
+        value = str(selected["value"])
+        status = "FILLED"
+        center = list(selected["center"])
+
+    elif len(candidates) >= 2:
+        value = "?"
+        status = "MULTIPLE"
+        center = None
 
     else:
-        detected_value = "?"
-
-    selected_index = (
-        values.index(
-            top_value
-        )
-    )
+        value = ""
+        status = "BLANK"
+        center = None
 
     return {
-        "value":
-            detected_value,
+        "value": value,
+        "status": status,
+        "center": center,
+        "median_mean": round(median_mean, 4),
+        "median_spread": round(median_spread, 4),
 
-        "top_value":
-            top_value,
-
-        "best_score":
-            round(
-                float(top_score),
-                4,
-            ),
-
-        "second_score":
-            round(
-                float(second_score),
-                4,
-            ),
-
-        "confidence_gap":
-            round(
-                float(gap),
-                4,
-            ),
-
-        "baseline_score":
-            round(
-                float(
-                    column_baseline
+        "filled_candidates": [
+            {
+                "value": str(item["value"]),
+                "center": list(item["center"]),
+                "mean": round(float(item["mean"]), 4),
+                "spread": round(float(item["spread"]), 4),
+                "mean_ratio": round(
+                    float(item["mean_ratio"]),
+                    4,
                 ),
-                4,
-            ),
-
-        "mad":
-            round(
-                float(
-                    column_mad
+                "spread_ratio": round(
+                    float(item["spread_ratio"]),
+                    4,
                 ),
-                4,
-            ),
-
-        "signal":
-            round(
-                float(signal),
-                4,
-            ),
-
-        "scores": {
-            key: round(
-                float(score),
-                4,
-            )
-            for key, score
-            in scores.items()
-        },
-
-        "center": [
-            int(round(x)),
-            int(
-                round(
-                    y_positions[
-                        selected_index
-                    ]
-                )
-            ),
+            }
+            for item in candidates
         ],
 
-        "score_mode":
-            "blank_reference_adaptive_v4",
+        "metrics": {
+            str(item["value"]): {
+                "mean": round(float(item["mean"]), 4),
+                "std": round(float(item["std"]), 4),
+                "p80": round(float(item["p80"]), 4),
+                "spread": round(
+                    float(item["spread"]),
+                    4,
+                ),
+                "mean_ratio": round(
+                    float(item["mean_ratio"]),
+                    4,
+                ),
+                "spread_ratio": round(
+                    float(item["spread_ratio"]),
+                    4,
+                ),
+            }
+            for item in metrics
+        },
+
+        "reader":
+            "jee_solid_core_column_v5",
     }
 
 
@@ -1015,305 +950,298 @@ def detect_numerical_value_robust(
     template: Dict[str, Any],
 ) -> Dict[str, Any]:
     columns = question.get("columns", [])
+
     if not columns:
-        return {"answer": "BLANK", "columns": []}
+        return {
+            "answer": "BLANK",
+            "columns": [],
+            "decimal_points": [],
+            "selected_decimal": None,
+            "sign": None,
+            "reader": "jee_solid_core_reader_v5",
+        }
 
     detected_digits: List[str] = []
     column_details: List[Dict[str, Any]] = []
 
-    for column_index, column in enumerate(columns, start=1):
-        detail = _classify_numerical_column(gray, column, template)
+    blank_cell_means = []
+    filled_cell_means = []
+
+    for column_index, column in enumerate(
+        columns,
+        start=1,
+    ):
+        detail = _classify_numerical_column(
+            gray,
+            column,
+            template,
+        )
+
         detail["column"] = column_index
-        detected_digits.append(detail["value"])
+
+        detected_digits.append(
+            str(detail["value"])
+        )
+
         column_details.append(detail)
 
-    all_scores = [
-        float(score)
-        for detail in column_details
-        for score in detail.get(
-            "scores",
+        candidate_values = {
+            str(item["value"])
+            for item in detail.get(
+                "filled_candidates",
+                [],
+            )
+        }
+
+        for digit, metric in detail.get(
+            "metrics",
             {},
-        ).values()
-    ]
-
-    question_noise_floor = float(
-        np.median(
-            np.asarray(
-                all_scores,
-                dtype=np.float32,
-            )
-        )
-        if all_scores
-        else 0.0
-    )
-
-    rescue_signal = float(
-        template.get(
-            "jee_numeric_question_rescue_signal",
-            0.050,
-        )
-    )
-
-    rescue_gap = float(
-        template.get(
-            "jee_numeric_question_rescue_gap",
-            0.008,
-        )
-    )
-
-    for index, detail in enumerate(
-        column_details
-    ):
-        if detail.get("value") != "?":
-            continue
-
-        global_signal = (
-            float(
-                detail.get(
-                    "best_score",
-                    0.0,
-                )
-            )
-            - question_noise_floor
-        )
-
-        local_signal = float(
-            detail.get(
-                "signal",
-                0.0,
-            )
-        )
-
-        gap = float(
-            detail.get(
-                "confidence_gap",
-                0.0,
-            )
-        )
-
-        if (
-            max(
-                global_signal,
-                local_signal,
-            )
-            >= rescue_signal
-            and gap >= rescue_gap
-        ):
-            rescued = str(
-                detail.get(
-                    "top_value",
-                    "?",
+        ).items():
+            mean = float(
+                metric.get(
+                    "mean",
+                    255.0,
                 )
             )
 
-            detail["value"] = (
-                rescued
+            if str(digit) in candidate_values:
+                filled_cell_means.append(mean)
+            else:
+                blank_cell_means.append(mean)
+
+    if blank_cell_means:
+        question_blank_mean = float(
+            np.median(
+                np.asarray(
+                    blank_cell_means,
+                    dtype=np.float32,
+                )
             )
+        )
+    else:
+        all_means = (
+            blank_cell_means
+            + filled_cell_means
+        )
 
-            detail[
-                "rescued_from_uncertain"
-            ] = True
+        question_blank_mean = float(
+            np.median(
+                np.asarray(
+                    all_means,
+                    dtype=np.float32,
+                )
+            )
+            if all_means
+            else 255.0
+        )
 
-            detected_digits[
-                index
-            ] = rescued
-
-    core_radius = int(template.get("jee_core_radius", 6))
-    dark_threshold = int(template.get("jee_core_dark_threshold", 140))
-    special_threshold = float(
+    special_mean_ratio = float(
         template.get(
-            "jee_numeric_delta_special_threshold",
-            0.16,
+            "jee_numeric_special_mean_ratio",
+            0.55,
         )
     )
 
     decimal_details = []
-    decimal_ranked = []
+    filled_decimals = []
 
-    for decimal in question.get("decimal_points", []):
-        score = _extra_ink_score(
+    for decimal in question.get(
+        "decimal_points",
+        [],
+    ):
+        measurement = _solid_core_metrics(
             gray,
-            _get_jee_reference_gray(template),
-            decimal["x"],
-            decimal["y"],
-            decimal.get("reference_x", decimal["x"]),
-            decimal.get("reference_y", decimal["y"]),
-            core_radius=int(
-                template.get("jee_numeric_delta_core_radius", 5)
-            ),
-            outer_radius=int(
-                template.get("jee_numeric_delta_outer_radius", 9)
-            ),
-            reference_search=int(
-                template.get("jee_numeric_reference_search", 2)
-            ),
+            float(decimal["x"]),
+            float(decimal["y"]),
+            template,
         )
+
+        mean_ratio = (
+            float(measurement["mean"])
+            / max(question_blank_mean, 1.0)
+        )
+
+        filled = (
+            mean_ratio
+            <= special_mean_ratio
+        )
+
         detail = {
-            "after_column": int(decimal["after_column"]),
-            "score": round(float(score), 4),
+            "after_column":
+                int(decimal["after_column"]),
+
             "center": [
                 int(round(float(decimal["x"]))),
                 int(round(float(decimal["y"]))),
             ],
-        }
-        decimal_details.append(detail)
-        decimal_ranked.append(
-            (
-                detail["after_column"],
-                float(score),
-            )
-        )
 
-    decimal_ranked.sort(
-        key=lambda item: item[1],
-        reverse=True,
+            "filled":
+                bool(filled),
+
+            "mean":
+                round(
+                    float(measurement["mean"]),
+                    4,
+                ),
+
+            "spread":
+                round(
+                    float(measurement["spread"]),
+                    4,
+                ),
+
+            "mean_ratio":
+                round(
+                    mean_ratio,
+                    4,
+                ),
+        }
+
+        decimal_details.append(detail)
+
+        if filled:
+            filled_decimals.append(detail)
+
+    selected_decimal = (
+        int(
+            filled_decimals[0][
+                "after_column"
+            ]
+        )
+        if len(filled_decimals) == 1
+        else None
     )
 
-    selected_decimal = None
-
-    if decimal_ranked:
-        best_decimal = decimal_ranked[0]
-        second_decimal_score = (
-            decimal_ranked[1][1]
-            if len(decimal_ranked) > 1
-            else 0.0
-        )
-
-        decimal_gap = (
-            float(best_decimal[1])
-            - float(second_decimal_score)
-        )
-
-        decimal_minimum_gap = float(
-            template.get(
-                "jee_numeric_decimal_gap",
-                0.08,
-            )
-        )
-
-        decimal_scores = np.asarray(
-            [
-                float(item[1])
-                for item in decimal_ranked
-            ],
-            dtype=np.float32,
-        )
-
-        decimal_baseline = float(
-            np.median(
-                decimal_scores
-            )
-            if decimal_scores.size
-            else question_noise_floor
-        )
-
-        decimal_signal = float(
-            best_decimal[1]
-            - min(
-                decimal_baseline,
-                question_noise_floor,
-            )
-        )
-
-        adaptive_decimal_signal = float(
-            template.get(
-                "jee_numeric_adaptive_decimal_signal",
-                0.045,
-            )
-        )
-
-        adaptive_decimal_gap = float(
-            template.get(
-                "jee_numeric_adaptive_decimal_gap",
-                0.010,
-            )
-        )
-
-        if (
-            decimal_signal
-            >= adaptive_decimal_signal
-            and decimal_gap
-            >= adaptive_decimal_gap
-        ):
-            selected_decimal = int(
-                best_decimal[0]
-            )
+    if len(filled_decimals) >= 2:
+        decimal_status = "MULTIPLE"
+    elif len(filled_decimals) == 1:
+        decimal_status = "FILLED"
+    else:
+        decimal_status = "BLANK"
 
     sign_detail = None
     negative = False
+
     sign = question.get("sign")
 
     if sign:
-        sign_score = _extra_ink_score(
+        measurement = _solid_core_metrics(
             gray,
-            _get_jee_reference_gray(template),
-            sign["x"],
-            sign["y"],
-            sign.get("reference_x", sign["x"]),
-            sign.get("reference_y", sign["y"]),
-            core_radius=int(
-                template.get("jee_numeric_delta_core_radius", 5)
-            ),
-            outer_radius=int(
-                template.get("jee_numeric_delta_outer_radius", 9)
-            ),
-            reference_search=int(
-                template.get("jee_numeric_reference_search", 2)
-            ),
+            float(sign["x"]),
+            float(sign["y"]),
+            template,
         )
-        sign_signal = float(
-            sign_score
-            - question_noise_floor
+
+        sign_mean_ratio = (
+            float(measurement["mean"])
+            / max(question_blank_mean, 1.0)
         )
 
         negative = (
-            sign_signal
-            >= float(
-                template.get(
-                    "jee_numeric_adaptive_sign_signal",
-                    0.050,
-                )
-            )
+            sign_mean_ratio
+            <= special_mean_ratio
         )
+
         sign_detail = {
-            "value": "-" if negative else "",
-            "score": round(float(sign_score), 4),
+            "value":
+                "-" if negative else "",
+
+            "filled":
+                bool(negative),
+
             "center": [
                 int(round(float(sign["x"]))),
                 int(round(float(sign["y"]))),
             ],
+
+            "mean":
+                round(
+                    float(measurement["mean"]),
+                    4,
+                ),
+
+            "spread":
+                round(
+                    float(measurement["spread"]),
+                    4,
+                ),
+
+            "mean_ratio":
+                round(
+                    sign_mean_ratio,
+                    4,
+                ),
         }
 
-    if all(value == "" for value in detected_digits):
+    has_multiple_column = any(
+        detail.get("status")
+        == "MULTIPLE"
+        for detail in column_details
+    )
+
+    if has_multiple_column:
+        answer = "UNCERTAIN"
+
+    elif len(filled_decimals) >= 2:
+        answer = "UNCERTAIN"
+
+    elif all(
+        value == ""
+        for value in detected_digits
+    ):
         answer = "BLANK"
 
-    elif any(value == "?" for value in detected_digits):
+    elif any(
+        value == "?"
+        for value in detected_digits
+    ):
         answer = "UNCERTAIN"
 
     else:
         used_indices = [
             index
-            for index, value in enumerate(detected_digits)
+            for index, value
+            in enumerate(detected_digits)
             if value
         ]
 
         if not used_indices:
             answer = "BLANK"
+
         else:
             first = min(used_indices)
             last = max(used_indices)
-            used_digits = detected_digits[first:last + 1]
 
-            if any(value == "" for value in used_digits):
+            used_digits = (
+                detected_digits[
+                    first:last + 1
+                ]
+            )
+
+            if any(
+                value == ""
+                for value in used_digits
+            ):
                 answer = "UNCERTAIN"
+
             else:
-                answer = "".join(used_digits)
+                answer = "".join(
+                    used_digits
+                )
 
                 if selected_decimal is not None:
-                    insertion = selected_decimal - first
+                    insertion = (
+                        selected_decimal
+                        - first
+                    )
 
-                    if insertion <= 0 or insertion >= len(answer):
+                    if (
+                        insertion <= 0
+                        or insertion
+                        >= len(answer)
+                    ):
                         answer = "UNCERTAIN"
+
                     else:
                         answer = (
                             answer[:insertion]
@@ -1321,22 +1249,24 @@ def detect_numerical_value_robust(
                             + answer[insertion:]
                         )
 
-                if negative and answer != "UNCERTAIN":
+                if (
+                    negative
+                    and answer
+                    != "UNCERTAIN"
+                ):
                     answer = "-" + answer
 
     return {
         "answer": answer,
         "columns": column_details,
         "decimal_points": decimal_details,
+        "decimal_status": decimal_status,
         "selected_decimal": selected_decimal,
         "sign": sign_detail,
-        "question_noise_floor": round(
-            float(
-                question_noise_floor
-            ),
-            4,
-        ),
-        "reader": "jee_adaptive_reference_reader_v4",
+        "question_blank_mean":
+            round(question_blank_mean, 4),
+        "reader":
+            "jee_solid_core_reader_v5",
     }
 
 

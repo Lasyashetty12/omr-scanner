@@ -4899,32 +4899,100 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                 base_x_value
             )
 
-            detected_answer = str(
-                record.get(
-                    "answer",
-                    "BLANK",
-                )
-            ).upper()
-
+            # Numerical bubble confidence is per bubble. The final assembled
+            # answer can still be UNCERTAIN because of an invalid pattern.
             ring_color = (
-                (
-                    0,
-                    215,
-                    255,
-                )
-                if detected_answer
-                == "UNCERTAIN"
-                else (
-                    0,
-                    200,
-                    0,
-                )
+                0,
+                200,
+                0,
             )
 
             for detail in record.get(
                 "columns",
                 [],
             ):
+                filled_candidates = (
+                    detail.get(
+                        "filled_candidates",
+                        [],
+                    )
+                    or []
+                )
+
+                if filled_candidates:
+                    candidate_color = (
+                        (
+                            0,
+                            215,
+                            255,
+                        )
+                        if len(
+                            filled_candidates
+                        ) >= 2
+                        else (
+                            0,
+                            200,
+                            0,
+                        )
+                    )
+
+                    for candidate in filled_candidates:
+                        detected_center = (
+                            candidate.get(
+                                "center"
+                            )
+                        )
+
+                        if (
+                            isinstance(
+                                detected_center,
+                                (list, tuple),
+                            )
+                            and len(
+                                detected_center
+                            ) == 2
+                        ):
+                            center = (
+                                int(
+                                    round(
+                                        float(
+                                            detected_center[
+                                                0
+                                            ]
+                                        )
+                                    )
+                                ),
+                                int(
+                                    round(
+                                        float(
+                                            detected_center[
+                                                1
+                                            ]
+                                        )
+                                    )
+                                ),
+                            )
+
+                            cv2.circle(
+                                debug,
+                                center,
+                                radius,
+                                candidate_color,
+                                ring_thickness,
+                                lineType=cv2.LINE_AA,
+                            )
+
+                            cv2.circle(
+                                debug,
+                                center,
+                                2,
+                                candidate_color,
+                                -1,
+                                lineType=cv2.LINE_AA,
+                            )
+
+                    continue
+
                 value = str(
                     detail.get(
                         "value",
@@ -5021,31 +5089,43 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                     lineType=cv2.LINE_AA,
                 )
 
-            selected_decimal = (
-                record.get(
-                    "selected_decimal"
+            filled_decimal_points = [
+                detail
+                for detail in record.get(
+                    "decimal_points",
+                    [],
+                )
+                if bool(
+                    detail.get(
+                        "filled",
+                        False,
+                    )
+                )
+            ]
+
+            decimal_color = (
+                (
+                    0,
+                    215,
+                    255,
+                )
+                if len(
+                    filled_decimal_points
+                ) >= 2
+                else (
+                    0,
+                    200,
+                    0,
                 )
             )
 
-            for detail in record.get(
-                "decimal_points",
-                [],
-            ):
+            for detail in filled_decimal_points:
                 after_column = int(
                     detail.get(
                         "after_column",
                         -1,
                     )
                 )
-
-                if (
-                    selected_decimal is None
-                    or after_column
-                    != int(
-                        selected_decimal
-                    )
-                ):
-                    continue
 
                 if (
                     after_column
@@ -5109,7 +5189,7 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                     debug,
                     center,
                     radius,
-                    ring_color,
+                    decimal_color,
                     ring_thickness,
                     lineType=cv2.LINE_AA,
                 )

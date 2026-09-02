@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,8 +59,9 @@ def test_production_still_uses_numeric_hybrid_only():
     branch = source[start:end]
 
     assert "scan_jee_answers(" in branch
-    assert "scan_jee_numerical_precise(" in branch
+    assert "scan_jee_numerical_sections_robust(" in branch
     assert 'answers["numerical"]' in branch
 
+    assert "scan_jee_numerical_precise(" not in branch
     assert "scan_jee_answers_precise(" not in branch
     assert "scan_jee_mcq_precise(" not in branch

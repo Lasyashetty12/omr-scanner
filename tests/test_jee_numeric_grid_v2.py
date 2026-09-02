@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,7 +47,7 @@ def test_jee_numeric_v2_selects_one_decimal_only():
     assert 'reader": "jee_precise_circle_reader_v2"' in body
 
 
-def test_jee_numeric_overlay_draws_only_selected_decimal():
+def test_jee_numeric_overlay_draws_detected_v5_bubbles():
     source = (
         ROOT
         / "scanner.py"
@@ -64,5 +64,7 @@ def test_jee_numeric_overlay_draws_only_selected_decimal():
 
     body = source[start:end]
 
-    assert "selected_decimal" in body
-    assert "selected_decimal is None" in body
+    assert "filled_candidates" in body
+    assert "filled_decimal_points" in body
+    assert "decimal_color" in body
+    assert "Numerical bubble confidence is per bubble" in body

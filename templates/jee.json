@@ -380,5 +380,9 @@
   "jee_numeric_question_rescue_gap": 0.008,
   "jee_numeric_adaptive_decimal_signal": 0.045,
   "jee_numeric_adaptive_decimal_gap": 0.01,
-  "jee_numeric_adaptive_sign_signal": 0.05
+  "jee_numeric_adaptive_sign_signal": 0.05,
+  "jee_numeric_solid_core_radius": 3,
+  "jee_numeric_solid_mean_ratio": 0.55,
+  "jee_numeric_solid_spread_ratio": 0.35,
+  "jee_numeric_special_mean_ratio": 0.55
 }

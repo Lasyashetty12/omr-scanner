@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import json
 import cv2
 
@@ -146,8 +146,9 @@ def test_production_jee_keeps_mcq_baseline_and_overrides_numeric_only():
     branch = source[start:end]
 
     assert "scan_jee_answers(" in branch
-    assert "scan_jee_numerical_precise(" in branch
+    assert "scan_jee_numerical_sections_robust(" in branch
     assert 'answers["numerical"]' in branch
 
+    assert "scan_jee_numerical_precise(" not in branch
     assert "scan_jee_answers_precise(" not in branch
     assert "scan_jee_mcq_precise(" not in branch
