@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 
 /* ==========================================================
@@ -373,8 +373,8 @@ const JPEG_QUALITY =
 
 // Two consecutive checks are still effectively instant for the user, while
 // preventing a single blurred frame from triggering capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 2;
-const AUTO_CAPTURE_CHECK_INTERVAL_MS = 80;
+const AUTO_CAPTURE_STABLE_CHECKS = 1;
+const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
 
 
 /* ==========================================================
@@ -877,43 +877,16 @@ function isReadyForAutoCapture(
     videoWidth,
     videoHeight
 ) {
-    /*
-        Camera auto-capture is registration-marker gated.  A white page,
-        printed text, bubbles, or a steady camera must never be enough.
-    */
-
-    if (!detection || !detection.sourcePoints || detection.markerCount !== 4) {
+    // detectDocumentCorners() already validates the four solid registration
+    // blocks and the page quadrilateral. One valid frame is enough.
+    if (
+        !detection
+        || !detection.sourcePoints
+        || detection.markerCount !== 4
+    ) {
         return {
             ready: false,
-            reason: "Align the OMR sheet Ã¢â‚¬â€ four black corner markers required"
-        };
-    }
-
-    if (!isSheetLargeEnough(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Four markers found Ã¢â‚¬â€ move the OMR sheet closer"
-        };
-    }
-
-    if (!isCompleteSheetInFrame(detection.sourcePoints, videoWidth, videoHeight)) {
-        return {
-            ready: false,
-            reason: "Four markers found Ã¢â‚¬â€ keep the complete sheet inside the frame"
-        };
-    }
-
-    if (!isSheetReasonablyAligned(detection.sourcePoints)) {
-        return {
-            ready: false,
-            reason: "Four markers found Ã¢â‚¬â€ straighten the OMR sheet"
-        };
-    }
-
-    if (hasExcessiveMovement(detection, previousDetection)) {
-        return {
-            ready: false,
-            reason: "Four markers found Ã¢â‚¬â€ hold the OMR sheet steady"
+            reason: "Align the OMR sheet â€” show all four black corner blocks"
         };
     }
 
@@ -922,7 +895,6 @@ function isReadyForAutoCapture(
         reason: "Four black corner markers recognized"
     };
 }
-
 
 /* ==========================================================
    LIVE CORNER-BLOCK DETECTION
@@ -1393,7 +1365,7 @@ function detectDocumentCorners() {
     // portrait sheet is viewed by a landscape phone sensor. 640px preserves
     // enough of the square for reliable component/contrast detection while
     // remaining small enough for live analysis on mobile devices.
-    const analysisWidth = Math.min(640, videoWidth);
+    const analysisWidth = Math.min(480, videoWidth);
     const analysisHeight = Math.round(
         analysisWidth * (videoHeight / videoWidth)
     );
@@ -1501,24 +1473,24 @@ function detectDocumentCorners() {
     // geometry guard prevents four dark response bubbles, table cells, or
     // logo fragments from forming a plausible but incorrect quadrilateral.
     const outerCornerGeometry = (
-        tl.x <= videoWidth * 0.36
-        && bl.x <= videoWidth * 0.36
-        && tr.x >= videoWidth * 0.64
-        && br.x >= videoWidth * 0.64
-        && tl.y <= videoHeight * 0.30
-        && tr.y <= videoHeight * 0.30
-        && bl.y >= videoHeight * 0.70
-        && br.y >= videoHeight * 0.70
+        tl.x <= videoWidth * 0.43
+        && bl.x <= videoWidth * 0.43
+        && tr.x >= videoWidth * 0.57
+        && br.x >= videoWidth * 0.57
+        && tl.y <= videoHeight * 0.38
+        && tr.y <= videoHeight * 0.38
+        && bl.y >= videoHeight * 0.62
+        && br.y >= videoHeight * 0.62
     );
     if (!outerCornerGeometry) return null;
 
     // The two left markers and the two right markers must describe the same
     // page edges.  Bubbles selected from different answer columns fail this
     // test even when each individual component happens to look dark/square.
-    if (Math.abs(tl.x - bl.x) > videoWidth * 0.15) return null;
-    if (Math.abs(tr.x - br.x) > videoWidth * 0.15) return null;
-    if (Math.abs(tl.y - tr.y) > videoHeight * 0.12) return null;
-    if (Math.abs(bl.y - br.y) > videoHeight * 0.12) return null;
+    if (Math.abs(tl.x - bl.x) > videoWidth * 0.22) return null;
+    if (Math.abs(tr.x - br.x) > videoWidth * 0.22) return null;
+    if (Math.abs(tl.y - tr.y) > videoHeight * 0.18) return null;
+    if (Math.abs(bl.y - br.y) > videoHeight * 0.18) return null;
 
     // All four printed registration boxes use the same physical dimensions.
     // Perspective can change their apparent size, but a bubble/text candidate
@@ -1537,8 +1509,8 @@ function detectDocumentCorners() {
     const left = Math.hypot(bl.x - tl.x, bl.y - tl.y);
     const right = Math.hypot(br.x - tr.x, br.y - tr.y);
 
-    if (Math.min(top, bottom) < videoWidth * 0.42) return null;
-    if (Math.min(left, right) < videoHeight * 0.42) return null;
+    if (Math.min(top, bottom) < videoWidth * 0.34) return null;
+    if (Math.min(left, right) < videoHeight * 0.34) return null;
 
     if (Math.max(top, bottom) / Math.max(Math.min(top, bottom), 1) > 1.75) return null;
     if (Math.max(left, right) / Math.max(Math.min(left, right), 1) > 1.75) return null;
@@ -1546,7 +1518,7 @@ function detectDocumentCorners() {
     const observedSheetRatio = (
         (top + bottom) / Math.max(left + right, 1)
     );
-    if (observedSheetRatio < 0.50 || observedSheetRatio > 0.90) {
+    if (observedSheetRatio < 0.42 || observedSheetRatio > 1.05) {
         return null;
     }
 
@@ -1558,7 +1530,7 @@ function detectDocumentCorners() {
         + (bl.x * tl.y - tl.x * bl.y)
     ) / 2;
 
-    if (polygonArea < videoWidth * videoHeight * 0.20) {
+    if (polygonArea < videoWidth * videoHeight * 0.12) {
         return null;
     }
 
@@ -1568,7 +1540,7 @@ function detectDocumentCorners() {
         / markerSides.length
     ) * (videoWidth / analysisWidth);
     const markerToSheetRatio = averageMarkerSide / Math.max(averageSheetWidth, 1);
-    if (markerToSheetRatio < 0.004 || markerToSheetRatio > 0.045) {
+    if (markerToSheetRatio < 0.0025 || markerToSheetRatio > 0.060) {
         return null;
     }
 
@@ -1796,6 +1768,11 @@ async function openCamera() {
 
         await camera.play();
 
+        if (captureButton) {
+            captureButton.disabled = false;
+            captureButton.classList.remove("hidden");
+        }
+
         // Match the preview/overlay box to the actual sensor frame. This
         // prevents CSS from showing a cropped image while detection and the
         // saved JPEG operate on the complete frame.
@@ -1867,6 +1844,19 @@ function captureCameraImage(
     clearError();
 
     hideResult();
+
+    if (!automatic) {
+        autoCaptureTriggered = true;
+
+        if (cornerDetectionFrame) {
+            cancelAnimationFrame(
+                cornerDetectionFrame
+            );
+
+            cornerDetectionFrame = null;
+        }
+    }
+
 
     if (
         !cameraStream
@@ -3194,3 +3184,4 @@ window.addEventListener(
             true;
     }
 })();
+
