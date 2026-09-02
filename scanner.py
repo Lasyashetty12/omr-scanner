@@ -5020,24 +5020,31 @@ def draw_jee_answer_analysis(corrected_image, template, answers):
                     lineType=cv2.LINE_AA,
                 )
 
+            selected_decimal = (
+                record.get(
+                    "selected_decimal"
+                )
+            )
+
             for detail in record.get(
                 "decimal_points",
                 [],
             ):
-                if float(
-                    detail.get(
-                        "score",
-                        0.0,
-                    )
-                ) < threshold:
-                    continue
-
                 after_column = int(
                     detail.get(
                         "after_column",
                         -1,
                     )
                 )
+
+                if (
+                    selected_decimal is None
+                    or after_column
+                    != int(
+                        selected_decimal
+                    )
+                ):
+                    continue
 
                 if (
                     after_column

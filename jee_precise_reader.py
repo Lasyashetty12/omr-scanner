@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import cv2
 import numpy as np
+from jee_reader import _calibrate_numerical_question
 
 
 Point = Tuple[float, float]
@@ -180,6 +181,32 @@ def _fill_ratio(
     )
 
     return float(dark) / float(total)
+
+
+def _numeric_local_fill(
+    gray,
+    x,
+    y,
+    radius,
+    dark_threshold,
+    search_radius=3,
+):
+    best_score = -1.0
+    best_center = (float(x), float(y))
+    search_radius = int(search_radius)
+    for dx in range(-search_radius, search_radius + 1):
+        for dy in range(-search_radius, search_radius + 1):
+            if dx * dx + dy * dy > search_radius * search_radius:
+                continue
+            cx = float(x) + dx
+            cy = float(y) + dy
+            score = _fill_ratio(
+                gray, cx, cy, radius, dark_threshold
+            )
+            if score > best_score:
+                best_score = float(score)
+                best_center = (cx, cy)
+    return float(best_score), best_center
 
 
 def scan_jee_mcq_precise(
@@ -621,7 +648,16 @@ def _read_numeric_question(
         for x, y in expected_digit_points
     ]
 
-    assigned_digit_points = _assign_unique(
+    # Hough circles are used only to estimate the local translation.
+    #
+    # Do not sample fill from Hough-assigned centres. A heavily shaded
+    # numerical bubble can distort its visible ring and move Hough's centre
+    # several pixels. Sampling that shifted point can hit the printed digit/
+    # ring of an otherwise blank bubble and create false digits or UNCERTAIN.
+    #
+    # Estimate dx/dy from the printed grid, then sample the translated
+    # template centres themselves.
+    hough_digit_points = _assign_unique(
         circles,
         translated_digit_points,
         circle_match_delta,
@@ -641,16 +677,22 @@ def _read_numeric_question(
         column_index,
         value,
     ) in enumerate(point_meta):
-        centre = assigned_digit_points[
+        centre = translated_digit_points[
             point_index
         ]
 
-        score = _fill_ratio(
+        score, sampled_centre = _numeric_local_fill(
             gray,
             centre[0],
             centre[1],
             core_radius,
             dark_threshold,
+            search_radius=int(
+                template.get(
+                    "jee_precise_numeric_local_search_radius",
+                    3,
+                )
+            ),
         )
 
         column_scores[
@@ -660,8 +702,8 @@ def _read_numeric_question(
         column_centres[
             column_index
         ][value] = [
-            int(round(centre[0])),
-            int(round(centre[1])),
+            int(round(sampled_centre[0])),
+            int(round(sampled_centre[1])),
         ]
 
     detected_digits: List[str] = []
@@ -688,18 +730,29 @@ def _read_numeric_question(
             top_score - second_score
         )
 
-        filled_values = [
-            value
-            for value, score in scores.items()
-            if score >= filled_threshold
-        ]
+        relaxed_threshold = float(
+            template.get(
+                "jee_precise_numeric_relaxed_threshold",
+                0.62,
+            )
+        )
 
-        if len(filled_values) >= 2:
-            detected_value = "?"
+        strong_gap = float(
+            template.get(
+                "jee_precise_numeric_strong_gap",
+                0.10,
+            )
+        )
 
-        elif (
+        if (
             top_score >= filled_threshold
             and confidence_gap >= minimum_gap
+        ):
+            detected_value = top_value
+
+        elif (
+            top_score >= relaxed_threshold
+            and confidence_gap >= strong_gap
         ):
             detected_value = top_value
 
@@ -732,11 +785,12 @@ def _read_numeric_question(
                 "center": column_centres[
                     column_index
                 ].get(top_value),
+                "sampling_mode": "translated_template_center",
             }
         )
 
     decimal_details: List[Dict[str, Any]] = []
-    decimal_candidates: List[int] = []
+    decimal_ranked: List[Tuple[int, float]] = []
 
     for decimal in decimal_points:
         expected = (
@@ -744,19 +798,31 @@ def _read_numeric_question(
             float(decimal["y"]) + dy,
         )
 
-        centre = _assign_unique(
+        # Keep Hough only for diagnostics; sample the translated template
+        # centre so a distorted/filled ring cannot pull the reader sideways.
+        hough_centre = _assign_unique(
             circles,
             [expected],
             circle_match_delta,
         )[0]
 
-        score = _fill_ratio(
+        centre = expected
+
+        score, sampled_centre = _numeric_local_fill(
             gray,
             centre[0],
             centre[1],
             core_radius,
             dark_threshold,
+            search_radius=int(
+                template.get(
+                    "jee_precise_numeric_local_search_radius",
+                    3,
+                )
+            ),
         )
+
+        centre = sampled_centre
 
         detail = {
             "after_column": int(
@@ -776,10 +842,48 @@ def _read_numeric_question(
             detail
         )
 
-        if score >= special_threshold:
-            decimal_candidates.append(
-                detail["after_column"]
+        decimal_ranked.append(
+            (
+                detail["after_column"],
+                float(score),
             )
+        )
+
+    decimal_ranked.sort(
+        key=lambda item:
+        item[1],
+        reverse=True,
+    )
+
+    selected_decimal = None
+
+    if decimal_ranked:
+        best_decimal_column = decimal_ranked[0][0]
+        best_decimal_score = float(decimal_ranked[0][1])
+
+        second_decimal_score = float(
+            decimal_ranked[1][1]
+            if len(decimal_ranked) > 1
+            else 0.0
+        )
+
+        decimal_gap = (
+            best_decimal_score
+            - second_decimal_score
+        )
+
+        decimal_minimum_gap = float(
+            template.get(
+                "jee_precise_numeric_decimal_gap",
+                0.08,
+            )
+        )
+
+        if (
+            best_decimal_score >= special_threshold
+            and decimal_gap >= decimal_minimum_gap
+        ):
+            selected_decimal = best_decimal_column
 
     sign_detail = None
     negative = False
@@ -790,19 +894,31 @@ def _read_numeric_question(
             float(sign["y"]) + dy,
         )
 
-        centre = _assign_unique(
+        # Keep Hough only for diagnostics; sample the translated template
+        # centre for the minus bubble as well.
+        hough_centre = _assign_unique(
             circles,
             [expected],
             circle_match_delta,
         )[0]
 
-        score = _fill_ratio(
+        centre = expected
+
+        score, sampled_centre = _numeric_local_fill(
             gray,
             centre[0],
             centre[1],
             core_radius,
             dark_threshold,
+            search_radius=int(
+                template.get(
+                    "jee_precise_numeric_local_search_radius",
+                    3,
+                )
+            ),
         )
+
+        centre = sampled_centre
 
         negative = (
             score >= special_threshold
@@ -845,17 +961,14 @@ def _read_numeric_question(
         ):
             answer = "UNCERTAIN"
 
-        elif len(decimal_candidates) > 1:
-            answer = "UNCERTAIN"
-
         else:
             answer = "".join(
                 used_digits
             )
 
-            if len(decimal_candidates) == 1:
+            if selected_decimal is not None:
                 after_column = (
-                    decimal_candidates[0]
+                    selected_decimal
                 )
 
                 insertion = (
@@ -891,8 +1004,9 @@ def _read_numeric_question(
         "answer": answer,
         "columns": column_details,
         "decimal_points": decimal_details,
+        "selected_decimal": selected_decimal,
         "sign": sign_detail,
-        "reader": "jee_precise_circle_reader_v1",
+        "reader": "jee_precise_circle_reader_v2",
     }, {
         "circle_count": len(circles),
         "translation_x": round(float(dx), 3),
@@ -929,13 +1043,23 @@ def scan_jee_numerical_precise(
                 question["question"]
             )
 
-            record, debug = (
-                _read_numeric_question(
+            calibrated_question, grid_debug = (
+                _calibrate_numerical_question(
                     gray,
                     question,
                     template,
                 )
             )
+
+            record, debug = (
+                _read_numeric_question(
+                    gray,
+                    calibrated_question,
+                    template,
+                )
+            )
+
+            debug["grid_cluster"] = grid_debug
 
             detected[
                 question_number
