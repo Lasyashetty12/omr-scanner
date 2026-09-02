@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -42,6 +43,261 @@ def _core_fill_ratio(
         return 0.0
 
     return float(np.count_nonzero((roi < dark_threshold) & mask)) / float(count)
+
+
+_JEE_REFERENCE_GRAY_CACHE: Dict[str, np.ndarray] = {}
+
+
+def _get_jee_reference_gray(
+    template: Dict[str, Any],
+) -> np.ndarray | None:
+    reference_name = str(
+        template.get(
+            "reference_image",
+            "jee_generated.png",
+        )
+    )
+
+    if reference_name in _JEE_REFERENCE_GRAY_CACHE:
+        return _JEE_REFERENCE_GRAY_CACHE[
+            reference_name
+        ]
+
+    path = (
+        Path(__file__).resolve().parent
+        / "references"
+        / reference_name
+    )
+
+    if not path.exists():
+        return None
+
+    reference = cv2.imread(
+        str(path),
+        cv2.IMREAD_GRAYSCALE,
+    )
+
+    if reference is None:
+        return None
+
+    _JEE_REFERENCE_GRAY_CACHE[
+        reference_name
+    ] = reference
+
+    return reference
+
+
+def _extract_square(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    radius: int,
+) -> np.ndarray | None:
+    x = int(round(float(x)))
+    y = int(round(float(y)))
+    radius = int(radius)
+
+    x0 = x - radius
+    x1 = x + radius + 1
+    y0 = y - radius
+    y1 = y + radius + 1
+
+    if (
+        x0 < 0
+        or y0 < 0
+        or x1 > gray.shape[1]
+        or y1 > gray.shape[0]
+    ):
+        return None
+
+    return gray[
+        y0:y1,
+        x0:x1,
+    ].astype(
+        np.float32
+    )
+
+
+def _extra_ink_score(
+    gray: np.ndarray,
+    reference_gray: np.ndarray | None,
+    actual_x: float,
+    actual_y: float,
+    reference_x: float,
+    reference_y: float,
+    *,
+    core_radius: int = 5,
+    outer_radius: int = 9,
+    reference_search: int = 2,
+) -> float:
+    if reference_gray is None:
+        return _core_fill_ratio(
+            gray,
+            actual_x,
+            actual_y,
+            radius=core_radius,
+            dark_threshold=140,
+        )
+
+    current = _extract_square(
+        gray,
+        actual_x,
+        actual_y,
+        outer_radius,
+    )
+
+    if current is None:
+        return 0.0
+
+    size = outer_radius * 2 + 1
+
+    yy, xx = np.ogrid[
+        :size,
+        :size,
+    ]
+
+    cx = outer_radius
+    cy = outer_radius
+
+    distance_sq = (
+        (xx - cx) ** 2
+        + (yy - cy) ** 2
+    )
+
+    core_mask = (
+        distance_sq
+        <= core_radius ** 2
+    )
+
+    annulus_mask = (
+        (distance_sq >= (core_radius + 2) ** 2)
+        & (distance_sq <= outer_radius ** 2)
+    )
+
+    best_reference = None
+    best_adjusted_current = None
+    best_annulus_error = None
+
+    for dx in range(
+        -int(reference_search),
+        int(reference_search) + 1,
+    ):
+        for dy in range(
+            -int(reference_search),
+            int(reference_search) + 1,
+        ):
+            reference = _extract_square(
+                reference_gray,
+                float(reference_x) + dx,
+                float(reference_y) + dy,
+                outer_radius,
+            )
+
+            if reference is None:
+                continue
+
+            ref_annulus = reference[
+                annulus_mask
+            ]
+
+            cur_annulus = current[
+                annulus_mask
+            ]
+
+            if (
+                ref_annulus.size == 0
+                or cur_annulus.size == 0
+            ):
+                continue
+
+            brightness_shift = float(
+                np.median(
+                    ref_annulus
+                )
+                - np.median(
+                    cur_annulus
+                )
+            )
+
+            adjusted_current = np.clip(
+                current
+                + brightness_shift,
+                0.0,
+                255.0,
+            )
+
+            annulus_error = float(
+                np.mean(
+                    np.abs(
+                        reference[
+                            annulus_mask
+                        ]
+                        - adjusted_current[
+                            annulus_mask
+                        ]
+                    )
+                )
+            )
+
+            if (
+                best_annulus_error is None
+                or annulus_error
+                < best_annulus_error
+            ):
+                best_annulus_error = annulus_error
+                best_reference = reference
+                best_adjusted_current = adjusted_current
+
+    if (
+        best_reference is None
+        or best_adjusted_current is None
+    ):
+        return 0.0
+
+    reference_blur = cv2.GaussianBlur(
+        best_reference,
+        (3, 3),
+        0,
+    )
+
+    current_blur = cv2.GaussianBlur(
+        best_adjusted_current,
+        (3, 3),
+        0,
+    )
+
+    extra_dark = np.clip(
+        reference_blur
+        - current_blur,
+        0.0,
+        255.0,
+    )
+
+    core_extra = extra_dark[
+        core_mask
+    ]
+
+    if core_extra.size == 0:
+        return 0.0
+
+    mean_extra = float(
+        np.mean(
+            core_extra
+        )
+        / 255.0
+    )
+
+    strong_fraction = float(
+        np.mean(
+            core_extra
+            >= 35.0
+        )
+    )
+
+    return float(
+        0.60 * mean_extra
+        + 0.40 * strong_fraction
+    )
 
 
 def _cluster_1d(values: List[float], k: int) -> List[float] | None:
@@ -359,6 +615,11 @@ def _calibrate_numerical_question(
 
     for index, column in enumerate(columns):
         new_column = dict(column)
+        new_column["reference_x"] = float(column["x"])
+        new_column["reference_y_positions"] = [
+            float(v)
+            for v in column["y_positions"]
+        ]
         new_column["x"] = float(actual_x[index])
         new_column["y_positions"] = [float(v) for v in actual_y]
         updated["columns"].append(new_column)
@@ -387,6 +648,8 @@ def _calibrate_numerical_question(
     updated["decimal_points"] = [
         {
             **decimal,
+            "reference_x": float(decimal["x"]),
+            "reference_y": float(decimal["y"]),
             "x": float(actual_decimal_x[index]),
             "y": float(decimal_y),
         }
@@ -410,9 +673,18 @@ def _calibrate_numerical_question(
             )
             updated["sign"] = {
                 **sign,
+                "reference_x": float(sign["x"]),
+                "reference_y": float(sign["y"]),
                 "x": float(selected_sign[0]),
                 "y": float(selected_sign[1]),
             }
+
+    if sign and "reference_x" not in updated.get("sign", {}):
+        updated["sign"] = {
+            **sign,
+            "reference_x": float(sign["x"]),
+            "reference_y": float(sign["y"]),
+        }
 
     return updated, {
         "calibrated": bool(calibrated),
@@ -428,66 +700,179 @@ def _classify_numerical_column(
     column: Dict[str, Any],
     template: Dict[str, Any],
 ) -> Dict[str, Any]:
-    values = [str(value) for value in column.get("values", list(range(10)))]
-    y_positions = [float(value) for value in column["y_positions"]]
+    values = [
+        str(value)
+        for value in column.get(
+            "values",
+            list(range(10)),
+        )
+    ]
+
+    y_positions = [
+        float(value)
+        for value in column["y_positions"]
+    ]
+
+    reference_y_positions = [
+        float(value)
+        for value in column.get(
+            "reference_y_positions",
+            y_positions,
+        )
+    ]
+
     x = float(column["x"])
 
-    core_radius = int(template.get("jee_core_radius", 6))
-    dark_threshold = int(template.get("jee_core_dark_threshold", 140))
-    blank_threshold = float(template.get("jee_numeric_blank_threshold", 0.56))
-    filled_threshold = float(template.get("jee_numeric_filled_threshold", 0.74))
-    minimum_gap = float(template.get("jee_numeric_minimum_gap", 0.12))
+    reference_x = float(
+        column.get(
+            "reference_x",
+            x,
+        )
+    )
+
+    reference_gray = _get_jee_reference_gray(
+        template
+    )
+
+    core_radius = int(
+        template.get(
+            "jee_numeric_delta_core_radius",
+            5,
+        )
+    )
 
     scores = {
-        value: _core_fill_ratio(
+        value: _extra_ink_score(
             gray,
+            reference_gray,
             x,
             y_positions[index],
-            radius=core_radius,
-            dark_threshold=dark_threshold,
+            reference_x,
+            reference_y_positions[index],
+            core_radius=core_radius,
+            outer_radius=int(
+                template.get(
+                    "jee_numeric_delta_outer_radius",
+                    9,
+                )
+            ),
+            reference_search=int(
+                template.get(
+                    "jee_numeric_reference_search",
+                    2,
+                )
+            ),
         )
-        for index, value in enumerate(values)
+        for index, value
+        in enumerate(values)
     }
 
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
     top_value, top_score = ranked[0]
-    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
-    gap = float(top_score - second_score)
+
+    second_score = (
+        ranked[1][1]
+        if len(ranked) > 1
+        else 0.0
+    )
+
+    gap = float(
+        top_score
+        - second_score
+    )
+
+    blank_threshold = float(
+        template.get(
+            "jee_numeric_delta_blank_threshold",
+            0.08,
+        )
+    )
+
+    filled_threshold = float(
+        template.get(
+            "jee_numeric_delta_filled_threshold",
+            0.20,
+        )
+    )
+
+    minimum_gap = float(
+        template.get(
+            "jee_numeric_delta_minimum_gap",
+            0.05,
+        )
+    )
 
     relaxed_threshold = float(
         template.get(
-            "jee_numeric_relaxed_threshold",
-            0.62,
+            "jee_numeric_delta_relaxed_threshold",
+            0.15,
         )
     )
 
     strong_gap = float(
         template.get(
-            "jee_numeric_strong_gap",
-            0.10,
+            "jee_numeric_delta_strong_gap",
+            0.08,
         )
     )
 
-    if top_score >= filled_threshold and gap >= minimum_gap:
+    if (
+        top_score >= filled_threshold
+        and gap >= minimum_gap
+    ):
         value = top_value
-    elif top_score >= relaxed_threshold and gap >= strong_gap:
+
+    elif (
+        top_score >= relaxed_threshold
+        and gap >= strong_gap
+    ):
         value = top_value
+
     elif top_score < blank_threshold:
         value = ""
+
     else:
         value = "?"
 
-    selected_index = values.index(top_value)
+    selected_index = values.index(
+        top_value
+    )
 
     return {
         "value": value,
-        "best_score": round(float(top_score), 4),
-        "confidence_gap": round(float(gap), 4),
-        "scores": {key: round(float(score), 4) for key, score in scores.items()},
+        "best_score": round(
+            float(top_score),
+            4,
+        ),
+        "confidence_gap": round(
+            float(gap),
+            4,
+        ),
+        "scores": {
+            key: round(
+                float(score),
+                4,
+            )
+            for key, score
+            in scores.items()
+        },
         "center": [
             int(round(x)),
-            int(round(y_positions[selected_index])),
+            int(
+                round(
+                    y_positions[
+                        selected_index
+                    ]
+                )
+            ),
         ],
+        "score_mode":
+            "blank_reference_extra_ink",
     }
 
 
@@ -511,18 +896,33 @@ def detect_numerical_value_robust(
 
     core_radius = int(template.get("jee_core_radius", 6))
     dark_threshold = int(template.get("jee_core_dark_threshold", 140))
-    special_threshold = float(template.get("jee_numeric_special_threshold", 0.68))
+    special_threshold = float(
+        template.get(
+            "jee_numeric_delta_special_threshold",
+            0.16,
+        )
+    )
 
     decimal_details = []
     decimal_ranked = []
 
     for decimal in question.get("decimal_points", []):
-        score = _core_fill_ratio(
+        score = _extra_ink_score(
             gray,
+            _get_jee_reference_gray(template),
             decimal["x"],
             decimal["y"],
-            radius=core_radius,
-            dark_threshold=dark_threshold,
+            decimal.get("reference_x", decimal["x"]),
+            decimal.get("reference_y", decimal["y"]),
+            core_radius=int(
+                template.get("jee_numeric_delta_core_radius", 5)
+            ),
+            outer_radius=int(
+                template.get("jee_numeric_delta_outer_radius", 9)
+            ),
+            reference_search=int(
+                template.get("jee_numeric_reference_search", 2)
+            ),
         )
         detail = {
             "after_column": int(decimal["after_column"]),
@@ -580,12 +980,22 @@ def detect_numerical_value_robust(
     sign = question.get("sign")
 
     if sign:
-        sign_score = _core_fill_ratio(
+        sign_score = _extra_ink_score(
             gray,
+            _get_jee_reference_gray(template),
             sign["x"],
             sign["y"],
-            radius=core_radius,
-            dark_threshold=dark_threshold,
+            sign.get("reference_x", sign["x"]),
+            sign.get("reference_y", sign["y"]),
+            core_radius=int(
+                template.get("jee_numeric_delta_core_radius", 5)
+            ),
+            outer_radius=int(
+                template.get("jee_numeric_delta_outer_radius", 9)
+            ),
+            reference_search=int(
+                template.get("jee_numeric_reference_search", 2)
+            ),
         )
         negative = sign_score >= special_threshold
         sign_detail = {
@@ -643,7 +1053,7 @@ def detect_numerical_value_robust(
         "decimal_points": decimal_details,
         "selected_decimal": selected_decimal,
         "sign": sign_detail,
-        "reader": "jee_robust_grid_reader_v2",
+        "reader": "jee_blank_reference_reader_v3",
     }
 
 

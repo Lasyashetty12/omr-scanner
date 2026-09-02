@@ -359,5 +359,14 @@
   "jee_precise_numeric_local_search_radius": 3,
   "jee_numeric_relaxed_threshold": 0.6,
   "jee_numeric_strong_gap": 0.1,
-  "jee_numeric_decimal_gap": 0.08
+  "jee_numeric_decimal_gap": 0.05,
+  "jee_numeric_delta_core_radius": 5,
+  "jee_numeric_delta_outer_radius": 9,
+  "jee_numeric_reference_search": 2,
+  "jee_numeric_delta_blank_threshold": 0.08,
+  "jee_numeric_delta_filled_threshold": 0.2,
+  "jee_numeric_delta_minimum_gap": 0.05,
+  "jee_numeric_delta_relaxed_threshold": 0.15,
+  "jee_numeric_delta_strong_gap": 0.08,
+  "jee_numeric_delta_special_threshold": 0.16
 }
