@@ -454,7 +454,23 @@ def _classify_numerical_column(
     second_score = ranked[1][1] if len(ranked) > 1 else 0.0
     gap = float(top_score - second_score)
 
+    relaxed_threshold = float(
+        template.get(
+            "jee_numeric_relaxed_threshold",
+            0.62,
+        )
+    )
+
+    strong_gap = float(
+        template.get(
+            "jee_numeric_strong_gap",
+            0.10,
+        )
+    )
+
     if top_score >= filled_threshold and gap >= minimum_gap:
+        value = top_value
+    elif top_score >= relaxed_threshold and gap >= strong_gap:
         value = top_value
     elif top_score < blank_threshold:
         value = ""
@@ -498,7 +514,7 @@ def detect_numerical_value_robust(
     special_threshold = float(template.get("jee_numeric_special_threshold", 0.68))
 
     decimal_details = []
-    decimal_candidates = []
+    decimal_ranked = []
 
     for decimal in question.get("decimal_points", []):
         score = _core_fill_ratio(
@@ -517,14 +533,47 @@ def detect_numerical_value_robust(
             ],
         }
         decimal_details.append(detail)
-        if score >= special_threshold:
-            decimal_candidates.append(detail)
+        decimal_ranked.append(
+            (
+                detail["after_column"],
+                float(score),
+            )
+        )
 
-    selected_decimal = (
-        decimal_candidates[0]["after_column"]
-        if len(decimal_candidates) == 1
-        else None
+    decimal_ranked.sort(
+        key=lambda item: item[1],
+        reverse=True,
     )
+
+    selected_decimal = None
+
+    if decimal_ranked:
+        best_decimal = decimal_ranked[0]
+        second_decimal_score = (
+            decimal_ranked[1][1]
+            if len(decimal_ranked) > 1
+            else 0.0
+        )
+
+        decimal_gap = (
+            float(best_decimal[1])
+            - float(second_decimal_score)
+        )
+
+        decimal_minimum_gap = float(
+            template.get(
+                "jee_numeric_decimal_gap",
+                0.08,
+            )
+        )
+
+        if (
+            float(best_decimal[1]) >= special_threshold
+            and decimal_gap >= decimal_minimum_gap
+        ):
+            selected_decimal = int(
+                best_decimal[0]
+            )
 
     sign_detail = None
     negative = False
@@ -551,7 +600,7 @@ def detect_numerical_value_robust(
     if all(value == "" for value in detected_digits):
         answer = "BLANK"
 
-    elif any(value == "?" for value in detected_digits) or len(decimal_candidates) > 1:
+    elif any(value == "?" for value in detected_digits):
         answer = "UNCERTAIN"
 
     else:
@@ -592,7 +641,9 @@ def detect_numerical_value_robust(
         "answer": answer,
         "columns": column_details,
         "decimal_points": decimal_details,
+        "selected_decimal": selected_decimal,
         "sign": sign_detail,
+        "reader": "jee_robust_grid_reader_v2",
     }
 
 

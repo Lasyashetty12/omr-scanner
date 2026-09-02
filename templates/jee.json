@@ -301,10 +301,10 @@
   "jee_core_minimum_gap": 0.1,
   "jee_core_relaxed_threshold": 0.72,
   "jee_core_strong_gap": 0.2,
-  "jee_numeric_blank_threshold": 0.56,
-  "jee_numeric_filled_threshold": 0.74,
-  "jee_numeric_minimum_gap": 0.12,
-  "jee_numeric_special_threshold": 0.68,
+  "jee_numeric_blank_threshold": 0.5,
+  "jee_numeric_filled_threshold": 0.68,
+  "jee_numeric_minimum_gap": 0.07,
+  "jee_numeric_special_threshold": 0.64,
   "identity": {
     "roll_number": {
       "x_positions": [
@@ -356,5 +356,8 @@
   "jee_precise_numeric_special_threshold": 0.68,
   "jee_precise_numeric_translation_delta": 12,
   "jee_precise_numeric_circle_match_delta": 10,
-  "jee_precise_numeric_local_search_radius": 3
+  "jee_precise_numeric_local_search_radius": 3,
+  "jee_numeric_relaxed_threshold": 0.6,
+  "jee_numeric_strong_gap": 0.1,
+  "jee_numeric_decimal_gap": 0.08
 }
