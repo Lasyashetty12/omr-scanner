@@ -129,6 +129,7 @@ def _extra_ink_score(
     core_radius: int = 5,
     outer_radius: int = 9,
     reference_search: int = 2,
+    actual_search: int = 2,
 ) -> float:
     if reference_gray is None:
         return _core_fill_ratio(
@@ -139,118 +140,139 @@ def _extra_ink_score(
             dark_threshold=140,
         )
 
-    current = _extract_square(
-        gray,
-        actual_x,
-        actual_y,
-        outer_radius,
-    )
-
-    if current is None:
-        return 0.0
-
-    size = outer_radius * 2 + 1
+    size = int(outer_radius) * 2 + 1
 
     yy, xx = np.ogrid[
         :size,
         :size,
     ]
 
-    cx = outer_radius
-    cy = outer_radius
+    centre = int(outer_radius)
 
     distance_sq = (
-        (xx - cx) ** 2
-        + (yy - cy) ** 2
+        (xx - centre) ** 2
+        + (yy - centre) ** 2
     )
 
     core_mask = (
         distance_sq
-        <= core_radius ** 2
+        <= int(core_radius) ** 2
     )
 
     annulus_mask = (
-        (distance_sq >= (core_radius + 2) ** 2)
-        & (distance_sq <= outer_radius ** 2)
+        (
+            distance_sq
+            >= (int(core_radius) + 2) ** 2
+        )
+        & (
+            distance_sq
+            <= int(outer_radius) ** 2
+        )
     )
 
     best_reference = None
-    best_adjusted_current = None
+    best_current = None
     best_annulus_error = None
 
-    for dx in range(
-        -int(reference_search),
-        int(reference_search) + 1,
+    for current_dx in range(
+        -int(actual_search),
+        int(actual_search) + 1,
     ):
-        for dy in range(
-            -int(reference_search),
-            int(reference_search) + 1,
+        for current_dy in range(
+            -int(actual_search),
+            int(actual_search) + 1,
         ):
-            reference = _extract_square(
-                reference_gray,
-                float(reference_x) + dx,
-                float(reference_y) + dy,
-                outer_radius,
+            current = _extract_square(
+                gray,
+                float(actual_x) + current_dx,
+                float(actual_y) + current_dy,
+                int(outer_radius),
             )
 
-            if reference is None:
+            if current is None:
                 continue
 
-            ref_annulus = reference[
+            current_annulus = current[
                 annulus_mask
             ]
 
-            cur_annulus = current[
-                annulus_mask
-            ]
+            if current_annulus.size == 0:
+                continue
 
-            if (
-                ref_annulus.size == 0
-                or cur_annulus.size == 0
+            for reference_dx in range(
+                -int(reference_search),
+                int(reference_search) + 1,
             ):
-                continue
-
-            brightness_shift = float(
-                np.median(
-                    ref_annulus
-                )
-                - np.median(
-                    cur_annulus
-                )
-            )
-
-            adjusted_current = np.clip(
-                current
-                + brightness_shift,
-                0.0,
-                255.0,
-            )
-
-            annulus_error = float(
-                np.mean(
-                    np.abs(
-                        reference[
-                            annulus_mask
-                        ]
-                        - adjusted_current[
-                            annulus_mask
-                        ]
+                for reference_dy in range(
+                    -int(reference_search),
+                    int(reference_search) + 1,
+                ):
+                    reference = _extract_square(
+                        reference_gray,
+                        float(reference_x)
+                        + reference_dx,
+                        float(reference_y)
+                        + reference_dy,
+                        int(outer_radius),
                     )
-                )
-            )
 
-            if (
-                best_annulus_error is None
-                or annulus_error
-                < best_annulus_error
-            ):
-                best_annulus_error = annulus_error
-                best_reference = reference
-                best_adjusted_current = adjusted_current
+                    if reference is None:
+                        continue
+
+                    reference_annulus = reference[
+                        annulus_mask
+                    ]
+
+                    if reference_annulus.size == 0:
+                        continue
+
+                    brightness_shift = float(
+                        np.median(
+                            reference_annulus
+                        )
+                        - np.median(
+                            current_annulus
+                        )
+                    )
+
+                    adjusted_current = np.clip(
+                        current
+                        + brightness_shift,
+                        0.0,
+                        255.0,
+                    )
+
+                    annulus_error = float(
+                        np.mean(
+                            np.abs(
+                                reference[
+                                    annulus_mask
+                                ]
+                                - adjusted_current[
+                                    annulus_mask
+                                ]
+                            )
+                        )
+                    )
+
+                    if (
+                        best_annulus_error is None
+                        or annulus_error
+                        < best_annulus_error
+                    ):
+                        best_annulus_error = (
+                            annulus_error
+                        )
+                        best_reference = (
+                            reference
+                        )
+                        best_current = (
+                            adjusted_current
+                        )
 
     if (
         best_reference is None
-        or best_adjusted_current is None
+        or best_current is None
     ):
         return 0.0
 
@@ -261,7 +283,7 @@ def _extra_ink_score(
     )
 
     current_blur = cv2.GaussianBlur(
-        best_adjusted_current,
+        best_current,
         (3, 3),
         0,
     )
@@ -290,13 +312,21 @@ def _extra_ink_score(
     strong_fraction = float(
         np.mean(
             core_extra
-            >= 35.0
+            >= 28.0
+        )
+    )
+
+    very_strong_fraction = float(
+        np.mean(
+            core_extra
+            >= 55.0
         )
     )
 
     return float(
-        0.60 * mean_extra
-        + 0.40 * strong_fraction
+        0.45 * mean_extra
+        + 0.35 * strong_fraction
+        + 0.20 * very_strong_fraction
     )
 
 
@@ -710,7 +740,9 @@ def _classify_numerical_column(
 
     y_positions = [
         float(value)
-        for value in column["y_positions"]
+        for value in column[
+            "y_positions"
+        ]
     ]
 
     reference_y_positions = [
@@ -721,7 +753,9 @@ def _classify_numerical_column(
         )
     ]
 
-    x = float(column["x"])
+    x = float(
+        column["x"]
+    )
 
     reference_x = float(
         column.get(
@@ -730,14 +764,37 @@ def _classify_numerical_column(
         )
     )
 
-    reference_gray = _get_jee_reference_gray(
-        template
+    reference_gray = (
+        _get_jee_reference_gray(
+            template
+        )
     )
 
     core_radius = int(
         template.get(
             "jee_numeric_delta_core_radius",
             5,
+        )
+    )
+
+    outer_radius = int(
+        template.get(
+            "jee_numeric_delta_outer_radius",
+            9,
+        )
+    )
+
+    reference_search = int(
+        template.get(
+            "jee_numeric_reference_search",
+            2,
+        )
+    )
+
+    actual_search = int(
+        template.get(
+            "jee_numeric_actual_search",
+            2,
         )
     )
 
@@ -750,18 +807,9 @@ def _classify_numerical_column(
             reference_x,
             reference_y_positions[index],
             core_radius=core_radius,
-            outer_radius=int(
-                template.get(
-                    "jee_numeric_delta_outer_radius",
-                    9,
-                )
-            ),
-            reference_search=int(
-                template.get(
-                    "jee_numeric_reference_search",
-                    2,
-                )
-            ),
+            outer_radius=outer_radius,
+            reference_search=reference_search,
+            actual_search=actual_search,
         )
         for index, value
         in enumerate(values)
@@ -769,16 +817,44 @@ def _classify_numerical_column(
 
     ranked = sorted(
         scores.items(),
-        key=lambda item: item[1],
+        key=lambda item:
+        item[1],
         reverse=True,
     )
 
-    top_value, top_score = ranked[0]
+    top_value, top_score = (
+        ranked[0]
+    )
 
-    second_score = (
+    second_score = float(
         ranked[1][1]
         if len(ranked) > 1
         else 0.0
+    )
+
+    score_values = np.asarray(
+        list(scores.values()),
+        dtype=np.float32,
+    )
+
+    column_baseline = float(
+        np.median(
+            score_values
+        )
+    )
+
+    column_mad = float(
+        np.median(
+            np.abs(
+                score_values
+                - column_baseline
+            )
+        )
+    )
+
+    signal = float(
+        top_score
+        - column_baseline
     )
 
     gap = float(
@@ -786,73 +862,128 @@ def _classify_numerical_column(
         - second_score
     )
 
-    blank_threshold = float(
+    blank_signal = float(
         template.get(
-            "jee_numeric_delta_blank_threshold",
-            0.08,
+            "jee_numeric_adaptive_blank_signal",
+            0.028,
         )
     )
 
-    filled_threshold = float(
+    filled_signal = float(
         template.get(
-            "jee_numeric_delta_filled_threshold",
-            0.20,
+            "jee_numeric_adaptive_filled_signal",
+            0.070,
+        )
+    )
+
+    strong_signal = float(
+        template.get(
+            "jee_numeric_adaptive_strong_signal",
+            0.120,
         )
     )
 
     minimum_gap = float(
         template.get(
-            "jee_numeric_delta_minimum_gap",
-            0.05,
+            "jee_numeric_adaptive_minimum_gap",
+            0.014,
         )
     )
 
-    relaxed_threshold = float(
+    strong_minimum_gap = float(
         template.get(
-            "jee_numeric_delta_relaxed_threshold",
-            0.15,
+            "jee_numeric_adaptive_strong_minimum_gap",
+            0.005,
         )
     )
 
-    strong_gap = float(
-        template.get(
-            "jee_numeric_delta_strong_gap",
-            0.08,
-        )
+    dynamic_signal = max(
+        filled_signal,
+        column_mad
+        * float(
+            template.get(
+                "jee_numeric_adaptive_mad_multiplier",
+                3.0,
+            )
+        ),
     )
 
-    if (
-        top_score >= filled_threshold
-        and gap >= minimum_gap
-    ):
-        value = top_value
+    if signal < blank_signal:
+        detected_value = ""
 
     elif (
-        top_score >= relaxed_threshold
-        and gap >= strong_gap
+        signal >= strong_signal
+        and gap
+        >= strong_minimum_gap
     ):
-        value = top_value
+        detected_value = (
+            top_value
+        )
 
-    elif top_score < blank_threshold:
-        value = ""
+    elif (
+        signal >= dynamic_signal
+        and gap >= minimum_gap
+    ):
+        detected_value = (
+            top_value
+        )
 
     else:
-        value = "?"
+        detected_value = "?"
 
-    selected_index = values.index(
-        top_value
+    selected_index = (
+        values.index(
+            top_value
+        )
     )
 
     return {
-        "value": value,
-        "best_score": round(
-            float(top_score),
-            4,
-        ),
-        "confidence_gap": round(
-            float(gap),
-            4,
-        ),
+        "value":
+            detected_value,
+
+        "top_value":
+            top_value,
+
+        "best_score":
+            round(
+                float(top_score),
+                4,
+            ),
+
+        "second_score":
+            round(
+                float(second_score),
+                4,
+            ),
+
+        "confidence_gap":
+            round(
+                float(gap),
+                4,
+            ),
+
+        "baseline_score":
+            round(
+                float(
+                    column_baseline
+                ),
+                4,
+            ),
+
+        "mad":
+            round(
+                float(
+                    column_mad
+                ),
+                4,
+            ),
+
+        "signal":
+            round(
+                float(signal),
+                4,
+            ),
+
         "scores": {
             key: round(
                 float(score),
@@ -861,6 +992,7 @@ def _classify_numerical_column(
             for key, score
             in scores.items()
         },
+
         "center": [
             int(round(x)),
             int(
@@ -871,8 +1003,9 @@ def _classify_numerical_column(
                 )
             ),
         ],
+
         "score_mode":
-            "blank_reference_extra_ink",
+            "blank_reference_adaptive_v4",
     }
 
 
@@ -893,6 +1026,97 @@ def detect_numerical_value_robust(
         detail["column"] = column_index
         detected_digits.append(detail["value"])
         column_details.append(detail)
+
+    all_scores = [
+        float(score)
+        for detail in column_details
+        for score in detail.get(
+            "scores",
+            {},
+        ).values()
+    ]
+
+    question_noise_floor = float(
+        np.median(
+            np.asarray(
+                all_scores,
+                dtype=np.float32,
+            )
+        )
+        if all_scores
+        else 0.0
+    )
+
+    rescue_signal = float(
+        template.get(
+            "jee_numeric_question_rescue_signal",
+            0.050,
+        )
+    )
+
+    rescue_gap = float(
+        template.get(
+            "jee_numeric_question_rescue_gap",
+            0.008,
+        )
+    )
+
+    for index, detail in enumerate(
+        column_details
+    ):
+        if detail.get("value") != "?":
+            continue
+
+        global_signal = (
+            float(
+                detail.get(
+                    "best_score",
+                    0.0,
+                )
+            )
+            - question_noise_floor
+        )
+
+        local_signal = float(
+            detail.get(
+                "signal",
+                0.0,
+            )
+        )
+
+        gap = float(
+            detail.get(
+                "confidence_gap",
+                0.0,
+            )
+        )
+
+        if (
+            max(
+                global_signal,
+                local_signal,
+            )
+            >= rescue_signal
+            and gap >= rescue_gap
+        ):
+            rescued = str(
+                detail.get(
+                    "top_value",
+                    "?",
+                )
+            )
+
+            detail["value"] = (
+                rescued
+            )
+
+            detail[
+                "rescued_from_uncertain"
+            ] = True
+
+            detected_digits[
+                index
+            ] = rescued
 
     core_radius = int(template.get("jee_core_radius", 6))
     dark_threshold = int(template.get("jee_core_dark_threshold", 140))
@@ -967,9 +1191,49 @@ def detect_numerical_value_robust(
             )
         )
 
+        decimal_scores = np.asarray(
+            [
+                float(item[1])
+                for item in decimal_ranked
+            ],
+            dtype=np.float32,
+        )
+
+        decimal_baseline = float(
+            np.median(
+                decimal_scores
+            )
+            if decimal_scores.size
+            else question_noise_floor
+        )
+
+        decimal_signal = float(
+            best_decimal[1]
+            - min(
+                decimal_baseline,
+                question_noise_floor,
+            )
+        )
+
+        adaptive_decimal_signal = float(
+            template.get(
+                "jee_numeric_adaptive_decimal_signal",
+                0.045,
+            )
+        )
+
+        adaptive_decimal_gap = float(
+            template.get(
+                "jee_numeric_adaptive_decimal_gap",
+                0.010,
+            )
+        )
+
         if (
-            float(best_decimal[1]) >= special_threshold
-            and decimal_gap >= decimal_minimum_gap
+            decimal_signal
+            >= adaptive_decimal_signal
+            and decimal_gap
+            >= adaptive_decimal_gap
         ):
             selected_decimal = int(
                 best_decimal[0]
@@ -997,7 +1261,20 @@ def detect_numerical_value_robust(
                 template.get("jee_numeric_reference_search", 2)
             ),
         )
-        negative = sign_score >= special_threshold
+        sign_signal = float(
+            sign_score
+            - question_noise_floor
+        )
+
+        negative = (
+            sign_signal
+            >= float(
+                template.get(
+                    "jee_numeric_adaptive_sign_signal",
+                    0.050,
+                )
+            )
+        )
         sign_detail = {
             "value": "-" if negative else "",
             "score": round(float(sign_score), 4),
@@ -1053,7 +1330,13 @@ def detect_numerical_value_robust(
         "decimal_points": decimal_details,
         "selected_decimal": selected_decimal,
         "sign": sign_detail,
-        "reader": "jee_blank_reference_reader_v3",
+        "question_noise_floor": round(
+            float(
+                question_noise_floor
+            ),
+            4,
+        ),
+        "reader": "jee_adaptive_reference_reader_v4",
     }
 
 

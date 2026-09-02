@@ -368,5 +368,17 @@
   "jee_numeric_delta_minimum_gap": 0.05,
   "jee_numeric_delta_relaxed_threshold": 0.15,
   "jee_numeric_delta_strong_gap": 0.08,
-  "jee_numeric_delta_special_threshold": 0.16
+  "jee_numeric_delta_special_threshold": 0.16,
+  "jee_numeric_actual_search": 2,
+  "jee_numeric_adaptive_blank_signal": 0.028,
+  "jee_numeric_adaptive_filled_signal": 0.07,
+  "jee_numeric_adaptive_strong_signal": 0.12,
+  "jee_numeric_adaptive_minimum_gap": 0.014,
+  "jee_numeric_adaptive_strong_minimum_gap": 0.005,
+  "jee_numeric_adaptive_mad_multiplier": 3.0,
+  "jee_numeric_question_rescue_signal": 0.05,
+  "jee_numeric_question_rescue_gap": 0.008,
+  "jee_numeric_adaptive_decimal_signal": 0.045,
+  "jee_numeric_adaptive_decimal_gap": 0.01,
+  "jee_numeric_adaptive_sign_signal": 0.05
 }
