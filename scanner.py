@@ -4,6 +4,7 @@ from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
+from jee_precise_reader import scan_jee_numerical_precise
 import json
 import logging
 import os
@@ -5618,6 +5619,23 @@ def process_omr(
                 recognition_image,
                 template,
             )
+        )
+
+        # Keep the stable MCQ reader above, but replace only the JEE
+        # numerical section with the circle-calibrated reader.
+        precise_numerical, precise_numeric_debug = (
+            scan_jee_numerical_precise(
+                corrected,
+                template,
+            )
+        )
+
+        answers["numerical"] = (
+            precise_numerical
+        )
+
+        answers["_numeric_calibration"] = (
+            precise_numeric_debug
         )
 
     else:

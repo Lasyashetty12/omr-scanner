@@ -43,7 +43,7 @@ def test_jee_mobile_baseline_uses_established_answer_reader():
     assert "scan_jee_answers_precise(" not in branch
 
 
-def test_jee_series_search_uses_normal_small_default():
+def test_jee_series_search_tolerates_mobile_header_offset():
     template = json.loads(
         (
             ROOT
@@ -52,5 +52,5 @@ def test_jee_series_search_uses_normal_small_default():
         ).read_text(encoding="utf-8")
     )
 
-    assert "search_radius" not in template["series"]
-    assert "search_step" not in template["series"]
+    assert template["series"]["search_radius"] == 18
+    assert template["series"]["search_step"] == 2

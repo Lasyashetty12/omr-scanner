@@ -33,7 +33,9 @@
         368,
         364
       ]
-    }
+    },
+    "search_radius": 18,
+    "search_step": 2
   },
   "mcq_sections": [
     {
@@ -345,5 +347,13 @@
       "filled_threshold": 0.76,
       "minimum_confidence_gap": 0.12
     }
-  }
+  },
+  "jee_precise_core_radius": 5,
+  "jee_precise_dark_threshold": 150,
+  "jee_precise_numeric_filled_threshold": 0.88,
+  "jee_precise_numeric_blank_threshold": 0.7,
+  "jee_precise_numeric_minimum_gap": 0.1,
+  "jee_precise_numeric_special_threshold": 0.84,
+  "jee_precise_numeric_translation_delta": 12,
+  "jee_precise_numeric_circle_match_delta": 10
 }
