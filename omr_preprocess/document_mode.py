@@ -144,7 +144,7 @@ def create_document_scan(
                 "blur_score"
             ]
         )
-        < 650.0
+        < 900.0
     )
 
     if soft_input:
@@ -194,7 +194,7 @@ def create_document_scan(
             np.clip(
                 0.22
                 + (
-                    650.0
+                    900.0
                     - characteristics["blur_score"]
                 )
                 / 3000.0,

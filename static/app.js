@@ -333,6 +333,8 @@ let previousDetection = null;
 
 let consecutiveValidFrames = 0;
 
+let cameraFocusWarmupUntil = 0;
+
 const markerAnalysisCanvas = document.createElement(
     "canvas"
 );
@@ -368,17 +370,17 @@ const CAMERA_OUTPUT_HEIGHT =
 
 
 const JPEG_QUALITY =
-    0.92;
+    0.97;
 
 
 // Two consecutive checks are still effectively instant for the user, while
 // preventing a single blurred frame from triggering capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 2;
+const AUTO_CAPTURE_STABLE_CHECKS = 3;
 const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
 
 // Downscaled live-frame Laplacian variance.
 // A blurred frame must never trigger automatic capture.
-const AUTO_CAPTURE_MIN_SHARPNESS = 650;
+const AUTO_CAPTURE_MIN_SHARPNESS = 1400;
 
 
 
@@ -657,6 +659,8 @@ function stopCamera() {
     previousDetection = null;
 
     consecutiveValidFrames = 0;
+
+    cameraFocusWarmupUntil = 0;
 
     cameraContainer?.classList.remove(
         "page-corners-detected"
@@ -980,6 +984,16 @@ function isReadyForAutoCapture(
     priorDetection
 ) {
     if (
+        cameraFocusWarmupUntil
+        && performance.now() < cameraFocusWarmupUntil
+    ) {
+        return {
+            ready: false,
+            reason: "Camera focusing — hold the OMR steady"
+        };
+    }
+
+    if (
         !detection
         || !detection.sourcePoints
         || detection.markerCount !== 4
@@ -1054,6 +1068,24 @@ function isReadyForAutoCapture(
             ready: false,
             reason: "Hold steady — waiting for camera focus"
         };
+    }
+
+    if (priorDetection) {
+        const previousSharpness = Number(
+            priorDetection.sharpness
+            || 0
+        );
+
+        if (
+            !Number.isFinite(previousSharpness)
+            || previousSharpness
+            < AUTO_CAPTURE_MIN_SHARPNESS
+        ) {
+            return {
+                ready: false,
+                reason: "Focus locking — hold steady"
+            };
+        }
     }
 
     return {
@@ -1870,12 +1902,12 @@ async function openCamera() {
 
                 width: {
                     ideal:
-                        1920
+                        2560
                 },
 
                 height: {
                     ideal:
-                        1080
+                        1440
                 },
 
                 /*
@@ -1957,6 +1989,53 @@ async function openCamera() {
         }
 
         const videoTrack = cameraStream.getVideoTracks()[0];
+
+        if (videoTrack) {
+            try {
+                const capabilities =
+                    typeof videoTrack.getCapabilities === "function"
+                        ? videoTrack.getCapabilities()
+                        : {};
+
+                const advanced = {};
+
+                if (
+                    Array.isArray(capabilities.focusMode)
+                    && capabilities.focusMode.includes("continuous")
+                ) {
+                    advanced.focusMode = "continuous";
+                }
+
+                if (
+                    Array.isArray(capabilities.exposureMode)
+                    && capabilities.exposureMode.includes("continuous")
+                ) {
+                    advanced.exposureMode = "continuous";
+                }
+
+                if (
+                    Array.isArray(capabilities.whiteBalanceMode)
+                    && capabilities.whiteBalanceMode.includes("continuous")
+                ) {
+                    advanced.whiteBalanceMode = "continuous";
+                }
+
+                if (Object.keys(advanced).length) {
+                    await videoTrack.applyConstraints({
+                        advanced: [advanced]
+                    });
+                }
+            } catch (focusError) {
+                console.debug(
+                    "Continuous camera focus/exposure unavailable:",
+                    focusError
+                );
+            }
+        }
+
+        cameraFocusWarmupUntil =
+            performance.now() + 350;
+
         const torchSupported = await checkTorchSupport(videoTrack);
         updateTorchUI(false, torchSupported);
 

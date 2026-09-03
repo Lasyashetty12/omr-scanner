@@ -43,10 +43,10 @@ def test_manual_capture_is_a_true_shutter():
 def test_autocapture_is_fast_but_requires_two_good_frames():
     source = _source()
 
-    assert "const AUTO_CAPTURE_STABLE_CHECKS = 2;" in source
+    assert "const AUTO_CAPTURE_STABLE_CHECKS = 3;" in source
     assert "const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;" in source
     assert "const analysisWidth = Math.min(640, videoWidth);" in source
-    assert "const AUTO_CAPTURE_MIN_SHARPNESS = 650;" in source
+    assert "const AUTO_CAPTURE_MIN_SHARPNESS = 1400;" in source
 
     assert "findSolidSquareByContrast(" in source
     assert "setTimeout(() =>" not in source
