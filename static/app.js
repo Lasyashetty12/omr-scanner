@@ -1188,10 +1188,10 @@ function findSolidMarkerInZone(
         if (componentWidth > maxSide || componentHeight > maxSide) continue;
 
         const aspect = componentWidth / Math.max(componentHeight, 1);
-        if (aspect < 0.60 || aspect > 1.67) continue;
+        if (aspect < 0.72 || aspect > 1.38) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.72) continue;
+        if (fill < 0.82) continue;
 
         // A filled response bubble is circular: the four corners of its
         // bounding box remain mostly white. A registration mark is a solid
@@ -1222,7 +1222,7 @@ function findSolidMarkerInZone(
             cornerOccupancies.reduce((sum, value) => sum + value, 0)
             / cornerOccupancies.length
         );
-        if (minimumCornerOccupancy < 0.50 || averageCornerOccupancy < 0.72) continue;
+        if (minimumCornerOccupancy < 0.65 || averageCornerOccupancy < 0.82) continue;
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
         const centerX = startX + (sumX / area);
@@ -1551,33 +1551,16 @@ function detectDocumentCorners() {
         )
     );
 
-    // A lower marker can touch the printed page border. Connected-component
-    // detection then sees one long border instead of a compact square. Fall
-    // back only for missing corners to a local square-versus-surroundings
-    // contrast check; the full four-marker geometry below remains mandatory.
-    if (!markers.every(Boolean)) {
-        const integralData = buildBrightnessIntegral(
-            pixels,
-            analysisWidth,
-            analysisHeight
-        );
-        markers = markers.map((marker, index) => {
-            if (marker) return marker;
-            const [sx, sy, ex, ey] = zones[index];
-            return findSolidSquareByContrast(
-                integralData,
-                sx,
-                sy,
-                ex,
-                ey,
-                cornerNames[index]
-            );
-        });
-    }
-
+    // STRICT REGISTRATION-BLOCK CONTRACT:
+    // All four markers must be found by the solid-component square detector.
+    // Do not synthesize a missing marker from generic dark contrast patches.
+    // This prevents OMR bubbles, text, logos, or table cells from triggering
+    // automatic capture.
     if (!markers.every(Boolean)) {
         return null;
     }
+
+
 
     const sourcePoints = markers.map(({ x, y }) => ({
         x: (x / analysisWidth) * videoWidth,
@@ -1618,7 +1601,7 @@ function detectDocumentCorners() {
     );
     const smallestMarkerSide = Math.min(...markerSides);
     const largestMarkerSide = Math.max(...markerSides);
-    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 2.8) {
+    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 1.85) {
         return null;
     }
 
@@ -1658,7 +1641,7 @@ function detectDocumentCorners() {
         / markerSides.length
     ) * (videoWidth / analysisWidth);
     const markerToSheetRatio = averageMarkerSide / Math.max(averageSheetWidth, 1);
-    if (markerToSheetRatio < 0.0025 || markerToSheetRatio > 0.060) {
+    if (markerToSheetRatio < 0.005 || markerToSheetRatio > 0.035) {
         return null;
     }
 

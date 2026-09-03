@@ -5740,7 +5740,7 @@ def process_omr(
         # recognition with the per-question robust printed-grid calibrator.
         robust_numerical, robust_numeric_debug = (
             scan_jee_numerical_sections_robust(
-                corrected,
+                recognition_image,
                 template,
             )
         )
