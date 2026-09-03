@@ -24,36 +24,19 @@ def test_manual_capture_is_a_true_shutter():
     assert expected_listener in source
     assert "if (automatic && !pageCornersDetected)" in source
 
-    capture_start = source.index(
-        "function captureCameraImage("
-    )
-    capture_end = source.index(
-        "/* ==========================================================",
-        capture_start + 1,
-    )
 
-    capture_function = source[
-        capture_start:capture_end
-    ]
-
-    assert "if (!automatic)" in capture_function
-    assert "cancelAnimationFrame(" in capture_function
-
-
-def test_autocapture_is_fast_but_requires_two_good_frames():
+def test_autocapture_is_immediate_after_four_corner_blocks():
     source = _source()
 
-    assert "const AUTO_CAPTURE_STABLE_CHECKS = 3;" in source
+    assert "const AUTO_CAPTURE_STABLE_CHECKS = 1;" in source
     assert "const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;" in source
     assert "const analysisWidth = Math.min(640, videoWidth);" in source
-    assert "const AUTO_CAPTURE_MIN_SHARPNESS = 1400;" in source
-
+    assert "findSolidMarkerInZone(" in source
     assert "findSolidSquareByContrast(" in source
-    assert "setTimeout(() =>" not in source
     assert "captureCameraImage(true);" in source
 
 
-def test_autocapture_readiness_requires_real_sheet_focus_and_stability():
+def test_autocapture_readiness_is_corner_only():
     source = _source()
 
     start = source.index(
@@ -66,19 +49,21 @@ def test_autocapture_readiness_requires_real_sheet_focus_and_stability():
 
     readiness = source[start:end]
 
-    assert "detection.markerCount !== 4" in readiness
-    assert "isCompleteSheetInFrame(" in readiness
-    assert "isSheetLargeEnough(" in readiness
-    assert "isSheetReasonablyAligned(" in readiness
-    assert "hasExcessiveMovement(" in readiness
-    assert "AUTO_CAPTURE_MIN_SHARPNESS" in readiness
-    assert "waiting for camera focus" in readiness
+    assert "detection.markerCount === 4" in readiness
     assert "ready: true" in readiness
 
+    assert "isCompleteSheetInFrame(" not in readiness
+    assert "isSheetLargeEnough(" not in readiness
+    assert "isSheetReasonablyAligned(" not in readiness
+    assert "hasExcessiveMovement(" not in readiness
+    assert "AUTO_CAPTURE_MIN_SHARPNESS" not in readiness
+    assert "cameraFocusWarmupUntil" not in readiness
 
-def test_live_detection_attaches_frame_sharpness():
+
+def test_corner_detector_still_rejects_non_corner_bubble_candidates():
     source = _source()
 
-    assert "function estimateFrameSharpness(" in source
-    assert "sharpness = estimateFrameSharpness(" in source
-    assert "sharpness," in source
+    assert 'const cornerNames = ["TL", "TR", "BR", "BL"]' in source
+    assert "outerCornerGeometry" in source
+    assert "markerToSheetRatio" in source
+    assert "minimumCornerOccupancy" in source

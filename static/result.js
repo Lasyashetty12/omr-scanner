@@ -164,6 +164,17 @@ async function loadResult() {
         return;
     }
 
+    // The /scan response is cached before navigation. Use it immediately.
+    // This avoids "Result not found" on serverless deployments where the next
+    // request may land on a different instance without the local JSON file.
+    const immediateCached = readCachedResult(resultId);
+
+    if (immediateCached) {
+        hideLoading();
+        displayResultData(immediateCached);
+        return;
+    }
+
     try {
         const resp = await fetch(`/api/omr-results/${encodeURIComponent(resultId)}`);
         if (!resp.ok) {

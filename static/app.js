@@ -375,7 +375,7 @@ const JPEG_QUALITY =
 
 // Two consecutive checks are still effectively instant for the user, while
 // preventing a single blurred frame from triggering capture.
-const AUTO_CAPTURE_STABLE_CHECKS = 3;
+const AUTO_CAPTURE_STABLE_CHECKS = 1;
 const AUTO_CAPTURE_CHECK_INTERVAL_MS = 45;
 
 // Downscaled live-frame Laplacian variance.
@@ -563,7 +563,7 @@ async function fetchAndRenderDashboard() {
                     <td>${r.blank}</td>
                     <td>${formattedDate}</td>
                     <td>
-                        <button type="button" class="action-view-btn" data-id="${r.id || r.scan_id}">
+                        <button type="button" class="action-view-btn" data-id="${r.scan_id || r.id}">
                             View
                         </button>
                     </td>
@@ -983,114 +983,33 @@ function isReadyForAutoCapture(
     videoHeight,
     priorDetection
 ) {
+    /*
+        CORNER-ONLY AUTOCAPTURE CONTRACT
+
+        Automatic capture depends ONLY on detection of all four Manchester
+        black registration blocks.
+
+        No bubble state, focus score, page margin, page size, movement,
+        tilt, or alignment check is allowed to delay automatic capture here.
+
+        detectDocumentCorners() itself still verifies that the candidates are
+        compact square markers in TL/TR/BR/BL and form a plausible outer-page
+        quadrilateral.  That is the only automatic-capture gate.
+    */
     if (
-        cameraFocusWarmupUntil
-        && performance.now() < cameraFocusWarmupUntil
+        detection
+        && detection.sourcePoints
+        && detection.markerCount === 4
     ) {
         return {
-            ready: false,
-            reason: "Camera focusing — hold the OMR steady"
+            ready: true,
+            reason: "Four black corner blocks detected — capturing…"
         };
-    }
-
-    if (
-        !detection
-        || !detection.sourcePoints
-        || detection.markerCount !== 4
-    ) {
-        return {
-            ready: false,
-            reason: "Align the OMR sheet — show all four black corner blocks"
-        };
-    }
-
-    if (
-        !isCompleteSheetInFrame(
-            detection.sourcePoints,
-            videoWidth,
-            videoHeight
-        )
-    ) {
-        return {
-            ready: false,
-            reason: "Move back slightly — keep the complete OMR and all four blocks inside the frame"
-        };
-    }
-
-    if (
-        !isSheetLargeEnough(
-            detection.sourcePoints,
-            videoWidth,
-            videoHeight
-        )
-    ) {
-        return {
-            ready: false,
-            reason: "Move closer — the OMR sheet is too small"
-        };
-    }
-
-    if (
-        !isSheetReasonablyAligned(
-            detection.sourcePoints
-        )
-    ) {
-        return {
-            ready: false,
-            reason: "Straighten the OMR sheet"
-        };
-    }
-
-    if (
-        priorDetection
-        && hasExcessiveMovement(
-            detection,
-            priorDetection
-        )
-    ) {
-        return {
-            ready: false,
-            reason: "Hold the phone steady"
-        };
-    }
-
-    const sharpness = Number(
-        detection.sharpness
-        || 0
-    );
-
-    if (
-        !Number.isFinite(sharpness)
-        || sharpness
-        < AUTO_CAPTURE_MIN_SHARPNESS
-    ) {
-        return {
-            ready: false,
-            reason: "Hold steady — waiting for camera focus"
-        };
-    }
-
-    if (priorDetection) {
-        const previousSharpness = Number(
-            priorDetection.sharpness
-            || 0
-        );
-
-        if (
-            !Number.isFinite(previousSharpness)
-            || previousSharpness
-            < AUTO_CAPTURE_MIN_SHARPNESS
-        ) {
-            return {
-                ready: false,
-                reason: "Focus locking — hold steady"
-            };
-        }
     }
 
     return {
-        ready: true,
-        reason: "Four corner blocks locked and image focused"
+        ready: false,
+        reason: "Show all four black corner blocks"
     };
 }
 
@@ -2776,24 +2695,14 @@ function displayResult(
     }
 
 
-    const correctedUrl =
-        result.corrected_image_url
-        ||
-        data.corrected_image_url;
+    /*
+        Keep the exact camera/upload preview visible after evaluation.
 
-    if (
-        correctedUrl
-        &&
-        capturedPreview
-    ) {
-        capturedPreview.src =
-            correctedUrl
-            + "?t="
-            + Date.now();
-
-        capturedPreview.hidden =
-            false;
-    }
+        The backend may perspective-correct and resize a COPY internally for
+        recognition, but the user's captured preview must never be replaced
+        by that canonical image. This avoids visible rotation, stretching,
+        dimension changes, or tilt in the captured-image preview.
+    */
 
 
     const bubbleDebugUrl =
@@ -2955,7 +2864,7 @@ async function scanOMR() {
 
         // Prefer the durable database ID. The scan UUID remains a fallback for
         // local development and deployments without a configured database.
-        latestResultId = data?.id || data?.scan_id || null;
+        latestResultId = data?.scan_id || data?.id || null;
 
         // Serverless local files may not survive the next request. Keep the
         // just-created result available to the individual-result page in this
