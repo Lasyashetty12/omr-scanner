@@ -589,74 +589,305 @@ def _calibrate_numerical_question(
     template: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     columns = question["columns"]
-    expected_x = [float(column["x"]) for column in columns]
-    expected_y = [float(v) for v in columns[0]["y_positions"]]
 
-    decimal_points = question.get("decimal_points", [])
-    expected_decimal_x = [float(item["x"]) for item in decimal_points]
-    decimal_y = float(decimal_points[0]["y"]) if decimal_points else min(expected_y) - 40.0
+    expected_x = [
+        float(column["x"])
+        for column in columns
+    ]
+
+    expected_y = [
+        float(value)
+        for value in columns[0]["y_positions"]
+    ]
+
+    decimal_points = question.get(
+        "decimal_points",
+        [],
+    )
+
+    decimal_y = (
+        float(decimal_points[0]["y"])
+        if decimal_points
+        else min(expected_y) - 40.0
+    )
 
     sign = question.get("sign")
-    sign_y = float(sign["y"]) if sign else max(expected_y) + 35.0
 
-    bubble_radius = int(template.get("bubble_radius", 10))
-    margin = int(template.get("jee_grid_hough_margin", 20))
-    max_delta = float(template.get("jee_grid_max_calibration_delta", 22))
+    sign_y = (
+        float(sign["y"])
+        if sign
+        else max(expected_y) + 35.0
+    )
+
+    bubble_radius = int(
+        template.get(
+            "bubble_radius",
+            10,
+        )
+    )
+
+    margin = int(
+        template.get(
+            "jee_grid_hough_margin",
+            20,
+        )
+    )
+
+    max_delta = float(
+        template.get(
+            "jee_grid_max_calibration_delta",
+            22,
+        )
+    )
+
+    search_margin = max(
+        margin,
+        int(round(max_delta + 8.0)),
+    )
 
     circles = _hough_circles(
         gray,
         (
-            min(expected_x) - margin,
-            decimal_y - margin,
-            max(expected_x) + margin,
-            sign_y + margin,
+            min(expected_x) - search_margin,
+            decimal_y - search_margin,
+            max(expected_x) + search_margin,
+            sign_y + search_margin,
         ),
         bubble_radius=bubble_radius,
-        min_dist=max(11, int(round(bubble_radius * 1.25))),
+        min_dist=max(
+            11,
+            int(round(bubble_radius * 1.25)),
+        ),
     )
 
-    digit_candidates = [
+    row_tolerance = max(
+        4.5,
+        float(bubble_radius) * 0.65,
+    )
+
+    broad_y_min = (
+        min(expected_y)
+        - max_delta
+        - 8.0
+    )
+
+    broad_y_max = (
+        max(expected_y)
+        + max_delta
+        + 8.0
+    )
+
+    broad_candidates = [
         point
         for point in circles
-        if min(expected_y) - 16 <= point[1] <= max(expected_y) + 16
+        if broad_y_min <= float(point[1]) <= broad_y_max
     ]
+
+    row_groups: List[List[Tuple[float, float, float]]] = []
+
+    for point in sorted(
+        broad_candidates,
+        key=lambda item: float(item[1]),
+    ):
+        if not row_groups:
+            row_groups.append([point])
+            continue
+
+        current = row_groups[-1]
+
+        current_y = float(
+            np.mean(
+                [
+                    float(item[1])
+                    for item in current
+                ]
+            )
+        )
+
+        if abs(float(point[1]) - current_y) <= row_tolerance:
+            current.append(point)
+        else:
+            row_groups.append([point])
+
+    expected_x_span = max(expected_x) - min(expected_x)
+
+    valid_digit_rows = []
+
+    for group in row_groups:
+        xs = [
+            float(point[0])
+            for point in group
+        ]
+
+        if len(xs) < max(
+            5,
+            len(expected_x) - 2,
+        ):
+            continue
+
+        x_span = max(xs) - min(xs)
+
+        if x_span < expected_x_span * 0.70:
+            continue
+
+        valid_digit_rows.append(group)
+
+    if len(valid_digit_rows) > len(expected_y):
+        valid_digit_rows = sorted(
+            valid_digit_rows,
+            key=lambda group: (
+                -len(group),
+                abs(
+                    (
+                        max(float(point[0]) for point in group)
+                        - min(float(point[0]) for point in group)
+                    )
+                    - expected_x_span
+                ),
+            ),
+        )[:len(expected_y)]
+
+        valid_digit_rows = sorted(
+            valid_digit_rows,
+            key=lambda group:
+                float(
+                    np.mean(
+                        [
+                            float(point[1])
+                            for point in group
+                        ]
+                    )
+                ),
+        )
 
     actual_x = None
     actual_y = None
+    digit_candidates: List[Tuple[float, float, float]] = []
 
-    if len(digit_candidates) >= max(
-        40,
-        int(len(expected_x) * len(expected_y) * 0.58),
-    ):
-        actual_x = _cluster_1d([point[0] for point in digit_candidates], len(expected_x))
-        actual_y = _cluster_1d([point[1] for point in digit_candidates], len(expected_y))
+    if len(valid_digit_rows) == len(expected_y):
+        digit_candidates = [
+            point
+            for group in valid_digit_rows
+            for point in group
+        ]
+
+        actual_x = _cluster_1d(
+            [
+                float(point[0])
+                for point in digit_candidates
+            ],
+            len(expected_x),
+        )
+
+        actual_y = [
+            float(
+                np.median(
+                    [
+                        float(point[1])
+                        for point in group
+                    ]
+                )
+            )
+            for group in valid_digit_rows
+        ]
 
     calibrated = (
-        _validate_cluster_centres(actual_x, expected_x, max_delta)
-        and _validate_cluster_centres(actual_y, expected_y, max_delta)
+        _validate_cluster_centres(
+            actual_x,
+            expected_x,
+            max_delta,
+        )
+        and _validate_cluster_centres(
+            actual_y,
+            expected_y,
+            max_delta,
+        )
     )
 
     if not calibrated:
         actual_x = sorted(expected_x)
         actual_y = sorted(expected_y)
 
+    if calibrated:
+        x_fit = np.polyfit(
+            np.asarray(
+                expected_x,
+                dtype=np.float64,
+            ),
+            np.asarray(
+                actual_x,
+                dtype=np.float64,
+            ),
+            1,
+        )
+
+        y_fit = np.polyfit(
+            np.asarray(
+                expected_y,
+                dtype=np.float64,
+            ),
+            np.asarray(
+                actual_y,
+                dtype=np.float64,
+            ),
+            1,
+        )
+
+        x_scale = float(x_fit[0])
+        x_offset = float(x_fit[1])
+        y_scale = float(y_fit[0])
+        y_offset = float(y_fit[1])
+
+    else:
+        x_scale = 1.0
+        x_offset = 0.0
+        y_scale = 1.0
+        y_offset = 0.0
+
+    def project_local_x(
+        value: float,
+    ) -> float:
+        return (
+            x_scale * float(value)
+            + x_offset
+        )
+
+    def project_local_y(
+        value: float,
+    ) -> float:
+        return (
+            y_scale * float(value)
+            + y_offset
+        )
+
     updated = dict(question)
     updated["columns"] = []
 
     for index, column in enumerate(columns):
         new_column = dict(column)
-        new_column["reference_x"] = float(column["x"])
-        new_column["reference_y_positions"] = [
-            float(v)
-            for v in column["y_positions"]
-        ]
-        new_column["x"] = float(actual_x[index])
-        new_column["y_positions"] = [float(v) for v in actual_y]
-        updated["columns"].append(new_column)
 
-    # v6.3: calibrate every decimal bubble independently to the
-    # nearest detected circle. This keeps the sampling centre away from
-    # both the printed center dot and the outer circle outline.
+        new_column["reference_x"] = float(
+            column["x"]
+        )
+
+        new_column["reference_y_positions"] = [
+            float(value)
+            for value in column["y_positions"]
+        ]
+
+        new_column["x"] = float(
+            actual_x[index]
+        )
+
+        new_column["y_positions"] = [
+            float(value)
+            for value in actual_y
+        ]
+
+        updated["columns"].append(
+            new_column
+        )
+
     decimal_match_radius = float(
         template.get(
             "jee_numeric_decimal_match_radius",
@@ -667,16 +898,35 @@ def _calibrate_numerical_question(
     calibrated_decimal_points = []
 
     for decimal in decimal_points:
-        expected_dx = float(decimal["x"])
-        expected_dy = float(decimal["y"])
+        expected_dx = float(
+            decimal["x"]
+        )
+
+        expected_dy = float(
+            decimal["y"]
+        )
+
+        translated_dx = project_local_x(
+            expected_dx
+        )
+
+        translated_dy = project_local_y(
+            expected_dy
+        )
 
         nearby = [
             point
             for point in circles
             if (
-                abs(float(point[0]) - expected_dx)
+                abs(
+                    float(point[0])
+                    - translated_dx
+                )
                 <= decimal_match_radius
-                and abs(float(point[1]) - expected_dy)
+                and abs(
+                    float(point[1])
+                    - translated_dy
+                )
                 <= decimal_match_radius
             )
         ]
@@ -686,8 +936,14 @@ def _calibrate_numerical_question(
                 nearby,
                 key=lambda point:
                     (
-                        (float(point[0]) - expected_dx) ** 2
-                        + (float(point[1]) - expected_dy) ** 2
+                        (
+                            float(point[0])
+                            - translated_dx
+                        ) ** 2
+                        + (
+                            float(point[1])
+                            - translated_dy
+                        ) ** 2
                     ),
             )
 
@@ -700,57 +956,118 @@ def _calibrate_numerical_question(
             )
 
         else:
-            actual_dx = expected_dx
-            actual_dy = expected_dy
+            actual_dx = translated_dx
+            actual_dy = translated_dy
 
         calibrated_decimal_points.append(
             {
                 **decimal,
                 "reference_x": expected_dx,
                 "reference_y": expected_dy,
+                "translated_x": translated_dx,
+                "translated_y": translated_dy,
                 "x": actual_dx,
                 "y": actual_dy,
             }
         )
 
-    updated["decimal_points"] = calibrated_decimal_points
+    updated[
+        "decimal_points"
+    ] = calibrated_decimal_points
 
     if sign:
+        expected_sign_x = float(
+            sign["x"]
+        )
+
+        expected_sign_y = float(
+            sign["y"]
+        )
+
+        translated_sign_x = project_local_x(
+            expected_sign_x
+        )
+
+        translated_sign_y = project_local_y(
+            expected_sign_y
+        )
+
         sign_candidates = [
             point
             for point in circles
-            if abs(point[1] - sign_y) <= 15
-            and abs(point[0] - float(sign["x"])) <= max_delta
+            if (
+                abs(
+                    float(point[1])
+                    - translated_sign_y
+                )
+                <= max(
+                    15.0,
+                    decimal_match_radius,
+                )
+                and abs(
+                    float(point[0])
+                    - translated_sign_x
+                )
+                <= max_delta
+            )
         ]
 
         if sign_candidates:
             selected_sign = min(
                 sign_candidates,
                 key=lambda point:
-                abs(point[0] - float(sign["x"]))
-                + abs(point[1] - sign_y),
+                    (
+                        abs(
+                            float(point[0])
+                            - translated_sign_x
+                        )
+                        + abs(
+                            float(point[1])
+                            - translated_sign_y
+                        )
+                    ),
             )
-            updated["sign"] = {
-                **sign,
-                "reference_x": float(sign["x"]),
-                "reference_y": float(sign["y"]),
-                "x": float(selected_sign[0]),
-                "y": float(selected_sign[1]),
-            }
 
-    if sign and "reference_x" not in updated.get("sign", {}):
+            actual_sign_x = float(
+                selected_sign[0]
+            )
+
+            actual_sign_y = float(
+                selected_sign[1]
+            )
+
+        else:
+            actual_sign_x = translated_sign_x
+            actual_sign_y = translated_sign_y
+
         updated["sign"] = {
             **sign,
-            "reference_x": float(sign["x"]),
-            "reference_y": float(sign["y"]),
+            "reference_x": expected_sign_x,
+            "reference_y": expected_sign_y,
+            "translated_x": translated_sign_x,
+            "translated_y": translated_sign_y,
+            "x": actual_sign_x,
+            "y": actual_sign_y,
         }
 
     return updated, {
         "calibrated": bool(calibrated),
         "circle_count": len(circles),
         "digit_circle_count": len(digit_candidates),
-        "x_centres": [round(float(v), 2) for v in actual_x],
-        "y_centres": [round(float(v), 2) for v in actual_y],
+        "digit_row_count": len(valid_digit_rows),
+        "x_centres": [
+            round(float(value), 2)
+            for value in actual_x
+        ],
+        "y_centres": [
+            round(float(value), 2)
+            for value in actual_y
+        ],
+        "local_x_scale": round(float(x_scale), 6),
+        "local_x_offset": round(float(x_offset), 3),
+        "local_y_scale": round(float(y_scale), 6),
+        "local_y_offset": round(float(y_offset), 3),
+        "calibration_version": "local_grid_affine_v10_2",
     }
 
 

@@ -56,19 +56,20 @@ def test_active_corner_detector_never_uses_generic_contrast_fallback():
     assert "STRICT REGISTRATION-BLOCK CONTRACT" in detector
 
 
-def test_response_bubble_shape_is_rejected_by_square_requirements():
+def test_response_bubbles_cannot_use_generic_missing_corner_fallback():
     source = _source()
 
-    assert "aspect < 0.72 || aspect > 1.38" in source
-    assert "fill < 0.82" in source
-    assert "minimumCornerOccupancy < 0.65" in source
-    assert "averageCornerOccupancy < 0.82" in source
+    assert "aspect < 0.50 || aspect > 1.90" in source
+    assert "fill < 0.65" in source
+    assert "0.60 + 0.40 * averageCornerOccupancy" in source
 
+    detector = _detect_document_corners_block()
+    assert "findSolidSquareByContrast(" not in detector
 
 def test_four_markers_must_have_consistent_physical_size():
     detector = _detect_document_corners_block()
 
-    assert "> 1.85" in detector
-    assert "markerToSheetRatio < 0.005" in detector
-    assert "markerToSheetRatio > 0.035" in detector
+    assert "> 1.95" in detector
+    assert "markerToSheetRatio < 0.009" in detector
+    assert "markerToSheetRatio > 0.038" in detector
     assert "outerCornerGeometry" in detector

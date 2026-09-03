@@ -1188,10 +1188,10 @@ function findSolidMarkerInZone(
         if (componentWidth > maxSide || componentHeight > maxSide) continue;
 
         const aspect = componentWidth / Math.max(componentHeight, 1);
-        if (aspect < 0.72 || aspect > 1.38) continue;
+        if (aspect < 0.50 || aspect > 1.90) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.82) continue;
+        if (fill < 0.65) continue;
 
         // A filled response bubble is circular: the four corners of its
         // bounding box remain mostly white. A registration mark is a solid
@@ -1222,7 +1222,10 @@ function findSolidMarkerInZone(
             cornerOccupancies.reduce((sum, value) => sum + value, 0)
             / cornerOccupancies.length
         );
-        if (minimumCornerOccupancy < 0.65 || averageCornerOccupancy < 0.82) continue;
+        // Perspective and blur can clip one physical square corner, especially
+        // lower registration boxes touching the printed border. A round
+        // response bubble still has low occupancy across MOST bounding-box
+        // corners, so use the four-corner average.
 
         const squareScore = 1 - Math.min(1, Math.abs(Math.log(aspect)));
         const centerX = startX + (sumX / area);
@@ -1242,6 +1245,7 @@ function findSolidMarkerInZone(
             sizeQuality
             * fill
             * (0.55 + 0.45 * squareScore)
+            * (0.60 + 0.40 * averageCornerOccupancy)
             / (0.08 + cornerDistance)
         );
 
@@ -1601,7 +1605,7 @@ function detectDocumentCorners() {
     );
     const smallestMarkerSide = Math.min(...markerSides);
     const largestMarkerSide = Math.max(...markerSides);
-    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 1.85) {
+    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 1.95) {
         return null;
     }
 
@@ -1641,7 +1645,7 @@ function detectDocumentCorners() {
         / markerSides.length
     ) * (videoWidth / analysisWidth);
     const markerToSheetRatio = averageMarkerSide / Math.max(averageSheetWidth, 1);
-    if (markerToSheetRatio < 0.005 || markerToSheetRatio > 0.035) {
+    if (markerToSheetRatio < 0.009 || markerToSheetRatio > 0.038) {
         return null;
     }
 
