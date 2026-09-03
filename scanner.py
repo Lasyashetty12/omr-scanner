@@ -5547,8 +5547,6 @@ def process_omr(
 
     camera_min_sharpness = 900.0
 
-    camera_min_document_sharpness = 650.0
-
     camera_sharpness = float(
         document_quality.get(
             "sharpness",
@@ -5563,19 +5561,17 @@ def process_omr(
         )
     )
 
+    # Only original camera sharpness is a hard gate.
+    # document_sharpness is measured after perspective correction and
+    # canonical resizing, so its Laplacian-variance scale is different.
     if (
         camera_capture
-        and (
-            camera_sharpness
-            < camera_min_sharpness
-            or camera_document_sharpness
-            < camera_min_document_sharpness
-        )
+        and camera_sharpness
+        < camera_min_sharpness
     ):
         raise ValueError(
             "Camera image is not sharp enough for reliable bubble detection. "
-            f"Camera sharpness: {camera_sharpness:.2f}; "
-            f"document sharpness: {camera_document_sharpness:.2f}. "
+            f"Camera sharpness: {camera_sharpness:.2f}. "
             "Keep all four black corner blocks visible and hold the phone "
             "steady until autofocus locks, then scan again."
         )

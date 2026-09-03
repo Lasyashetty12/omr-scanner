@@ -29,8 +29,9 @@ def test_v8_server_rejects_soft_camera_sheet():
     ).read_text(encoding="utf-8")
 
     assert "camera_min_sharpness = 900.0" in source
-    assert "camera_min_document_sharpness = 650.0" in source
     assert "camera_document_sharpness" in source
+    assert "camera_min_document_sharpness" not in source
+    assert "camera_sharpness" in source
     assert "not sharp enough for reliable bubble detection" in source
 
 
