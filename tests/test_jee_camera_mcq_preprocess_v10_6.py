@@ -135,7 +135,9 @@ def test_camera_mcq_preprocess_preserves_dimensions_at_runtime():
         )
     )
 
-    assert result.shape == image.shape[:2]
+    assert result.shape == image.shape
+    assert result.ndim == 3
+    assert result.shape[2] == 3
 
 
 def test_numerical_reader_is_untouched():

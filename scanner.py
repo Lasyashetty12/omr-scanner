@@ -3879,7 +3879,15 @@ def prepare_jee_camera_mcq_image(
             "JEE camera MCQ preprocessing changed image geometry."
         )
 
-    return camera_mcq_gray
+    # scan_jee_mcq_sections() follows the earlier stable BGR input path and
+    # performs its own grayscale normalization. Return a 3-channel image so
+    # OpenCV never receives an already-grayscale image in COLOR_BGR2GRAY.
+    #
+    # This conversion changes channels only; width and height stay identical.
+    return cv2.cvtColor(
+        camera_mcq_gray,
+        cv2.COLOR_GRAY2BGR,
+    )
 
 
 # ============================================================
