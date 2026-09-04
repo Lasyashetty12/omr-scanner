@@ -5,10 +5,7 @@ from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
 from jee_precise_reader import scan_jee_numerical_precise
-from jee_reader import (
-    scan_jee_mcq_sections_robust,
-    scan_jee_numerical_sections_robust,
-)
+from jee_reader import scan_jee_numerical_sections_robust
 import json
 import logging
 import os
@@ -3800,6 +3797,92 @@ def detect_jee_series(gray_image, template):
 
 
 # ============================================================
+# JEE CAMERA MCQ — PHOTOMETRIC PREPROCESSING ONLY
+# ============================================================
+
+def prepare_jee_camera_mcq_image(
+    recognition_image,
+):
+    """
+    Improve live-camera JEE MCQ contrast WITHOUT changing geometry.
+
+    Only pixel intensities are changed. No resize, crop, rotation,
+    homography, or perspective transform is used.
+    """
+    gray = normalize_grayscale(
+        recognition_image
+    )
+
+    original_shape = gray.shape
+
+    short_side = max(
+        1,
+        min(gray.shape[:2]),
+    )
+
+    background_sigma = float(
+        max(
+            16.0,
+            min(
+                36.0,
+                short_side / 55.0,
+            ),
+        )
+    )
+
+    background = cv2.GaussianBlur(
+        gray,
+        (0, 0),
+        sigmaX=background_sigma,
+        sigmaY=background_sigma,
+    )
+
+    safe_background = np.maximum(
+        background,
+        1,
+    ).astype(np.uint8)
+
+    flattened = cv2.divide(
+        gray,
+        safe_background,
+        scale=238.0,
+    )
+
+    # Empty printed bubbles and A/B/C/D glyphs are mostly thin strokes.
+    # Filled student bubbles contain broad dark ink.
+    ink = 255 - flattened
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3),
+    )
+
+    solid_ink = cv2.morphologyEx(
+        ink,
+        cv2.MORPH_OPEN,
+        kernel,
+        iterations=1,
+    )
+
+    retained_ink = cv2.addWeighted(
+        ink,
+        0.28,
+        solid_ink,
+        0.72,
+        0,
+    )
+
+    camera_mcq_gray = 255 - retained_ink
+
+    if camera_mcq_gray.shape != original_shape:
+        raise ValueError(
+            "JEE camera MCQ preprocessing changed image geometry."
+        )
+
+    return camera_mcq_gray
+
+
+# ============================================================
 # JEE MCQ SCANNER
 # ============================================================
 
@@ -5740,31 +5823,29 @@ def process_omr(
         )
 
         # ----------------------------------------------------
-        # CAMERA-ONLY JEE MCQ OVERRIDE
+        # CAMERA JEE MCQ — EARLIER GEOMETRY + PREPROCESSING ONLY
         # ----------------------------------------------------
-        # Uploaded JEE sheets already evaluate accurately through the stable
-        # scan_jee_answers() path above, so leave upload MCQ untouched.
-        #
-        # Live camera frames pass through document-mode illumination/contrast
-        # enhancement before recognition. That changes the printed empty MCQ
-        # bubbles relative to the blank JEE reference and can create false
-        # MULTIPLE results. For camera captures only, run the reference-delta
-        # robust MCQ reader on the unmodified canonical image.
+        # Keep the earlier validated page geometry and stable MCQ reader.
+        # Only pixel intensities are preprocessed for live-camera MCQs.
         if camera_capture:
-            camera_mcq, camera_mcq_debug = (
-                scan_jee_mcq_sections_robust(
-                    corrected,
+            camera_mcq_image = (
+                prepare_jee_camera_mcq_image(
+                    recognition_image
+                )
+            )
+
+            camera_mcq = (
+                scan_jee_mcq_sections(
+                    camera_mcq_image,
                     template,
                 )
             )
 
-            answers["mcq"] = camera_mcq
-            answers["_mcq_calibration"] = (
-                camera_mcq_debug
+            answers["mcq"] = (
+                camera_mcq
             )
 
-        # Keep JEE numerical recognition exactly as before.
-        # It continues to use the preprocessed recognition_image.
+        # JEE numerical recognition below is intentionally untouched.
         robust_numerical, robust_numeric_debug = (
             scan_jee_numerical_sections_robust(
                 recognition_image,
