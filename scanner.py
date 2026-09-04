@@ -5,7 +5,10 @@ from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
 from jee_precise_reader import scan_jee_numerical_precise
-from jee_reader import scan_jee_numerical_sections_robust
+from jee_reader import (
+    scan_jee_mcq_sections_robust,
+    scan_jee_numerical_sections_robust,
+)
 import json
 import logging
 import os
@@ -5736,8 +5739,32 @@ def process_omr(
             )
         )
 
-        # Keep the stable MCQ reader above. Replace only JEE numerical
-        # recognition with the per-question robust printed-grid calibrator.
+        # ----------------------------------------------------
+        # CAMERA-ONLY JEE MCQ OVERRIDE
+        # ----------------------------------------------------
+        # Uploaded JEE sheets already evaluate accurately through the stable
+        # scan_jee_answers() path above, so leave upload MCQ untouched.
+        #
+        # Live camera frames pass through document-mode illumination/contrast
+        # enhancement before recognition. That changes the printed empty MCQ
+        # bubbles relative to the blank JEE reference and can create false
+        # MULTIPLE results. For camera captures only, run the reference-delta
+        # robust MCQ reader on the unmodified canonical image.
+        if camera_capture:
+            camera_mcq, camera_mcq_debug = (
+                scan_jee_mcq_sections_robust(
+                    corrected,
+                    template,
+                )
+            )
+
+            answers["mcq"] = camera_mcq
+            answers["_mcq_calibration"] = (
+                camera_mcq_debug
+            )
+
+        # Keep JEE numerical recognition exactly as before.
+        # It continues to use the preprocessed recognition_image.
         robust_numerical, robust_numeric_debug = (
             scan_jee_numerical_sections_robust(
                 recognition_image,
