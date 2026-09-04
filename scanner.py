@@ -3890,6 +3890,63 @@ def prepare_jee_camera_mcq_image(
     )
 
 
+def build_jee_camera_mcq_template(
+    template,
+):
+    """
+    Build a CAMERA-ONLY MCQ reading profile without changing page geometry.
+
+    Keep original filled / multiple / blank thresholds. Only:
+      - read the inner bubble core with radius 8 instead of radius 10
+      - reduce local centre search to +/-2 px
+
+    The original template dictionary is never mutated.
+    """
+    camera_template = template.copy()
+
+    camera_template[
+        "bubble_radius"
+    ] = int(
+        template.get(
+            "jee_camera_mcq_core_radius",
+            8,
+        )
+    )
+
+    camera_search_radius = int(
+        template.get(
+            "jee_camera_mcq_search_radius",
+            2,
+        )
+    )
+
+    camera_sections = []
+
+    for section in template.get(
+        "mcq_sections",
+        [],
+    ):
+        camera_section = section.copy()
+
+        camera_section[
+            "search_radius"
+        ] = camera_search_radius
+
+        camera_section[
+            "search_step"
+        ] = 1
+
+        camera_sections.append(
+            camera_section
+        )
+
+    camera_template[
+        "mcq_sections"
+    ] = camera_sections
+
+    return camera_template
+
+
 # ============================================================
 # JEE MCQ SCANNER
 # ============================================================
@@ -5842,10 +5899,16 @@ def process_omr(
                 )
             )
 
+            camera_mcq_template = (
+                build_jee_camera_mcq_template(
+                    template
+                )
+            )
+
             camera_mcq = (
                 scan_jee_mcq_sections(
                     camera_mcq_image,
-                    template,
+                    camera_mcq_template,
                 )
             )
 
