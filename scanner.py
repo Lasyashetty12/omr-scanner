@@ -3890,61 +3890,394 @@ def prepare_jee_camera_mcq_image(
     )
 
 
-def build_jee_camera_mcq_template(
+
+
+def _decide_jee_camera_mcq(
+    scores,
+    core_scores,
     template,
 ):
     """
-    Build a CAMERA-ONLY MCQ reading profile without changing page geometry.
+    Camera-only JEE MCQ decision logic.
 
-    Keep original filled / multiple / blank thresholds. Only:
-      - read the inner bubble core with radius 8 instead of radius 10
-      - reduce local centre search to +/-2 px
-
-    The original template dictionary is never mutated.
+    Absolute full-bubble scores keep the proven v10.6a calibration.
+    Inner-core scores are used only to distinguish:
+      - one real filled bubble + printed-ring residue
+      - two genuinely filled bubbles
+      - one slightly weak but clearly dominant filled bubble
     """
-    camera_template = template.copy()
-
-    camera_template[
-        "bubble_radius"
-    ] = int(
+    options = list(
         template.get(
-            "jee_camera_mcq_core_radius",
-            8,
+            "options",
+            ["A", "B", "C", "D"],
         )
     )
 
-    camera_search_radius = int(
-        template.get(
-            "jee_camera_mcq_search_radius",
-            2,
+    ranked = sorted(
+        (
+            (
+                option,
+                float(
+                    scores.get(
+                        option,
+                        0.0,
+                    )
+                ),
+            )
+            for option in options
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    if not ranked:
+        return {
+            "answer": "BLANK",
+            "highest_score": 0.0,
+            "confidence_gap": 0.0,
+        }
+
+    top_option = ranked[0][0]
+    top_score = float(ranked[0][1])
+
+    second_option = (
+        ranked[1][0]
+        if len(ranked) > 1
+        else None
+    )
+
+    second_score = float(
+        ranked[1][1]
+        if len(ranked) > 1
+        else 0.0
+    )
+
+    full_gap = (
+        top_score
+        - second_score
+    )
+
+    top_core = float(
+        core_scores.get(
+            top_option,
+            0.0,
         )
     )
 
-    camera_sections = []
+    second_core = float(
+        core_scores.get(
+            second_option,
+            0.0,
+        )
+        if second_option is not None
+        else 0.0
+    )
 
-    for section in template.get(
-        "mcq_sections",
-        [],
+    core_gap = (
+        top_core
+        - second_core
+    )
+
+    blank_threshold = float(
+        template.get(
+            "blank_threshold",
+            0.72,
+        )
+    )
+
+    filled_threshold = float(
+        template.get(
+            "filled_threshold",
+            0.75,
+        )
+    )
+
+    multiple_threshold = float(
+        template.get(
+            "multiple_threshold",
+            filled_threshold,
+        )
+    )
+
+    full_single_gap = float(
+        template.get(
+            "jee_camera_mcq_single_gap",
+            0.075,
+        )
+    )
+
+    core_single_gap = float(
+        template.get(
+            "jee_camera_mcq_core_single_gap",
+            0.16,
+        )
+    )
+
+    minimum_core_single = float(
+        template.get(
+            "jee_camera_mcq_min_core_single",
+            0.56,
+        )
+    )
+
+    relaxed_single_gap = float(
+        template.get(
+            "jee_camera_mcq_relaxed_single_gap",
+            0.10,
+        )
+    )
+
+    relaxed_core_gap = float(
+        template.get(
+            "jee_camera_mcq_relaxed_core_gap",
+            0.13,
+        )
+    )
+
+    relaxed_min_core = float(
+        template.get(
+            "jee_camera_mcq_relaxed_min_core",
+            0.60,
+        )
+    )
+
+    multiple_candidates = [
+        option
+        for option in options
+        if float(
+            scores.get(
+                option,
+                0.0,
+            )
+        ) >= multiple_threshold
+    ]
+
+    # --------------------------------------------------------
+    # TWO OR MORE FULL-BUBBLE SCORES ABOVE MULTIPLE THRESHOLD
+    # --------------------------------------------------------
+    # Camera residue can push a second printed bubble over 0.75.
+    # Do not call MULTIPLE when one bubble is clearly stronger either
+    # across the whole bubble or in the solid central ink.
+    if len(
+        multiple_candidates
+    ) >= 2:
+        dominant_single = (
+            (
+                full_gap
+                >= full_single_gap
+            )
+            or (
+                top_core
+                >= minimum_core_single
+                and core_gap
+                >= core_single_gap
+            )
+        )
+
+        if dominant_single:
+            answer = (
+                top_option
+            )
+        else:
+            answer = (
+                "MULTIPLE"
+            )
+
+    # --------------------------------------------------------
+    # NORMAL STRONG SINGLE
+    # --------------------------------------------------------
+    elif (
+        top_score
+        >= filled_threshold
     ):
-        camera_section = section.copy()
-
-        camera_section[
-            "search_radius"
-        ] = camera_search_radius
-
-        camera_section[
-            "search_step"
-        ] = 1
-
-        camera_sections.append(
-            camera_section
+        answer = (
+            top_option
         )
 
-    camera_template[
-        "mcq_sections"
-    ] = camera_sections
+    # --------------------------------------------------------
+    # CAMERA-ONLY UNCERTAIN RESCUE
+    # --------------------------------------------------------
+    # v10.6a was already good but occasionally left a real fill in the
+    # narrow 0.72-0.75 UNCERTAIN band. Promote it only when the same
+    # option is also strongly dominant in the central ink.
+    elif (
+        top_score
+        >= blank_threshold
+        and top_core
+        >= relaxed_min_core
+        and (
+            full_gap
+            >= relaxed_single_gap
+            or core_gap
+            >= relaxed_core_gap
+        )
+    ):
+        answer = (
+            top_option
+        )
 
-    return camera_template
+    elif (
+        top_score
+        < blank_threshold
+    ):
+        answer = (
+            "BLANK"
+        )
+
+    else:
+        answer = (
+            "UNCERTAIN"
+        )
+
+    return {
+        "answer":
+            answer,
+
+        "highest_score":
+            round(
+                top_score,
+                4,
+            ),
+
+        "confidence_gap":
+            round(
+                full_gap,
+                4,
+            ),
+
+        "core_gap":
+            round(
+                core_gap,
+                4,
+            ),
+    }
+
+
+def detect_jee_camera_question_answer(
+    gray_image,
+    coordinates,
+    template,
+):
+    """
+    Classify one live-camera JEE MCQ without changing geometry,
+    search radius, full-bubble radius, or the v10.6a preprocessing.
+
+    The proven full radius=10 reading remains primary. A small inner
+    confirmation disk is measured at the SAME chosen centre only to
+    reject false MULTIPLE / UNCERTAIN states caused by printed residue.
+    """
+    options = list(
+        template.get(
+            "options",
+            ["A", "B", "C", "D"],
+        )
+    )
+
+    scores = {}
+    core_scores = {}
+
+    core_radius = int(
+        template.get(
+            "jee_camera_mcq_confirmation_radius",
+            5,
+        )
+    )
+
+    core_template = (
+        template.copy()
+    )
+
+    core_template[
+        "bubble_radius"
+    ] = core_radius
+
+    for option in options:
+        x, y = (
+            coordinates[
+                option
+            ]
+        )
+
+        scores[
+            option
+        ] = float(
+            get_fill_ratio(
+                gray_image,
+                x,
+                y,
+                template,
+            )
+        )
+
+        core_scores[
+            option
+        ] = float(
+            get_fill_ratio(
+                gray_image,
+                x,
+                y,
+                core_template,
+            )
+        )
+
+    decision = (
+        _decide_jee_camera_mcq(
+            scores,
+            core_scores,
+            template,
+        )
+    )
+
+    decision[
+        "scores"
+    ] = {
+        key:
+            round(
+                float(value),
+                4,
+            )
+        for key, value
+        in scores.items()
+    }
+
+    decision[
+        "core_scores"
+    ] = {
+        key:
+            round(
+                float(value),
+                4,
+            )
+        for key, value
+        in core_scores.items()
+    }
+
+    decision[
+        "option_centres"
+    ] = {
+        option: [
+            int(
+                coordinates[
+                    option
+                ][0]
+            ),
+            int(
+                coordinates[
+                    option
+                ][1]
+            ),
+        ]
+        for option in options
+    }
+
+    decision[
+        "reader"
+    ] = (
+        "jee_camera_relative_confirmation_v10_8"
+    )
+
+    return decision
+
 
 
 # ============================================================
@@ -4129,13 +4462,31 @@ def scan_jee_mcq_sections(
                 "options"
             ] = options
 
+            if bool(
+                template.get(
+                    "jee_camera_relative_decision",
+                    False,
+                )
+            ):
+                result = (
+                    detect_jee_camera_question_answer(
+                        gray,
+                        coordinates,
+                        temporary_template,
+                    )
+                )
+            else:
+                result = (
+                    detect_question_answer(
+                        gray,
+                        coordinates,
+                        temporary_template,
+                    )
+                )
+
             detected[
                 question_number
-            ] = detect_question_answer(
-                gray,
-                coordinates,
-                temporary_template,
-            )
+            ] = result
 
     return detected
 
@@ -5899,11 +6250,14 @@ def process_omr(
                 )
             )
 
+            # Start from the better v10.6a camera path exactly:
+            # same dimensions, same radius=10, same local search=4.
+            # Only the final per-question decision becomes camera-aware.
             camera_mcq_template = (
-                build_jee_camera_mcq_template(
-                    template
-                )
+                template.copy()
             )
+
+            camera_mcq_template["jee_camera_relative_decision"] = True
 
             camera_mcq = (
                 scan_jee_mcq_sections(
