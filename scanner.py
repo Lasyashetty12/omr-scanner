@@ -3927,25 +3927,305 @@ def _is_jee_mcq_choice(
     }
 
 
+
+def _jee_template_mcq_coordinates(
+    template,
+):
+    """
+    Build exact JEE MCQ coordinates from the canonical template.
+    Used only as a safe fallback when Hough grid calibration is unavailable.
+    """
+    coordinates = {}
+
+    for section in template.get(
+        "mcq_sections",
+        [],
+    ):
+        start_question = int(
+            section[
+                "start_question"
+            ]
+        )
+
+        total_questions = int(
+            section[
+                "total_questions"
+            ]
+        )
+
+        options = list(
+            section.get(
+                "options",
+                [
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                ],
+            )
+        )
+
+        option_x = (
+            section[
+                "option_x"
+            ]
+        )
+
+        y_positions = (
+            section.get(
+                "question_y_positions"
+            )
+        )
+
+        if y_positions is None:
+            start_y = int(
+                section[
+                    "start_y"
+                ]
+            )
+
+            row_gap = int(
+                section[
+                    "row_gap"
+                ]
+            )
+
+        for row_index in range(
+            total_questions
+        ):
+            question_number = (
+                start_question
+                + row_index
+            )
+
+            if y_positions is not None:
+                y = float(
+                    y_positions[
+                        row_index
+                    ]
+                )
+            else:
+                y = float(
+                    start_y
+                    + row_index
+                    * row_gap
+                )
+
+            coordinates[
+                question_number
+            ] = {
+                option: (
+                    float(
+                        option_x[
+                            option
+                        ]
+                    ),
+                    y,
+                )
+                for option in options
+            }
+
+    return coordinates
+
+
+def _jee_ml_mcq_coordinates(
+    recognition_image,
+    template,
+):
+    """
+    Use the robust JEE grid reader only for bubble CENTRES.
+
+    Its A/B/C/D classification is deliberately ignored.  The calibrated
+    option_centres are then handed to ml_omr.hybrid_reader, which was built
+    specifically to reject printed empty rings and requires much stronger
+    evidence before declaring MULTIPLE.
+    """
+    fallback = (
+        _jee_template_mcq_coordinates(
+            template
+        )
+    )
+
+    geometry_records = {}
+    geometry_debug = {}
+
+    try:
+        (
+            geometry_records,
+            geometry_debug,
+        ) = (
+            scan_jee_mcq_sections_robust(
+                recognition_image,
+                template,
+            )
+        )
+    except Exception as error:
+        geometry_debug = {
+            "error":
+                str(
+                    error
+                ),
+
+            "fallback":
+                "template_coordinates",
+        }
+
+    coordinates = {}
+
+    for (
+        question_number,
+        fallback_options,
+    ) in fallback.items():
+        record = geometry_records.get(
+            question_number,
+            geometry_records.get(
+                str(
+                    question_number
+                ),
+                {},
+            ),
+        )
+
+        calibrated = (
+            record.get(
+                "option_centres",
+                {},
+            )
+            if isinstance(
+                record,
+                dict,
+            )
+            else {}
+        )
+
+        option_map = {}
+
+        for option, fallback_point in (
+            fallback_options.items()
+        ):
+            point = (
+                calibrated.get(
+                    option
+                )
+            )
+
+            if (
+                isinstance(
+                    point,
+                    (
+                        list,
+                        tuple,
+                    ),
+                )
+                and len(
+                    point
+                ) == 2
+            ):
+                option_map[
+                    option
+                ] = (
+                    float(
+                        point[
+                            0
+                        ]
+                    ),
+                    float(
+                        point[
+                            1
+                        ]
+                    ),
+                )
+            else:
+                option_map[
+                    option
+                ] = (
+                    float(
+                        fallback_point[
+                            0
+                        ]
+                    ),
+                    float(
+                        fallback_point[
+                            1
+                        ]
+                    ),
+                )
+
+        coordinates[
+            question_number
+        ] = option_map
+
+    return (
+        coordinates,
+        geometry_debug,
+    )
+
+
 def resolve_jee_camera_mcq_ambiguities(
     recognition_image,
     stable_mcq,
     template,
 ):
     """
-    Keep the better v10.6a camera MCQ result as the primary result.
+    Final JEE camera MCQ gate using the existing ml_omr hybrid reader.
 
-    The reference-delta reader is used only as an ambiguity resolver:
-      - stable A/B/C/D stays untouched
-      - stable MULTIPLE/UNCERTAIN/BLANK can be rescued when the
-        reference-delta reader finds one clear A/B/C/D answer
+    Primary rule:
+      - a stable A/B/C/D answer is preserved
 
-    This never changes page geometry or the v10.6a sampling path.
+    For unstable states only (MULTIPLE / UNCERTAIN / BLANK):
+      - run ml_omr on calibrated JEE bubble centres
+      - ML/hybrid SINGLE -> use that option
+      - ML/hybrid MULTIPLE -> keep MULTIPLE
+      - ML/hybrid blank -> force BLANK
+
+    This directly targets false MULTIPLE results caused by printed blank
+    bubble outlines.  It does not change numerical recognition.
     """
-    robust_mcq, robust_debug = (
-        scan_jee_mcq_sections_robust(
+    ensure_ml_model_available()
+
+    (
+        coordinates,
+        geometry_debug,
+    ) = (
+        _jee_ml_mcq_coordinates(
             recognition_image,
             template,
+        )
+    )
+
+    crop_radius = int(
+        template.get(
+            "jee_ml_crop_radius",
+            10,
+        )
+    )
+
+    (
+        ml_answers,
+        ml_debug,
+    ) = (
+        scan_answers_ml(
+            gray=
+                recognition_image,
+
+            coordinates=
+                coordinates,
+
+            crop_radius=
+                crop_radius,
+
+            # hybrid_reader currently ignores these two legacy values,
+            # but pass the normal API values explicitly.
+            filled_confidence=
+                0.70,
+
+            ambiguous_confidence=
+                0.60,
+
+            # Disable the NEET/KCET "last row in a long column" rescue.
+            # JEE MCQ sections are separate 10-row blocks.
+            questions_per_column=
+                1000,
         )
     )
 
@@ -3953,25 +4233,36 @@ def resolve_jee_camera_mcq_ambiguities(
 
     question_numbers = sorted(
         set(
-            stable_mcq.keys()
+            coordinates.keys()
         )
         | set(
-            robust_mcq.keys()
+            stable_mcq.keys()
         )
     )
 
-    resolved_questions = []
+    changed_questions = []
+    blanked_false_multiples = []
 
-    for question_number in question_numbers:
-        stable_record = stable_mcq.get(
-            question_number,
-            {},
+    for question_number in (
+        question_numbers
+    ):
+        stable_record = (
+            stable_mcq.get(
+                question_number,
+                stable_mcq.get(
+                    str(
+                        question_number
+                    ),
+                    {},
+                ),
+            )
         )
 
-        robust_record = robust_mcq.get(
-            question_number,
-            {},
-        )
+        if not isinstance(
+            stable_record,
+            dict,
+        ):
+            stable_record = {}
 
         stable_answer = (
             _jee_record_answer(
@@ -3979,88 +4270,243 @@ def resolve_jee_camera_mcq_ambiguities(
             )
         )
 
-        robust_answer = (
-            _jee_record_answer(
-                robust_record
+        ml_answer = (
+            ml_answers.get(
+                question_number,
+                ml_answers.get(
+                    str(
+                        question_number
+                    )
+                ),
             )
         )
 
+        ml_decision = (
+            ml_debug.get(
+                question_number,
+                ml_debug.get(
+                    str(
+                        question_number
+                    ),
+                    {},
+                ),
+            )
+        )
+
+        if not isinstance(
+            ml_decision,
+            dict,
+        ):
+            ml_decision = {}
+
+        selected = dict(
+            stable_record
+        )
+
+        option_centres = {
+            option: [
+                int(
+                    round(
+                        float(
+                            point[
+                                0
+                            ]
+                        )
+                    )
+                ),
+                int(
+                    round(
+                        float(
+                            point[
+                                1
+                            ]
+                        )
+                    )
+                ),
+            ]
+            for option, point
+            in coordinates.get(
+                question_number,
+                {},
+            ).items()
+        }
+
+        if option_centres:
+            selected[
+                "option_centres"
+            ] = (
+                option_centres
+            )
+
+        # ----------------------------------------------------
+        # Preserve stable single answers.
+        # ----------------------------------------------------
         if _is_jee_mcq_choice(
             stable_answer
         ):
-            selected = dict(
-                stable_record
+            final_answer = (
+                stable_answer
             )
 
             selected[
                 "camera_resolver"
             ] = (
-                "stable_v10_6a_kept"
+                "stable_single_kept_v10_11"
+            )
+
+        # ----------------------------------------------------
+        # For MULTIPLE / UNCERTAIN / BLANK, trust the
+        # bubble-specific ML hybrid decision.
+        # ----------------------------------------------------
+        else:
+            if _is_jee_mcq_choice(
+                ml_answer
+            ):
+                final_answer = (
+                    str(
+                        ml_answer
+                    ).upper()
+                )
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "ml_hybrid_single_v10_11"
+                )
+
+            elif (
+                str(
+                    ml_answer
+                    or ""
+                ).upper()
+                == "MULTIPLE"
+            ):
+                final_answer = (
+                    "MULTIPLE"
+                )
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "ml_hybrid_multiple_v10_11"
+                )
+
+            else:
+                final_answer = (
+                    "BLANK"
+                )
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "ml_hybrid_blank_v10_11"
+                )
+
+                if (
+                    stable_answer
+                    == "MULTIPLE"
+                ):
+                    blanked_false_multiples.append(
+                        int(
+                            question_number
+                        )
+                    )
+
+            if (
+                final_answer
+                != stable_answer
+            ):
+                changed_questions.append(
+                    int(
+                        question_number
+                    )
+                )
+
+        selected[
+            "answer"
+        ] = final_answer
+
+        selected[
+            "camera_resolver_original_answer"
+        ] = stable_answer
+
+        selected[
+            "camera_ml_hybrid"
+        ] = ml_decision
+
+        selected[
+            "camera_ml_answer"
+        ] = (
+            ml_answer
+        )
+
+        selected[
+            "reader"
+        ] = (
+            "jee_ml_hybrid_gate_v10_11"
+        )
+
+        # The JEE debug overlay identifies MULTIPLE bubbles by the score
+        # dictionary.  Replace those display scores with the ML multiple
+        # candidates so an old false-red circle is not carried forward.
+        if (
+            final_answer
+            == "MULTIPLE"
+        ):
+            multiple_options = list(
+                ml_decision.get(
+                    "multiple_options",
+                    [],
+                )
+                or []
+            )
+
+            selected[
+                "scores"
+            ] = {
+                option:
+                    (
+                        1.0
+                        if option
+                        in multiple_options
+                        else 0.0
+                    )
+                for option
+                in (
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                )
+            }
+
+            selected[
+                "multiple_options"
+            ] = (
+                multiple_options
             )
 
         elif (
-            stable_answer
-            in {
-                "MULTIPLE",
-                "UNCERTAIN",
-                "BLANK",
-                "",
-            }
-            and _is_jee_mcq_choice(
-                robust_answer
-            )
+            final_answer
+            == "BLANK"
         ):
-            # Preserve the stable record shape used by the existing
-            # debug/result code. Only replace the final decision.
-            selected = dict(
-                stable_record
-            )
-
             selected[
-                "answer"
-            ] = robust_answer
-
-            selected[
-                "camera_resolver"
-            ] = (
-                "reference_delta_rescue_v10_10"
-            )
-
-            selected[
-                "camera_resolver_original_answer"
-            ] = stable_answer
-
-            selected[
-                "camera_reference_delta"
-            ] = robust_record
-
-            resolved_questions.append(
-                int(
-                    question_number
+                "scores"
+            ] = {
+                option:
+                    0.0
+                for option
+                in (
+                    "A",
+                    "B",
+                    "C",
+                    "D",
                 )
-            )
-
-        elif stable_record:
-            selected = dict(
-                stable_record
-            )
+            }
 
             selected[
-                "camera_resolver"
-            ] = (
-                "stable_ambiguous_kept"
-            )
-
-        else:
-            selected = dict(
-                robust_record
-            )
-
-            selected[
-                "camera_resolver"
-            ] = (
-                "reference_delta_only"
-            )
+                "multiple_options"
+            ] = []
 
         merged[
             question_number
@@ -4068,15 +4514,23 @@ def resolve_jee_camera_mcq_ambiguities(
 
     return merged, {
         "reader":
-            "stable_plus_reference_delta_v10_10",
+            "jee_ml_hybrid_gate_v10_11",
 
-        "resolved_questions":
-            resolved_questions,
+        "crop_radius":
+            crop_radius,
 
-        "reference_delta_debug":
-            robust_debug,
+        "changed_questions":
+            changed_questions,
+
+        "false_multiple_to_blank":
+            blanked_false_multiples,
+
+        "geometry_debug":
+            geometry_debug,
+
+        "ml_debug":
+            ml_debug,
     }
-
 
 def _is_concrete_jee_numeric_answer(
     value,
