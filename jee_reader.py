@@ -474,28 +474,40 @@ def _calibrate_mcq_grid(
 def _classify_mcq(
     gray: np.ndarray,
     coordinates: Dict[str, Tuple[float, float]],
+    reference_coordinates: Dict[str, Tuple[float, float]],
     template: Dict[str, Any],
 ) -> Dict[str, Any]:
     options = list(coordinates.keys())
+    reference_gray = _get_jee_reference_gray(template)
 
-    core_radius = int(template.get("jee_core_radius", 6))
-    dark_threshold = int(template.get("jee_core_dark_threshold", 140))
-    blank_threshold = float(template.get("jee_core_blank_threshold", 0.66))
-    filled_threshold = float(template.get("jee_core_filled_threshold", 0.78))
-    minimum_gap = float(template.get("jee_core_minimum_gap", 0.10))
-    relaxed_threshold = float(template.get("jee_core_relaxed_threshold", 0.72))
-    strong_gap = float(template.get("jee_core_strong_gap", 0.20))
+    core_radius = int(template.get("jee_mcq_delta_core_radius", 5))
+    outer_radius = int(template.get("jee_mcq_delta_outer_radius", 9))
+    actual_search = int(template.get("jee_mcq_delta_actual_search", 2))
+    reference_search = int(template.get("jee_mcq_delta_reference_search", 2))
 
-    scores = {
-        option: _core_fill_ratio(
+    blank_threshold = float(template.get("jee_mcq_delta_blank_threshold", 0.055))
+    filled_threshold = float(template.get("jee_mcq_delta_filled_threshold", 0.145))
+    multiple_threshold = float(template.get("jee_mcq_delta_multiple_threshold", filled_threshold))
+    minimum_gap = float(template.get("jee_mcq_delta_minimum_gap", 0.035))
+    relaxed_threshold = float(template.get("jee_mcq_delta_relaxed_threshold", 0.105))
+    strong_gap = float(template.get("jee_mcq_delta_strong_gap", 0.055))
+
+    scores = {}
+    for option in options:
+        actual_x, actual_y = coordinates[option]
+        reference_x, reference_y = reference_coordinates[option]
+        scores[option] = _extra_ink_score(
             gray,
-            coordinates[option][0],
-            coordinates[option][1],
-            radius=core_radius,
-            dark_threshold=dark_threshold,
+            reference_gray,
+            actual_x,
+            actual_y,
+            reference_x,
+            reference_y,
+            core_radius=core_radius,
+            outer_radius=outer_radius,
+            reference_search=reference_search,
+            actual_search=actual_search,
         )
-        for option in options
-    }
 
     ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     top_option, top_score = ranked[0]
@@ -505,20 +517,14 @@ def _classify_mcq(
     filled = [
         option
         for option, score in scores.items()
-        if score >= filled_threshold
+        if score >= multiple_threshold
     ]
 
     if len(filled) >= 2:
         answer = "MULTIPLE"
-    elif (
-        top_score >= filled_threshold
-        and confidence_gap >= minimum_gap
-    ):
+    elif top_score >= filled_threshold and confidence_gap >= minimum_gap:
         answer = top_option
-    elif (
-        top_score >= relaxed_threshold
-        and confidence_gap >= strong_gap
-    ):
+    elif top_score >= relaxed_threshold and confidence_gap >= strong_gap:
         answer = top_option
     elif top_score < blank_threshold:
         answer = "BLANK"
@@ -529,8 +535,9 @@ def _classify_mcq(
         "answer": answer,
         "scores": {key: round(float(value), 4) for key, value in scores.items()},
         "highest_score": round(float(top_score), 4),
-        "confidence_gap": round(float(confidence_gap), 4),
+        "confidence_gap": round(confidence_gap, 4),
         "multiple_options": filled if answer == "MULTIPLE" else [],
+        "reader": "jee_mcq_reference_delta_v10_4",
         "selected_center": (
             [
                 int(round(coordinates[top_option][0])),
@@ -576,7 +583,19 @@ def scan_jee_mcq_sections_robust(
                 option: (float(x_by_option[option]), y)
                 for option in options
             }
-            record = _classify_mcq(gray, coordinates, template)
+            reference_coordinates = {
+                option: (
+                    float(section["option_x"][option]),
+                    float(section["question_y_positions"][row_index]),
+                )
+                for option in options
+            }
+            record = _classify_mcq(
+                gray,
+                coordinates,
+                reference_coordinates,
+                template,
+            )
             record["grid_calibrated"] = bool(debug["calibrated"])
             detected[question_number] = record
 

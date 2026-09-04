@@ -3,6 +3,7 @@
 import json
 import os
 import uuid
+from typing import List
 
 import cv2
 
@@ -1473,3 +1474,76 @@ def api_info():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+# ============================================================
+# BATCH SCAN OMR — MAX 500 FILES
+# ============================================================
+
+@app.post("/scan-batch")
+async def scan_omr_batch(
+    images: List[UploadFile] = File(...),
+    exam: str = Form(...),
+    stream: str = Form("pcmb"),
+):
+    if not images:
+        raise HTTPException(
+            status_code=400,
+            detail="No OMR images were uploaded.",
+        )
+
+    if len(images) > 500:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A maximum of 500 OMR images "
+                "can be uploaded at one time."
+            ),
+        )
+
+    results = []
+    failures = []
+
+    for index, image in enumerate(images, start=1):
+        try:
+            result = await scan_omr(
+                image=image,
+                exam=exam,
+                stream=stream,
+            )
+
+            results.append(
+                {
+                    "index": index,
+                    "filename": image.filename,
+                    "result": result,
+                }
+            )
+
+        except HTTPException as error:
+            failures.append(
+                {
+                    "index": index,
+                    "filename": image.filename,
+                    "status_code": error.status_code,
+                    "error": str(error.detail),
+                }
+            )
+
+        except Exception as error:
+            failures.append(
+                {
+                    "index": index,
+                    "filename": image.filename,
+                    "status_code": 500,
+                    "error": str(error),
+                }
+            )
+
+    return {
+        "requested": len(images),
+        "processed": len(results),
+        "failed": len(failures),
+        "results": results,
+        "failures": failures,
+    }

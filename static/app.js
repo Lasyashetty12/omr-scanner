@@ -308,6 +308,9 @@ let cameraStream = null;
 
 let capturedBlob = null;
 
+let batchUploadFiles = [];
+const MAX_BATCH_OMR_FILES = 500;
+
 let previewObjectUrl = null;
 
 
@@ -334,6 +337,33 @@ let previousDetection = null;
 let consecutiveValidFrames = 0;
 
 let cameraFocusWarmupUntil = 0;
+
+if (imageUpload) {
+    imageUpload.addEventListener(
+        "change",
+        (event) => {
+            const files = Array.from(
+                event.target.files || []
+            );
+
+            if (files.length > MAX_BATCH_OMR_FILES) {
+                batchUploadFiles = [];
+                event.target.value = "";
+
+                showError(
+                    "You can upload a maximum of "
+                    + MAX_BATCH_OMR_FILES
+                    + " OMR images at one time."
+                );
+
+                return;
+            }
+
+            batchUploadFiles = files;
+        },
+        true
+    );
+}
 
 const markerAnalysisCanvas = document.createElement(
     "canvas"
@@ -2748,7 +2778,132 @@ function displayResult(
    SCAN
    ========================================================== */
 
+
+async function scanBatchOMRs() {
+    clearError();
+    hideResult();
+    hideSuccessState();
+
+    const files = batchUploadFiles.slice(
+        0,
+        MAX_BATCH_OMR_FILES
+    );
+
+    if (files.length <= 1) {
+        return false;
+    }
+
+    showLoading(
+        "Processing "
+        + files.length
+        + " OMR sheets..."
+    );
+
+    const formData = new FormData();
+
+    for (const file of files) {
+        formData.append(
+            "images",
+            file,
+            file.name
+        );
+    }
+
+    formData.append(
+        "exam",
+        examSelect.value
+    );
+
+    formData.append(
+        "stream",
+        selectedStream
+    );
+
+    try {
+        const response = await fetch(
+            "/scan-batch",
+            {
+                method: "POST",
+                body: formData,
+            }
+        );
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                payload.detail
+                || "Batch OMR upload failed."
+            );
+        }
+
+        for (const item of payload.results || []) {
+            const result = item.result || {};
+            const key = result.scan_id || result.id;
+
+            if (key) {
+                try {
+                    localStorage.setItem(
+                        `omr-result:${key}`,
+                        JSON.stringify(result)
+                    );
+                } catch (storageError) {
+                    console.debug(
+                        "Result cache unavailable:",
+                        storageError
+                    );
+                }
+            }
+        }
+
+        const successful = payload.results || [];
+
+        if (successful.length) {
+            const lastResult = successful[successful.length - 1].result;
+
+            latestResultId = (
+                lastResult?.scan_id
+                || lastResult?.id
+                || null
+            );
+
+            displayResult(lastResult);
+        }
+
+        if (message) {
+            message.textContent = (
+                "Batch complete: "
+                + payload.processed
+                + " processed, "
+                + payload.failed
+                + " failed, out of "
+                + payload.requested
+                + "."
+            );
+        }
+
+        batchUploadFiles = [];
+        hideLoading();
+        showSuccessState();
+
+        return true;
+
+    } catch (error) {
+        hideLoading();
+
+        showError(
+            error.message
+            || "Batch OMR upload failed."
+        );
+
+        return true;
+    }
+}
+
 async function scanOMR() {
+    if (batchUploadFiles.length > 1) {
+        return scanBatchOMRs();
+    }
 
     clearError();
 

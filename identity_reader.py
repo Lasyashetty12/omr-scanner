@@ -136,12 +136,18 @@ def _detect_roll_number(
 
     minimum_circles = max(
         35,
-        int(len(expected_x) * len(expected_y) * 0.55),
+        int(len(expected_x) * len(expected_y) * 0.50),
     )
 
     if len(circles) >= minimum_circles:
-        actual_x = _cluster_1d([point[0] for point in circles], len(expected_x))
-        actual_y = _cluster_1d([point[1] for point in circles], len(expected_y))
+        actual_x = _cluster_1d(
+            [point[0] for point in circles],
+            len(expected_x),
+        )
+        actual_y = _cluster_1d(
+            [point[1] for point in circles],
+            len(expected_y),
+        )
 
     calibrated = (
         actual_x is not None
@@ -154,36 +160,102 @@ def _detect_roll_number(
         actual_x = sorted(expected_x)
         actual_y = sorted(expected_y)
 
-    core_radius = int(config.get("core_radius", 6))
-    dark_threshold = int(config.get("dark_threshold", 140))
-    filled_threshold = float(config.get("filled_threshold", 0.76))
-    minimum_gap = float(config.get("minimum_confidence_gap", 0.12))
+    core_radius = int(config.get("solid_core_radius", 5))
+    p90_threshold = float(config.get("solid_p90_threshold", 125.0))
+    std_threshold = float(config.get("solid_std_threshold", 34.0))
+    relative_p90_ratio = float(config.get("solid_p90_ratio", 0.72))
+    minimum_p90_gap = float(config.get("solid_minimum_p90_gap", 16.0))
+
+    def core_stats(x: float, y: float) -> Dict[str, float]:
+        xi = int(round(float(x)))
+        yi = int(round(float(y)))
+        radius = max(2, core_radius)
+        h, w = gray.shape[:2]
+
+        x0 = max(0, xi - radius)
+        x1 = min(w, xi + radius + 1)
+        y0 = max(0, yi - radius)
+        y1 = min(h, yi + radius + 1)
+
+        roi = gray[y0:y1, x0:x1]
+        if roi.size == 0:
+            return {"mean": 255.0, "p90": 255.0, "std": 0.0}
+
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        mask = ((xx - xi) ** 2 + (yy - yi) ** 2) <= radius ** 2
+        vals = roi[mask].astype(np.float32)
+
+        if vals.size == 0:
+            return {"mean": 255.0, "p90": 255.0, "std": 0.0}
+
+        return {
+            "mean": float(np.mean(vals)),
+            "p90": float(np.percentile(vals, 90)),
+            "std": float(np.std(vals)),
+        }
 
     digits = []
     column_details = []
 
     for column_index, x in enumerate(actual_x):
-        scores = {
-            value: _core_fill_ratio(
-                gray,
-                x,
-                actual_y[index],
-                radius=core_radius,
-                dark_threshold=dark_threshold,
-            )
+        metrics = {
+            value: core_stats(x, actual_y[index])
             for index, value in enumerate(values)
         }
 
-        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-        best_value, best_score = ranked[0]
-        second_score = ranked[1][1] if len(ranked) > 1 else 0.0
-        gap = float(best_score - second_score)
+        p90_values = [float(item["p90"]) for item in metrics.values()]
+        median_p90 = float(np.median(p90_values))
+
+        ranked = sorted(
+            metrics.items(),
+            key=lambda item: (
+                float(item[1]["p90"]),
+                float(item[1]["std"]),
+                float(item[1]["mean"]),
+            ),
+        )
+
+        best_value, best = ranked[0]
+        second = ranked[1][1] if len(ranked) > 1 else {"p90": 255.0}
+
+        best_p90 = float(best["p90"])
+        second_p90 = float(second["p90"])
+        p90_gap = second_p90 - best_p90
+
+        relative_ok = best_p90 <= median_p90 * relative_p90_ratio
+        absolute_ok = (
+            best_p90 <= p90_threshold
+            and float(best["std"]) <= std_threshold
+        )
 
         digit = (
             best_value
-            if best_score >= filled_threshold and gap >= minimum_gap
+            if absolute_ok and relative_ok and p90_gap >= minimum_p90_gap
             else None
         )
+
+        if digit is None:
+            old_scores = {
+                value: _core_fill_ratio(
+                    gray,
+                    x,
+                    actual_y[index],
+                    radius=int(config.get("core_radius", 6)),
+                    dark_threshold=int(config.get("dark_threshold", 140)),
+                )
+                for index, value in enumerate(values)
+            }
+
+            old_ranked = sorted(old_scores.items(), key=lambda item: item[1], reverse=True)
+            old_best_value, old_best = old_ranked[0]
+            old_second = old_ranked[1][1] if len(old_ranked) > 1 else 0.0
+
+            if (
+                old_best >= float(config.get("filled_threshold", 0.76))
+                and (old_best - old_second) >= float(config.get("minimum_confidence_gap", 0.12))
+                and best_p90 <= p90_threshold + 18.0
+            ):
+                digit = old_best_value
 
         digits.append(digit)
 
@@ -191,11 +263,17 @@ def _detect_roll_number(
             {
                 "column": column_index + 1,
                 "value": digit,
-                "best_score": round(float(best_score), 4),
-                "confidence_gap": round(float(gap), 4),
-                "scores": {
-                    key: round(float(score), 4)
-                    for key, score in scores.items()
+                "best_p90": round(best_p90, 2),
+                "second_p90": round(second_p90, 2),
+                "p90_gap": round(p90_gap, 2),
+                "median_p90": round(median_p90, 2),
+                "best_std": round(float(best["std"]), 2),
+                "metrics": {
+                    value: {
+                        key: round(float(metric), 2)
+                        for key, metric in details.items()
+                    }
+                    for value, details in metrics.items()
                 },
             }
         )
@@ -208,6 +286,7 @@ def _detect_roll_number(
         "columns": column_details,
         "grid_calibrated": bool(calibrated),
         "circle_count": len(circles),
+        "reader": "solid_roll_grid_v10_4",
     }
 
 

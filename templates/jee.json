@@ -345,7 +345,12 @@
       "core_radius": 6,
       "dark_threshold": 140,
       "filled_threshold": 0.76,
-      "minimum_confidence_gap": 0.12
+      "minimum_confidence_gap": 0.12,
+      "solid_core_radius": 5,
+      "solid_p90_threshold": 125.0,
+      "solid_std_threshold": 34.0,
+      "solid_p90_ratio": 0.72,
+      "solid_minimum_p90_gap": 16.0
     }
   },
   "jee_precise_core_radius": 5,
@@ -403,5 +408,15 @@
   "jee_numeric_decimal_background_inner_radius": 12,
   "jee_numeric_decimal_background_outer_radius": 15,
   "jee_numeric_decimal_contrast_ratio": 0.68,
-  "jee_numeric_decimal_contrast_delta": 35.0
+  "jee_numeric_decimal_contrast_delta": 35.0,
+  "jee_mcq_delta_core_radius": 5,
+  "jee_mcq_delta_outer_radius": 9,
+  "jee_mcq_delta_actual_search": 2,
+  "jee_mcq_delta_reference_search": 2,
+  "jee_mcq_delta_blank_threshold": 0.055,
+  "jee_mcq_delta_filled_threshold": 0.145,
+  "jee_mcq_delta_multiple_threshold": 0.145,
+  "jee_mcq_delta_minimum_gap": 0.035,
+  "jee_mcq_delta_relaxed_threshold": 0.105,
+  "jee_mcq_delta_strong_gap": 0.055
 }
