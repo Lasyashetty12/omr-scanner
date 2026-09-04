@@ -1507,6 +1507,107 @@ def _classify_numerical_column(
     }
 
 
+
+def _canonicalise_jee_assembled_number(value: str) -> str:
+    text = str(value).strip()
+    if not text:
+        return text
+
+    negative = text.startswith("-")
+    if negative:
+        text = text[1:]
+
+    if "." in text:
+        integer_part, fraction_part = text.split(".", 1)
+        integer_part = integer_part.lstrip("0") or "0"
+        fraction_part = fraction_part or "0"
+        result = integer_part + "." + fraction_part
+    else:
+        result = text.lstrip("0") or "0"
+
+    zero_probe = result.replace(".", "")
+    if negative and any(char != "0" for char in zero_probe):
+        result = "-" + result
+
+    return result
+
+
+def _assemble_sparse_jee_numerical(
+    detected_digits: List[str],
+    selected_decimal: int | None,
+    negative: bool,
+) -> Dict[str, Any]:
+    marked = [
+        (index + 1, str(value))
+        for index, value in enumerate(detected_digits)
+        if str(value) not in {"", "?"}
+    ]
+
+    if not marked:
+        return {
+            "answer": "BLANK",
+            "raw_answer": None,
+            "used_columns": [],
+            "integer_columns": [],
+            "fractional_columns": [],
+            "assembly_version": "sparse_physical_columns_v10_12",
+        }
+
+    used_columns = [int(column) for column, _value in marked]
+
+    if selected_decimal is None:
+        raw_answer = "".join(value for _column, value in marked)
+        integer_columns = list(used_columns)
+        fractional_columns = []
+    else:
+        decimal_after = int(selected_decimal)
+
+        integer_pairs = [
+            (column, value)
+            for column, value in marked
+            if column <= decimal_after
+        ]
+        fractional_pairs = [
+            (column, value)
+            for column, value in marked
+            if column > decimal_after
+        ]
+
+        integer_part = "".join(
+            value for _column, value in integer_pairs
+        ) or "0"
+
+        fractional_part = "".join(
+            value for _column, value in fractional_pairs
+        ) or "0"
+
+        raw_answer = integer_part + "." + fractional_part
+
+        integer_columns = [
+            int(column)
+            for column, _value in integer_pairs
+        ]
+        fractional_columns = [
+            int(column)
+            for column, _value in fractional_pairs
+        ]
+
+    if negative:
+        raw_answer = "-" + raw_answer
+
+    answer = _canonicalise_jee_assembled_number(raw_answer)
+
+    return {
+        "answer": answer,
+        "raw_answer": raw_answer,
+        "used_columns": used_columns,
+        "integer_columns": integer_columns,
+        "fractional_columns": fractional_columns,
+        "assembly_version": "sparse_physical_columns_v10_12",
+    }
+
+
+
 def detect_numerical_value_robust(
     gray: np.ndarray,
     question: Dict[str, Any],
@@ -1819,6 +1920,8 @@ def detect_numerical_value_robust(
         for detail in column_details
     )
 
+    assembly = None
+
     if has_multiple_column:
         answer = "UNCERTAIN"
 
@@ -1838,63 +1941,12 @@ def detect_numerical_value_robust(
         answer = "UNCERTAIN"
 
     else:
-        used_indices = [
-            index
-            for index, value
-            in enumerate(detected_digits)
-            if value
-        ]
-
-        if not used_indices:
-            answer = "BLANK"
-
-        else:
-            first = min(used_indices)
-            last = max(used_indices)
-
-            used_digits = (
-                detected_digits[
-                    first:last + 1
-                ]
-            )
-
-            if any(
-                value == ""
-                for value in used_digits
-            ):
-                answer = "UNCERTAIN"
-
-            else:
-                answer = "".join(
-                    used_digits
-                )
-
-                if selected_decimal is not None:
-                    insertion = (
-                        selected_decimal
-                        - first
-                    )
-
-                    if (
-                        insertion <= 0
-                        or insertion
-                        >= len(answer)
-                    ):
-                        answer = "UNCERTAIN"
-
-                    else:
-                        answer = (
-                            answer[:insertion]
-                            + "."
-                            + answer[insertion:]
-                        )
-
-                if (
-                    negative
-                    and answer
-                    != "UNCERTAIN"
-                ):
-                    answer = "-" + answer
+        assembly = _assemble_sparse_jee_numerical(
+            detected_digits,
+            selected_decimal,
+            negative,
+        )
+        answer = str(assembly["answer"])
 
     return {
         "answer": answer,
@@ -1913,6 +1965,37 @@ def detect_numerical_value_robust(
 
         "decimal_classifier_version":
             "decimal_core_v6_1",
+
+        "raw_answer":
+            (
+                assembly.get("raw_answer")
+                if assembly
+                else None
+            ),
+
+        "used_columns":
+            (
+                assembly.get("used_columns", [])
+                if assembly
+                else []
+            ),
+
+        "integer_columns":
+            (
+                assembly.get("integer_columns", [])
+                if assembly
+                else []
+            ),
+
+        "fractional_columns":
+            (
+                assembly.get("fractional_columns", [])
+                if assembly
+                else []
+            ),
+
+        "assembly_version":
+            "sparse_physical_columns_v10_12",
     }
 
 

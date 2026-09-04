@@ -1,6 +1,37 @@
 # scorer.py
 
 
+
+from decimal import Decimal, InvalidOperation
+
+
+def _normalise_jee_numerical_for_compare(value):
+    text = str(value).strip()
+    upper = text.upper()
+
+    if upper in {"", "BLANK", "UNCERTAIN", "MULTIPLE"}:
+        return upper
+
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return text
+
+    if not number.is_finite():
+        return text
+
+    if number == 0:
+        number = Decimal(0)
+
+    normalized = format(number.normalize(), "f")
+
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+
+    return normalized or "0"
+
+
+
 # ============================================================
 # NORMAL MCQ SCORER
 # USED FOR NEET + KCET
@@ -344,13 +375,25 @@ def calculate_jee_numerical_score(
             )
 
 
+        detected_normalized = (
+            _normalise_jee_numerical_for_compare(
+                detected_answer
+            )
+        )
+
+        correct_normalized = (
+            _normalise_jee_numerical_for_compare(
+                correct_answer
+            )
+        )
+
         # ----------------------------------------------------
         # CORRECT
         # ----------------------------------------------------
 
         if (
-            detected_answer
-            == correct_answer
+            detected_normalized
+            == correct_normalized
         ):
 
             status = "CORRECT"
@@ -425,6 +468,12 @@ def calculate_jee_numerical_score(
 
             "correct_answer":
                 correct_answer,
+
+            "detected_normalized":
+                detected_normalized,
+
+            "correct_normalized":
+                correct_normalized,
 
             "status":
                 status,
