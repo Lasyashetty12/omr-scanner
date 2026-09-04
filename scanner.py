@@ -5,7 +5,10 @@ from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
 from jee_precise_reader import scan_jee_numerical_precise
-from jee_reader import scan_jee_numerical_sections_robust
+from jee_reader import (
+    scan_jee_mcq_sections_robust,
+    scan_jee_numerical_sections_robust,
+)
 import json
 import logging
 import os
@@ -3892,391 +3895,423 @@ def prepare_jee_camera_mcq_image(
 
 
 
-def _decide_jee_camera_mcq(
-    scores,
-    core_scores,
-    template,
+
+
+def _jee_record_answer(
+    record,
 ):
-    """
-    Camera-only JEE MCQ decision logic.
-
-    Absolute full-bubble scores keep the proven v10.6a calibration.
-    Inner-core scores are used only to distinguish:
-      - one real filled bubble + printed-ring residue
-      - two genuinely filled bubbles
-      - one slightly weak but clearly dominant filled bubble
-    """
-    options = list(
-        template.get(
-            "options",
-            ["A", "B", "C", "D"],
-        )
-    )
-
-    ranked = sorted(
-        (
-            (
-                option,
-                float(
-                    scores.get(
-                        option,
-                        0.0,
-                    )
-                ),
-            )
-            for option in options
-        ),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    if not ranked:
-        return {
-            "answer": "BLANK",
-            "highest_score": 0.0,
-            "confidence_gap": 0.0,
-        }
-
-    top_option = ranked[0][0]
-    top_score = float(ranked[0][1])
-
-    second_option = (
-        ranked[1][0]
-        if len(ranked) > 1
-        else None
-    )
-
-    second_score = float(
-        ranked[1][1]
-        if len(ranked) > 1
-        else 0.0
-    )
-
-    full_gap = (
-        top_score
-        - second_score
-    )
-
-    top_core = float(
-        core_scores.get(
-            top_option,
-            0.0,
-        )
-    )
-
-    second_core = float(
-        core_scores.get(
-            second_option,
-            0.0,
-        )
-        if second_option is not None
-        else 0.0
-    )
-
-    core_gap = (
-        top_core
-        - second_core
-    )
-
-    blank_threshold = float(
-        template.get(
-            "blank_threshold",
-            0.72,
-        )
-    )
-
-    filled_threshold = float(
-        template.get(
-            "filled_threshold",
-            0.75,
-        )
-    )
-
-    multiple_threshold = float(
-        template.get(
-            "multiple_threshold",
-            filled_threshold,
-        )
-    )
-
-    full_single_gap = float(
-        template.get(
-            "jee_camera_mcq_single_gap",
-            0.075,
-        )
-    )
-
-    core_single_gap = float(
-        template.get(
-            "jee_camera_mcq_core_single_gap",
-            0.16,
-        )
-    )
-
-    minimum_core_single = float(
-        template.get(
-            "jee_camera_mcq_min_core_single",
-            0.56,
-        )
-    )
-
-    relaxed_single_gap = float(
-        template.get(
-            "jee_camera_mcq_relaxed_single_gap",
-            0.10,
-        )
-    )
-
-    relaxed_core_gap = float(
-        template.get(
-            "jee_camera_mcq_relaxed_core_gap",
-            0.13,
-        )
-    )
-
-    relaxed_min_core = float(
-        template.get(
-            "jee_camera_mcq_relaxed_min_core",
-            0.60,
-        )
-    )
-
-    multiple_candidates = [
-        option
-        for option in options
-        if float(
-            scores.get(
-                option,
-                0.0,
-            )
-        ) >= multiple_threshold
-    ]
-
-    # --------------------------------------------------------
-    # TWO OR MORE FULL-BUBBLE SCORES ABOVE MULTIPLE THRESHOLD
-    # --------------------------------------------------------
-    # Camera residue can push a second printed bubble over 0.75.
-    # Do not call MULTIPLE when one bubble is clearly stronger either
-    # across the whole bubble or in the solid central ink.
-    if len(
-        multiple_candidates
-    ) >= 2:
-        dominant_single = (
-            (
-                full_gap
-                >= full_single_gap
-            )
-            or (
-                top_core
-                >= minimum_core_single
-                and core_gap
-                >= core_single_gap
-            )
-        )
-
-        if dominant_single:
-            answer = (
-                top_option
-            )
-        else:
-            answer = (
-                "MULTIPLE"
-            )
-
-    # --------------------------------------------------------
-    # NORMAL STRONG SINGLE
-    # --------------------------------------------------------
-    elif (
-        top_score
-        >= filled_threshold
+    if not isinstance(
+        record,
+        dict,
     ):
-        answer = (
-            top_option
+        return ""
+
+    return str(
+        record.get(
+            "answer",
+            "",
         )
+    ).strip().upper()
 
-    # --------------------------------------------------------
-    # CAMERA-ONLY UNCERTAIN RESCUE
-    # --------------------------------------------------------
-    # v10.6a was already good but occasionally left a real fill in the
-    # narrow 0.72-0.75 UNCERTAIN band. Promote it only when the same
-    # option is also strongly dominant in the central ink.
-    elif (
-        top_score
-        >= blank_threshold
-        and top_core
-        >= relaxed_min_core
-        and (
-            full_gap
-            >= relaxed_single_gap
-            or core_gap
-            >= relaxed_core_gap
-        )
-    ):
-        answer = (
-            top_option
-        )
 
-    elif (
-        top_score
-        < blank_threshold
-    ):
-        answer = (
-            "BLANK"
-        )
-
-    else:
-        answer = (
-            "UNCERTAIN"
-        )
-
-    return {
-        "answer":
-            answer,
-
-        "highest_score":
-            round(
-                top_score,
-                4,
-            ),
-
-        "confidence_gap":
-            round(
-                full_gap,
-                4,
-            ),
-
-        "core_gap":
-            round(
-                core_gap,
-                4,
-            ),
+def _is_jee_mcq_choice(
+    value,
+):
+    return str(
+        value
+    ).strip().upper() in {
+        "A",
+        "B",
+        "C",
+        "D",
     }
 
 
-def detect_jee_camera_question_answer(
-    gray_image,
-    coordinates,
+def resolve_jee_camera_mcq_ambiguities(
+    recognition_image,
+    stable_mcq,
     template,
 ):
     """
-    Classify one live-camera JEE MCQ without changing geometry,
-    search radius, full-bubble radius, or the v10.6a preprocessing.
+    Keep the better v10.6a camera MCQ result as the primary result.
 
-    The proven full radius=10 reading remains primary. A small inner
-    confirmation disk is measured at the SAME chosen centre only to
-    reject false MULTIPLE / UNCERTAIN states caused by printed residue.
+    The reference-delta reader is used only as an ambiguity resolver:
+      - stable A/B/C/D stays untouched
+      - stable MULTIPLE/UNCERTAIN/BLANK can be rescued when the
+        reference-delta reader finds one clear A/B/C/D answer
+
+    This never changes page geometry or the v10.6a sampling path.
     """
-    options = list(
-        template.get(
-            "options",
-            ["A", "B", "C", "D"],
-        )
-    )
-
-    scores = {}
-    core_scores = {}
-
-    core_radius = int(
-        template.get(
-            "jee_camera_mcq_confirmation_radius",
-            5,
-        )
-    )
-
-    core_template = (
-        template.copy()
-    )
-
-    core_template[
-        "bubble_radius"
-    ] = core_radius
-
-    for option in options:
-        x, y = (
-            coordinates[
-                option
-            ]
-        )
-
-        scores[
-            option
-        ] = float(
-            get_fill_ratio(
-                gray_image,
-                x,
-                y,
-                template,
-            )
-        )
-
-        core_scores[
-            option
-        ] = float(
-            get_fill_ratio(
-                gray_image,
-                x,
-                y,
-                core_template,
-            )
-        )
-
-    decision = (
-        _decide_jee_camera_mcq(
-            scores,
-            core_scores,
+    robust_mcq, robust_debug = (
+        scan_jee_mcq_sections_robust(
+            recognition_image,
             template,
         )
     )
 
-    decision[
-        "scores"
-    ] = {
-        key:
-            round(
-                float(value),
-                4,
-            )
-        for key, value
-        in scores.items()
-    }
+    merged = {}
 
-    decision[
-        "core_scores"
-    ] = {
-        key:
-            round(
-                float(value),
-                4,
-            )
-        for key, value
-        in core_scores.items()
-    }
-
-    decision[
-        "option_centres"
-    ] = {
-        option: [
-            int(
-                coordinates[
-                    option
-                ][0]
-            ),
-            int(
-                coordinates[
-                    option
-                ][1]
-            ),
-        ]
-        for option in options
-    }
-
-    decision[
-        "reader"
-    ] = (
-        "jee_camera_relative_confirmation_v10_8"
+    question_numbers = sorted(
+        set(
+            stable_mcq.keys()
+        )
+        | set(
+            robust_mcq.keys()
+        )
     )
 
-    return decision
+    resolved_questions = []
+
+    for question_number in question_numbers:
+        stable_record = stable_mcq.get(
+            question_number,
+            {},
+        )
+
+        robust_record = robust_mcq.get(
+            question_number,
+            {},
+        )
+
+        stable_answer = (
+            _jee_record_answer(
+                stable_record
+            )
+        )
+
+        robust_answer = (
+            _jee_record_answer(
+                robust_record
+            )
+        )
+
+        if _is_jee_mcq_choice(
+            stable_answer
+        ):
+            selected = dict(
+                stable_record
+            )
+
+            selected[
+                "camera_resolver"
+            ] = (
+                "stable_v10_6a_kept"
+            )
+
+        elif (
+            stable_answer
+            in {
+                "MULTIPLE",
+                "UNCERTAIN",
+                "BLANK",
+                "",
+            }
+            and _is_jee_mcq_choice(
+                robust_answer
+            )
+        ):
+            # Preserve the stable record shape used by the existing
+            # debug/result code. Only replace the final decision.
+            selected = dict(
+                stable_record
+            )
+
+            selected[
+                "answer"
+            ] = robust_answer
+
+            selected[
+                "camera_resolver"
+            ] = (
+                "reference_delta_rescue_v10_10"
+            )
+
+            selected[
+                "camera_resolver_original_answer"
+            ] = stable_answer
+
+            selected[
+                "camera_reference_delta"
+            ] = robust_record
+
+            resolved_questions.append(
+                int(
+                    question_number
+                )
+            )
+
+        elif stable_record:
+            selected = dict(
+                stable_record
+            )
+
+            selected[
+                "camera_resolver"
+            ] = (
+                "stable_ambiguous_kept"
+            )
+
+        else:
+            selected = dict(
+                robust_record
+            )
+
+            selected[
+                "camera_resolver"
+            ] = (
+                "reference_delta_only"
+            )
+
+        merged[
+            question_number
+        ] = selected
+
+    return merged, {
+        "reader":
+            "stable_plus_reference_delta_v10_10",
+
+        "resolved_questions":
+            resolved_questions,
+
+        "reference_delta_debug":
+            robust_debug,
+    }
+
+
+def _is_concrete_jee_numeric_answer(
+    value,
+):
+    text = str(
+        value or ""
+    ).strip().upper()
+
+    return (
+        bool(
+            text
+        )
+        and text
+        not in {
+            "BLANK",
+            "UNCERTAIN",
+            "MULTIPLE",
+            "?",
+        }
+    )
+
+
+def merge_jee_camera_numerical_records(
+    primary_robust,
+    legacy,
+    raw_robust,
+):
+    """
+    Camera-only numerical ensemble.
+
+    Sources:
+      1. robust reader on recognition_image (current proven path)
+      2. original/legacy numerical result already produced by scan_jee_answers
+      3. robust reader on corrected canonical image (raw-ink fallback)
+
+    Rules:
+      - if two concrete readers agree, consensus wins
+      - otherwise keep the current robust recognition-image answer
+      - if current robust is BLANK/UNCERTAIN, use a concrete fallback
+      - if everybody is ambiguous, keep current robust
+
+    No numerical coordinates, thresholds, decimal logic, or sign logic are
+    modified inside jee_reader.py.
+    """
+    merged = {}
+    debug = {}
+
+    question_numbers = sorted(
+        set(
+            primary_robust.keys()
+        )
+        | set(
+            legacy.keys()
+        )
+        | set(
+            raw_robust.keys()
+        )
+    )
+
+    for question_number in question_numbers:
+        records = {
+            "robust_recognition":
+                primary_robust.get(
+                    question_number,
+                    {},
+                ),
+
+            "legacy":
+                legacy.get(
+                    question_number,
+                    {},
+                ),
+
+            "robust_corrected":
+                raw_robust.get(
+                    question_number,
+                    {},
+                ),
+        }
+
+        answers = {
+            source:
+                _jee_record_answer(
+                    record
+                )
+            for source, record
+            in records.items()
+        }
+
+        concrete = {
+            source:
+                answer
+            for source, answer
+            in answers.items()
+            if _is_concrete_jee_numeric_answer(
+                answer
+            )
+        }
+
+        counts = {}
+
+        for answer in concrete.values():
+            counts[
+                answer
+            ] = (
+                counts.get(
+                    answer,
+                    0,
+                )
+                + 1
+            )
+
+        consensus_answer = None
+
+        if counts:
+            best_answer, best_count = max(
+                counts.items(),
+                key=lambda item:
+                    item[1],
+            )
+
+            if best_count >= 2:
+                consensus_answer = (
+                    best_answer
+                )
+
+        priority = [
+            "robust_recognition",
+            "robust_corrected",
+            "legacy",
+        ]
+
+        selected_source = None
+
+        if consensus_answer is not None:
+            for source in priority:
+                if (
+                    answers.get(
+                        source
+                    )
+                    == consensus_answer
+                ):
+                    selected_source = (
+                        source
+                    )
+                    break
+
+        elif _is_concrete_jee_numeric_answer(
+            answers.get(
+                "robust_recognition"
+            )
+        ):
+            selected_source = (
+                "robust_recognition"
+            )
+
+        elif _is_concrete_jee_numeric_answer(
+            answers.get(
+                "robust_corrected"
+            )
+        ):
+            selected_source = (
+                "robust_corrected"
+            )
+
+        elif _is_concrete_jee_numeric_answer(
+            answers.get(
+                "legacy"
+            )
+        ):
+            selected_source = (
+                "legacy"
+            )
+
+        else:
+            selected_source = (
+                "robust_recognition"
+                if records[
+                    "robust_recognition"
+                ]
+                else (
+                    "robust_corrected"
+                    if records[
+                        "robust_corrected"
+                    ]
+                    else "legacy"
+                )
+            )
+
+        selected = dict(
+            records.get(
+                selected_source,
+                {},
+            )
+        )
+
+        selected[
+            "numeric_ensemble_source"
+        ] = selected_source
+
+        selected[
+            "numeric_ensemble_answers"
+        ] = answers
+
+        if consensus_answer is not None:
+            selected[
+                "numeric_ensemble_consensus"
+            ] = consensus_answer
+
+        merged[
+            question_number
+        ] = selected
+
+        debug[
+            str(
+                question_number
+            )
+        ] = {
+            "selected_source":
+                selected_source,
+
+            "answers":
+                answers,
+
+            "consensus":
+                consensus_answer,
+        }
+
+    return merged, {
+        "reader":
+            "three_source_numeric_ensemble_v10_10",
+
+        "questions":
+            debug,
+    }
 
 
 
@@ -4462,31 +4497,13 @@ def scan_jee_mcq_sections(
                 "options"
             ] = options
 
-            if bool(
-                template.get(
-                    "jee_camera_relative_decision",
-                    False,
-                )
-            ):
-                result = (
-                    detect_jee_camera_question_answer(
-                        gray,
-                        coordinates,
-                        temporary_template,
-                    )
-                )
-            else:
-                result = (
-                    detect_question_answer(
-                        gray,
-                        coordinates,
-                        temporary_template,
-                    )
-                )
-
             detected[
                 question_number
-            ] = result
+            ] = detect_question_answer(
+                gray,
+                coordinates,
+                temporary_template,
+            )
 
     return detected
 
@@ -6250,33 +6267,86 @@ def process_omr(
                 )
             )
 
-            # Start from the better v10.6a camera path exactly:
-            # same dimensions, same radius=10, same local search=4.
-            # Only the final per-question decision becomes camera-aware.
-            camera_mcq_template = (
-                template.copy()
-            )
-
-            camera_mcq_template["jee_camera_relative_decision"] = True
-
+            # Final camera MCQ path:
+            # 1. keep the proven v10.6a stable reader unchanged
+            # 2. use reference-delta only to resolve its ambiguous outputs
             camera_mcq = (
                 scan_jee_mcq_sections(
                     camera_mcq_image,
-                    camera_mcq_template,
+                    template,
                 )
+            )
+
+            (
+                camera_mcq,
+                camera_mcq_resolver_debug,
+            ) = resolve_jee_camera_mcq_ambiguities(
+                recognition_image,
+                camera_mcq,
+                template,
             )
 
             answers["mcq"] = (
                 camera_mcq
             )
 
-        # JEE numerical recognition below is intentionally untouched.
+            answers[
+                "_camera_mcq_resolver"
+            ] = (
+                camera_mcq_resolver_debug
+            )
+
+        # Keep the already-produced legacy numerical result as an
+        # independent fallback. The current robust reader remains primary.
+        legacy_numerical = dict(
+            answers.get(
+                "numerical",
+                {},
+            )
+        )
+
         robust_numerical, robust_numeric_debug = (
             scan_jee_numerical_sections_robust(
                 recognition_image,
                 template,
             )
         )
+
+        if camera_capture:
+            # Second robust pass on the unmodified canonical image.
+            # This preserves raw pen ink that can occasionally be weakened
+            # by document-mode normalization. Geometry is identical.
+            (
+                raw_robust_numerical,
+                raw_robust_numeric_debug,
+            ) = (
+                scan_jee_numerical_sections_robust(
+                    corrected,
+                    template,
+                )
+            )
+
+            (
+                robust_numerical,
+                numeric_ensemble_debug,
+            ) = (
+                merge_jee_camera_numerical_records(
+                    robust_numerical,
+                    legacy_numerical,
+                    raw_robust_numerical,
+                )
+            )
+
+            robust_numeric_debug = {
+                "primary":
+                    robust_numeric_debug,
+
+                "raw_corrected":
+                    raw_robust_numeric_debug,
+
+                "ensemble":
+                    numeric_ensemble_debug,
+            }
 
         answers["numerical"] = (
             robust_numerical
