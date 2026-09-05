@@ -46,7 +46,17 @@ async function fetchAndRenderDashboard() {
     if (examDashboardFilter.value !== "all") params.set("exam", examDashboardFilter.value);
 
     try {
-        const response = await fetch(`/api/omr-results?${params.toString()}`);
+        params.set("_t", Date.now().toString());
+
+        const response = await fetch(
+            `/api/omr-results?${params.toString()}`,
+            {
+                cache: "no-store",
+                headers: {
+                    "Cache-Control": "no-cache",
+                },
+            }
+        );
         if (!response.ok) {
             throw new Error(`Server returned HTTP ${response.status}`);
         }
@@ -93,7 +103,7 @@ async function fetchAndRenderDashboard() {
                 <td>${formatDate(row.exam_date || row.date)}</td>
                 <td>${escapeHtml(row.session || "-")}</td>
                 <td>
-                    <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.scan_id || row.id)}">
+                    <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.id || row.scan_id)}">
                         View Result
                     </button>
                 </td>

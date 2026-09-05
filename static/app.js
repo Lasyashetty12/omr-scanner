@@ -2905,8 +2905,8 @@ async function scanBatchOMRs() {
             const lastResult = successful[successful.length - 1].result;
 
             latestResultId = (
-                lastResult?.scan_id
-                || lastResult?.id
+                lastResult?.id
+                || lastResult?.scan_id
                 || null
             );
 
@@ -3062,7 +3062,7 @@ async function scanOMR() {
 
         // Prefer the durable database ID. The scan UUID remains a fallback for
         // local development and deployments without a configured database.
-        latestResultId = data?.scan_id || data?.id || null;
+        latestResultId = data?.id || data?.scan_id || null;
 
         // Serverless local files may not survive the next request. Keep the
         // just-created result available to the individual-result page in this

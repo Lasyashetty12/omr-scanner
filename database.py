@@ -29,6 +29,8 @@ def _load_local_env():
 
 _load_local_env()
 
+_LAST_DB_ERROR = None
+
 
 def get_supabase_config():
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -42,9 +44,14 @@ def is_db_configured():
 
 
 def _supabase_request(endpoint, method="GET", data=None, query_params=None):
+    global _LAST_DB_ERROR
+
     url, key = get_supabase_config()
     if not url or not key:
-        raise ValueError("Supabase database environment variables are missing.")
+        _LAST_DB_ERROR = (
+            "Supabase database environment variables are missing."
+        )
+        raise ValueError(_LAST_DB_ERROR)
 
     full_url = f"{url}/rest/v1/{endpoint}"
     if query_params:
@@ -61,11 +68,59 @@ def _supabase_request(endpoint, method="GET", data=None, query_params=None):
     if data is not None:
         body_bytes = json.dumps(data).encode("utf-8")
 
-    with urllib.request.urlopen(req, data=body_bytes) as response:
-        resp_text = response.read().decode("utf-8")
-        if resp_text:
-            return json.loads(resp_text)
-        return None
+    try:
+        with urllib.request.urlopen(req, data=body_bytes) as response:
+            resp_text = response.read().decode("utf-8")
+            _LAST_DB_ERROR = None
+
+            if resp_text:
+                return json.loads(resp_text)
+
+            return None
+
+    except Exception as error:
+        _LAST_DB_ERROR = str(error)
+        raise
+
+
+
+def get_database_diagnostics():
+    """
+    Verify that Supabase credentials exist and the omr_results table is
+    reachable. Never returns the URL or API key.
+    """
+    configured = is_db_configured()
+
+    if not configured:
+        return {
+            "configured": False,
+            "reachable": False,
+            "last_error":
+                "Supabase environment variables are missing.",
+        }
+
+    try:
+        _supabase_request(
+            "omr_results",
+            method="GET",
+            query_params={
+                "select": "id",
+                "limit": "1",
+            },
+        )
+
+        return {
+            "configured": True,
+            "reachable": True,
+            "last_error": _LAST_DB_ERROR,
+        }
+
+    except Exception as error:
+        return {
+            "configured": True,
+            "reachable": False,
+            "last_error": str(error),
+        }
 
 
 
@@ -122,7 +177,49 @@ def _get_or_create_student_by_roll(student_payload):
     existing = _find_student_by_roll_number(roll_number)
 
     if existing:
-        return existing.get("id")
+        existing_id = existing.get("id")
+
+        if existing_id is not None:
+            # _update_existing_student_v10_16
+            # Refresh selected metadata for the same stable roll-number row.
+            update_payload = {
+                "name":
+                    student_payload.get("name")
+                    or existing.get("name")
+                    or "Student Candidate",
+
+                "class_name":
+                    str(
+                        student_payload.get("class_name")
+                        or existing.get("class_name")
+                        or ""
+                    ),
+
+                "section":
+                    str(
+                        student_payload.get("section")
+                        or existing.get("section")
+                        or ""
+                    ),
+
+                "batch":
+                    str(
+                        student_payload.get("batch")
+                        or existing.get("batch")
+                        or ""
+                    ),
+            }
+
+            _supabase_request(
+                "students",
+                method="PATCH",
+                data=update_payload,
+                query_params={
+                    "id": f"eq.{existing_id}",
+                },
+            )
+
+        return existing_id
 
     created = _supabase_request(
         "students",

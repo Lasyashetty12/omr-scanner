@@ -36,6 +36,62 @@ const imageLightbox = document.getElementById("imageLightbox");
 const lightboxImg = document.getElementById("lightboxImg");
 const lightboxClose = document.getElementById("lightboxClose");
 
+// Vercel can route the result-page request to another instance immediately
+// after /scan. Retry the durable Supabase lookup before showing "not found".
+const RESULT_FETCH_DELAYS_MS = [
+    0,
+    250,
+    500,
+    900,
+    1500,
+    2500,
+];
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchResultWithRetry(resultId) {
+    let lastError = null;
+
+    for (
+        let attempt = 0;
+        attempt < RESULT_FETCH_DELAYS_MS.length;
+        attempt += 1
+    ) {
+        const delay = RESULT_FETCH_DELAYS_MS[attempt];
+
+        if (delay > 0) {
+            await sleep(delay);
+        }
+
+        try {
+            const response = await fetch(
+                `/api/omr-results/${encodeURIComponent(resultId)}?_t=${Date.now()}`,
+                {
+                    cache: "no-store",
+                    headers: {
+                        "Cache-Control": "no-cache",
+                    },
+                }
+            );
+
+            if (response.ok) {
+                return await response.json();
+            }
+
+            lastError = new Error(
+                `Result lookup returned HTTP ${response.status}`
+            );
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError || new Error("Result not found.");
+}
+
+
 function showError(msg) {
     if (!errorBox) return;
     errorBox.textContent = msg;
@@ -105,10 +161,10 @@ function displayResultData(data) {
         resClassSection.textContent = `${cls} - Section ${sec}`;
     }
     if (resExamDate) {
-        const rawDt = examInfoObj.exam_date || result.date;
+        const rawDt = examInfoObj.exam_date || result.exam_date || result.date;
         resExamDate.textContent = rawDt ? new Date(rawDt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today";
     }
-    if (resSession) resSession.textContent = examInfoObj.session || "Morning";
+    if (resSession) resSession.textContent = examInfoObj.session || result.session || "Morning";
 
     if (resultExam) resultExam.textContent = (result.exam || result.exam_name || "-").toUpperCase();
     if (resultStream) resultStream.textContent = (result.stream || "PCMB").toUpperCase();
@@ -176,11 +232,7 @@ async function loadResult() {
     }
 
     try {
-        const resp = await fetch(`/api/omr-results/${encodeURIComponent(resultId)}`);
-        if (!resp.ok) {
-            throw new Error("Result not found.");
-        }
-        const data = await resp.json();
+        const data = await fetchResultWithRetry(resultId);
         try {
             localStorage.setItem(`omr-result:${resultId}`, JSON.stringify(data));
         } catch (storageError) {

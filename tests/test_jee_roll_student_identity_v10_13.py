@@ -117,9 +117,35 @@ def test_same_roll_reuses_existing_student(monkeypatch):
         )
 
         if endpoint == "students" and method == "GET":
-            return [{"id": 42, "roll_number": "2034167"}]
+            return [
+                {
+                    "id": 42,
+                    "roll_number": "2034167",
+                    "name": "Student Candidate",
+                    "class_name": "11",
+                    "section": "B",
+                    "batch": "2025",
+                }
+            ]
 
-        raise AssertionError("Existing student must be reused.")
+        # v10.16b may refresh class/section/batch on the same student row.
+        # That is still reuse, not duplicate creation.
+        if endpoint == "students" and method == "PATCH":
+            assert query_params == {
+                "id": "eq.42"
+            }
+            assert data is not None
+            return [
+                {
+                    "id": 42,
+                    "roll_number": "2034167",
+                    **data,
+                }
+            ]
+
+        raise AssertionError(
+            f"Unexpected request: {endpoint} {method}"
+        )
 
     monkeypatch.setattr(
         database,
@@ -138,9 +164,14 @@ def test_same_roll_reuses_existing_student(monkeypatch):
     )
 
     assert student_id == 42
-    assert len(calls) == 1
-    assert calls[0][3]["roll_number"] == "eq.2034167"
 
+    # Same roll must never POST a duplicate student.
+    assert not any(
+        endpoint == "students"
+        and method == "POST"
+        for endpoint, method, _data, _query
+        in calls
+    )
 
 def test_new_roll_creates_student_once(monkeypatch):
     methods = []

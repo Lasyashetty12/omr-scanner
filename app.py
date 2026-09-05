@@ -40,6 +40,7 @@ from database import (
     get_omr_results_from_db,
     get_omr_result_by_id_from_db,
     get_omr_result_by_scan_id_from_db,
+    get_database_diagnostics,
     is_db_configured,
 )
 
@@ -298,6 +299,24 @@ def health():
 
 
 # ============================================================
+# STORAGE STATUS - SAFE PRODUCTION DIAGNOSTIC
+# ============================================================
+
+@app.get("/api/storage-status")
+def storage_status():
+    db_status = get_database_diagnostics()
+
+    return {
+        "supabase": db_status,
+        "cloudinary": {
+            "configured": bool(
+                cloudinary_enabled()
+            ),
+        },
+    }
+
+
+# ============================================================
 # SCAN OMR
 # ============================================================
 
@@ -368,7 +387,7 @@ async def scan_omr(
 
     if exam == "jee":
         if (
-            class_name not in {"11", "12"}
+            class_name not in {"11", "12", "LT"}
             or section not in {"A", "B", "C"}
             or session not in {"Morning", "Afternoon"}
             or not exam_date
@@ -1357,8 +1376,15 @@ async def scan_omr(
     )
     if db_id:
         result["id"] = db_id
+        result["database_saved"] = True
+        result["database_result_id"] = db_id
     else:
         result["id"] = scan_id
+        result["database_saved"] = False
+        result["database_warning"] = (
+            "Evaluation completed, but the result was not persisted "
+            "to Supabase. Check /api/storage-status."
+        )
 
     return result
 
