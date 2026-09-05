@@ -79,6 +79,31 @@ def ensure_ml_model_available():
         )
 
 
+def merge_identity_fallback(primary, fallback):
+    """Fill unread identity fields from a second canonical image pass."""
+    merged = dict(primary or {})
+    fallback = fallback or {}
+    recovered = []
+
+    for field in ("roll_number", "class", "exam"):
+        if merged.get(field) or not fallback.get(field):
+            continue
+
+        merged[field] = fallback[field]
+        details_key = f"{field}_details"
+
+        if fallback.get(details_key) is not None:
+            merged[details_key] = fallback[details_key]
+
+        recovered.append(field)
+
+    if recovered:
+        merged["fallback_source"] = "corrected_image"
+        merged["fallback_recovered"] = recovered
+
+    return merged
+
+
 # ============================================================
 # TEMPLATE
 # ============================================================
@@ -6845,6 +6870,22 @@ def process_omr(
             recognition_image,
             template,
         )
+
+        if (
+            template_exam_name in ("NEET", "KCET")
+            and any(
+                not (identity or {}).get(field)
+                for field in ("roll_number", "class", "exam")
+            )
+        ):
+            corrected_identity = detect_identity_fields(
+                corrected,
+                template,
+            )
+            identity = merge_identity_fallback(
+                identity,
+                corrected_identity,
+            )
 
         if (
             template_exam_name == "JEE"

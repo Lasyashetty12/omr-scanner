@@ -635,18 +635,30 @@ def _detect_choice_row(
     )
 
     actual_x = None
+    actual_y = None
 
-    if len(circles) >= len(labels):
+    row_circles = [
+        point
+        for point in circles
+        if abs(point[1] - target_y) <= margin
+    ]
+
+    if len(row_circles) >= len(labels):
         actual_x = _cluster_1d(
             [
                 point[0]
-                for point in circles
-                if abs(point[1] - target_y) <= margin
+                for point in row_circles
             ],
             len(labels),
         )
 
-    calibrated = (
+        actual_y = float(
+            np.median(
+                [point[1] for point in row_circles]
+            )
+        )
+
+    x_calibrated = (
         actual_x is not None
         and max(
             abs(a - b)
@@ -654,8 +666,19 @@ def _detect_choice_row(
         ) <= max_delta
     )
 
-    if not calibrated:
+    y_calibrated = (
+        actual_y is not None
+        and abs(actual_y - target_y) <= max_delta
+    )
+
+    if not x_calibrated:
         actual_x = sorted(expected_x)
+
+    sampling_y = (
+        actual_y
+        if y_calibrated
+        else target_y
+    )
 
     # Preserve left-to-right label ordering from the template.
     sorted_pairs = sorted(
@@ -674,7 +697,7 @@ def _detect_choice_row(
         label: _core_fill_ratio(
             gray,
             actual_x[index],
-            target_y,
+            sampling_y,
             radius=core_radius,
             dark_threshold=dark_threshold,
         )
@@ -700,7 +723,10 @@ def _detect_choice_row(
             key: round(float(score), 4)
             for key, score in scores.items()
         },
-        "grid_calibrated": bool(calibrated),
+        "grid_calibrated": bool(x_calibrated and y_calibrated),
+        "x_calibrated": bool(x_calibrated),
+        "y_calibrated": bool(y_calibrated),
+        "sampling_y": round(float(sampling_y), 2),
         "circle_count": len(circles),
     }
 
