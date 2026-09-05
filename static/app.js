@@ -181,6 +181,31 @@ const kcetStreamSection =
         "kcetStreamSection"
     );
 
+const jeeMetadataSection =
+    document.getElementById(
+        "jeeMetadataSection"
+    );
+
+const jeeClass =
+    document.getElementById(
+        "jeeClass"
+    );
+
+const jeeSection =
+    document.getElementById(
+        "jeeSection"
+    );
+
+const jeeExamDate =
+    document.getElementById(
+        "jeeExamDate"
+    );
+
+const jeeSession =
+    document.getElementById(
+        "jeeSession"
+    );
+
 const streamPcmbBtn =
     document.getElementById(
         "streamPcmbBtn"
@@ -2784,6 +2809,19 @@ async function scanBatchOMRs() {
     hideResult();
     hideSuccessState();
 
+    const batchExam = (
+        examSelect?.value
+        || ""
+    ).trim();
+
+    if (
+        !validateJeeScanMetadata(
+            batchExam
+        )
+    ) {
+        return true;
+    }
+
     const files = batchUploadFiles.slice(
         0,
         MAX_BATCH_OMR_FILES
@@ -2817,6 +2855,11 @@ async function scanBatchOMRs() {
     formData.append(
         "stream",
         selectedStream
+    );
+
+    appendJeeScanMetadata(
+        formData,
+        batchExam
     );
 
     try {
@@ -2928,6 +2971,14 @@ async function scanOMR() {
         return;
     }
 
+    if (
+        !validateJeeScanMetadata(
+            exam
+        )
+    ) {
+        return;
+    }
+
 
     if (
         !capturedBlob
@@ -2970,7 +3021,12 @@ async function scanOMR() {
 
         formData.append(
             "stream",
-            exam === "kcet" ? selectedStream : "pcmb"
+            exam === "kcet" ? selectedStream : "pcm"
+        );
+
+        appendJeeScanMetadata(
+            formData,
+            exam
         );
 
         formData.append(
@@ -3348,8 +3404,19 @@ if (streamPcmBtn) {
     });
 }
 
+function localTodayIsoDate() {
+    const now = new Date();
+    now.setMinutes(
+        now.getMinutes()
+        - now.getTimezoneOffset()
+    );
+    return now.toISOString().slice(0, 10);
+}
+
+
 function updateExamStreamVisibility() {
     const selected = examSelect?.value?.toLowerCase()?.trim();
+
     if (kcetStreamSection) {
         if (selected === "kcet") {
             kcetStreamSection.classList.remove("hidden");
@@ -3357,11 +3424,118 @@ function updateExamStreamVisibility() {
             kcetStreamSection.classList.add("hidden");
         }
     }
+
+    if (jeeMetadataSection) {
+        if (selected === "jee") {
+            jeeMetadataSection.classList.remove("hidden");
+
+            if (
+                jeeExamDate
+                && !jeeExamDate.value
+            ) {
+                jeeExamDate.value = localTodayIsoDate();
+            }
+        } else {
+            jeeMetadataSection.classList.add("hidden");
+        }
+    }
+}
+
+
+function getJeeScanMetadata(examValue) {
+    const exam = String(
+        examValue || ""
+    ).trim().toLowerCase();
+
+    if (exam !== "jee") {
+        return {
+            valid: true,
+            className: "",
+            section: "",
+            examDate: "",
+            session: "",
+        };
+    }
+
+    const className = (jeeClass?.value || "").trim();
+    const section = (jeeSection?.value || "").trim();
+    const examDate = (jeeExamDate?.value || "").trim();
+    const session = (jeeSession?.value || "").trim();
+
+    return {
+        valid: Boolean(
+            className
+            && section
+            && examDate
+            && session
+        ),
+        className,
+        section,
+        examDate,
+        session,
+    };
+}
+
+
+function validateJeeScanMetadata(examValue) {
+    const metadata = getJeeScanMetadata(
+        examValue
+    );
+
+    if (!metadata.valid) {
+        showError(
+            "For JEE, select Class, Section, Exam Date and Session before scanning."
+        );
+        return null;
+    }
+
+    return metadata;
+}
+
+
+function appendJeeScanMetadata(
+    formData,
+    examValue
+) {
+    const metadata = getJeeScanMetadata(
+        examValue
+    );
+
+    if (
+        String(
+            examValue || ""
+        ).trim().toLowerCase()
+        !== "jee"
+    ) {
+        return;
+    }
+
+    formData.append(
+        "class_name",
+        metadata.className
+    );
+
+    formData.append(
+        "section",
+        metadata.section
+    );
+
+    formData.append(
+        "exam_date",
+        metadata.examDate
+    );
+
+    formData.append(
+        "session",
+        metadata.session
+    );
 }
 
 if (examSelect) {
     examSelect.addEventListener("change", updateExamStreamVisibility);
 }
+
+updateExamStreamVisibility();
 
 /* LIGHTBOX FULLSCREEN ZOOM */
 const imageLightbox = document.getElementById("imageLightbox");

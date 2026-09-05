@@ -34,7 +34,7 @@ function openIndividualResult(resultId) {
 async function fetchAndRenderDashboard() {
     dashboardTableBody.innerHTML = `
         <tr>
-            <td colspan="12" class="dashboard-message-cell">
+            <td colspan="13" class="dashboard-message-cell">
                 ⚡ Loading evaluated student records from database...
             </td>
         </tr>
@@ -73,7 +73,7 @@ async function fetchAndRenderDashboard() {
 
         if (!results.length) {
             dashboardTableBody.innerHTML = `
-                <tr><td colspan="12" class="dashboard-message-cell">No evaluated OMR results found.</td></tr>
+                <tr><td colspan="13" class="dashboard-message-cell">No evaluated OMR results found.</td></tr>
             `;
             return;
         }
@@ -90,7 +90,8 @@ async function fetchAndRenderDashboard() {
                 <td>${escapeHtml(row.correct ?? 0)}</td>
                 <td>${escapeHtml(row.wrong ?? 0)}</td>
                 <td>${escapeHtml(row.blank ?? 0)}</td>
-                <td>${formatDate(row.date)}</td>
+                <td>${formatDate(row.exam_date || row.date)}</td>
+                <td>${escapeHtml(row.session || "-")}</td>
                 <td>
                     <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.scan_id || row.id)}">
                         View Result
@@ -109,7 +110,7 @@ async function fetchAndRenderDashboard() {
         dashboardSummary.innerHTML = "";
         dashboardTableBody.innerHTML = `
             <tr>
-                <td colspan="12" class="dashboard-message-cell dashboard-error-cell">
+                <td colspan="13" class="dashboard-message-cell dashboard-error-cell">
                     Unable to load student results: ${escapeHtml(error.message || "API failure")}
                 </td>
             </tr>

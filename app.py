@@ -3,6 +3,7 @@
 import json
 import os
 import uuid
+from datetime import datetime
 from typing import List
 
 import cv2
@@ -309,6 +310,14 @@ async def scan_omr(
 
     stream: str = Form("pcmb"),
 
+    class_name: str = Form(""),
+
+    section: str = Form(""),
+
+    exam_date: str = Form(""),
+
+    session: str = Form(""),
+
 ):
 
     # ========================================================
@@ -336,6 +345,55 @@ async def scan_omr(
                 "NEET, KCET or JEE."
             ),
         )
+
+    class_name = str(
+        class_name
+        or ""
+    ).strip()
+
+    section = str(
+        section
+        or ""
+    ).strip().upper()
+
+    exam_date = str(
+        exam_date
+        or ""
+    ).strip()
+
+    session = str(
+        session
+        or ""
+    ).strip()
+
+    if exam == "jee":
+        if (
+            class_name not in {"11", "12"}
+            or section not in {"A", "B", "C"}
+            or session not in {"Morning", "Afternoon"}
+            or not exam_date
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "JEE scan requires Class, Section, "
+                    "Exam Date and Session."
+                ),
+            )
+
+        try:
+            datetime.strptime(
+                exam_date,
+                "%Y-%m-%d",
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Exam Date must be a valid date "
+                    "in YYYY-MM-DD format."
+                ),
+            )
 
 
     # ========================================================
@@ -561,6 +619,27 @@ async def scan_omr(
                 "Printed exam bubble does not match "
                 "the exam selected in the scanner."
             )
+
+    if exam == "jee":
+        result["class"] = class_name
+        result["section"] = section
+        result["exam_date"] = exam_date
+        result["session"] = session
+        result["stream"] = "PCM"
+
+        result["student"] = {
+            "name": "Student Candidate",
+            "roll_number":
+                result.get("roll_number"),
+            "class": class_name,
+            "section": section,
+        }
+
+        result["exam_info"] = {
+            "exam_type": "JEE",
+            "exam_date": exam_date,
+            "session": session,
+        }
 
 
     # ========================================================
@@ -1146,6 +1225,17 @@ async def scan_omr(
                     "series": series,
                     "paper_code": series,
                     "series_details": series_data,
+                    "stream": "PCM",
+                    "max_score": 300,
+                    "marking_scheme": {
+                        "name": "JEE Main 2026 Paper 1",
+                        "mcq_correct": 4,
+                        "mcq_wrong": -1,
+                        "mcq_blank": 0,
+                        "numerical_correct": 4,
+                        "numerical_wrong": -1,
+                        "numerical_blank": 0,
+                    },
                     "score": score_data.get("score"),
                     "correct": score_data.get("correct"),
                     "wrong": score_data.get("wrong"),
@@ -1251,7 +1341,20 @@ async def scan_omr(
     # SAVE TO DATABASE
     # ========================================================
 
-    db_id = save_omr_result_to_db(result)
+    db_student_info = None
+
+    if exam == "jee":
+        db_student_info = {
+            "name": "Student Candidate",
+            "class_name": class_name,
+            "section": section,
+            "batch": exam_date[:4],
+        }
+
+    db_id = save_omr_result_to_db(
+        result,
+        student_info=db_student_info,
+    )
     if db_id:
         result["id"] = db_id
     else:
@@ -1485,6 +1588,10 @@ async def scan_omr_batch(
     images: List[UploadFile] = File(...),
     exam: str = Form(...),
     stream: str = Form("pcmb"),
+    class_name: str = Form(""),
+    section: str = Form(""),
+    exam_date: str = Form(""),
+    session: str = Form(""),
 ):
     if not images:
         raise HTTPException(
@@ -1510,6 +1617,10 @@ async def scan_omr_batch(
                 image=image,
                 exam=exam,
                 stream=stream,
+                class_name=class_name,
+                section=section,
+                exam_date=exam_date,
+                session=session,
             )
 
             results.append(

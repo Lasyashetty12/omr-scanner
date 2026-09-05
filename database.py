@@ -216,12 +216,22 @@ def save_omr_result_to_db(result_data, student_info=None):
         # Exam info
         exam_type = (result_data.get("exam") or "NEET").upper()
         paper_code = str(result_data.get("paper_code") or result_data.get("series") or "A1")
+        exam_session = str(
+            result_data.get("session")
+            or "Morning"
+        )
+
+        exam_date = str(
+            result_data.get("exam_date")
+            or datetime.utcnow().strftime("%Y-%m-%d")
+        )
+
         exam_payload = {
             "exam_type": exam_type,
             "paper_code": paper_code,
             "paper_series": paper_code,
-            "session": "Morning",
-            "exam_date": datetime.utcnow().strftime("%Y-%m-%d")
+            "session": exam_session,
+            "exam_date": exam_date,
         }
         exams_resp = _supabase_request("exams", method="POST", data=exam_payload)
         exam_id = exams_resp[0]["id"] if exams_resp else None
@@ -319,11 +329,44 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
             s_data = students_map.get(r.get("student_id")) or {}
             e_data = exams_map.get(r.get("exam_id")) or {}
 
-            student_name = s_data.get("name") or "Student Candidate"
-            roll_number = s_data.get("roll_number") or f"ROLL-{r['id']}"
-            class_name = s_data.get("class_name") or "12"
-            section = s_data.get("section") or "A"
-            exam_type = (e_data.get("exam_type") or "NEET").upper()
+            raw_data = {}
+            if r.get("raw_result_json"):
+                try:
+                    raw_data = json.loads(
+                        r["raw_result_json"]
+                    )
+                except Exception:
+                    raw_data = {}
+
+            student_name = (
+                raw_data.get("student_name")
+                or s_data.get("name")
+                or "Student Candidate"
+            )
+
+            roll_number = (
+                raw_data.get("roll_number")
+                or s_data.get("roll_number")
+                or f"ROLL-{r['id']}"
+            )
+
+            class_name = str(
+                raw_data.get("class")
+                or s_data.get("class_name")
+                or "12"
+            )
+
+            section = str(
+                raw_data.get("section")
+                or s_data.get("section")
+                or "A"
+            )
+
+            exam_type = (
+                e_data.get("exam_type")
+                or raw_data.get("exam")
+                or "NEET"
+            ).upper()
 
             # Apply filters if provided
             if class_filter and class_filter.lower() != "all" and class_name.lower() != class_filter.lower():
@@ -339,13 +382,23 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
             # Keep the scan UUID available to the frontend.  It is the stable
             # public result key and can be resolved through the scans table even
             # when serverless local files are not on the same Vercel instance.
-            scan_id = None
-            if r.get("raw_result_json"):
-                try:
-                    raw_data = json.loads(r["raw_result_json"])
-                    scan_id = raw_data.get("scan_id")
-                except Exception:
-                    scan_id = None
+            scan_id = (
+                raw_data.get("scan_id")
+                if raw_data
+                else None
+            )
+
+            selected_exam_date = (
+                raw_data.get("exam_date")
+                or e_data.get("exam_date")
+                or created_at[:10]
+            )
+
+            selected_session = (
+                raw_data.get("session")
+                or e_data.get("session")
+                or "Morning"
+            )
 
             results.append({
                 "id": r["id"],
@@ -365,7 +418,10 @@ def get_omr_results_from_db(class_filter=None, section_filter=None, exam_filter=
                 "uncertain": r.get("uncertain", 0),
                 "total_questions": r.get("total_questions", 180),
                 "stream": r.get("stream", "PCMB"),
-                "date": created_at
+                "exam_date": selected_exam_date,
+                "session": selected_session,
+                "date": selected_exam_date,
+                "created_at": created_at,
             })
 
         return results
@@ -467,16 +523,30 @@ def get_omr_result_by_id_from_db(result_id):
             "student": {
                 "name": s_data.get("name") or "Student Candidate",
                 "roll_number": s_data.get("roll_number") or f"ROLL-{r['id']}",
-                "class": s_data.get("class_name") or "12",
-                "section": s_data.get("section") or "A",
+                "class":
+                    raw_data.get("class")
+                    or s_data.get("class_name")
+                    or "12",
+
+                "section":
+                    raw_data.get("section")
+                    or s_data.get("section")
+                    or "A",
                 "batch": s_data.get("batch") or "2026"
             },
             "exam_info": {
                 "exam_type": (e_data.get("exam_type") or "NEET").upper(),
                 "paper_code": e_data.get("paper_code") or "A1",
                 "paper_series": e_data.get("paper_series") or "A1",
-                "exam_date": e_data.get("exam_date") or r.get("created_at", "")[:10],
-                "session": e_data.get("session") or "Morning"
+                "exam_date":
+                    raw_data.get("exam_date")
+                    or e_data.get("exam_date")
+                    or r.get("created_at", "")[:10],
+
+                "session":
+                    raw_data.get("session")
+                    or e_data.get("session")
+                    or "Morning"
             },
             "question_results": q_dict if q_dict else raw_data.get("question_results", {}),
             "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",

@@ -300,7 +300,7 @@ def calculate_jee_numerical_score(
     detected_answers,
     answer_key,
     correct_marks=4,
-    wrong_marks=0,
+    wrong_marks=-1,
     blank_marks=0,
 ):
     """
@@ -528,7 +528,7 @@ def calculate_jee_score(
         "mcq_multiple": -1,
 
         "numerical_correct": 4,
-        "numerical_wrong": 0,
+        "numerical_wrong": -1,
         "numerical_blank": 0
     }
     """
@@ -600,7 +600,7 @@ def calculate_jee_score(
             wrong_marks=
                 marking.get(
                     "numerical_wrong",
-                    0,
+                    -1,
                 ),
 
             blank_marks=

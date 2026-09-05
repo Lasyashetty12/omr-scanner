@@ -9,7 +9,7 @@
     "mcq_blank": 0,
     "mcq_multiple": -1,
     "numerical_correct": 4,
-    "numerical_wrong": 0,
+    "numerical_wrong": -1,
     "numerical_blank": 0
   },
   "answers": {
