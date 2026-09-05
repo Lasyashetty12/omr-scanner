@@ -68,6 +68,75 @@ def _supabase_request(endpoint, method="GET", data=None, query_params=None):
         return None
 
 
+
+def _clean_roll_number(value):
+    text = str(value or "").strip()
+    return text or None
+
+
+def _resolve_canonical_student_roll(result_data, student_info):
+    student_info = student_info or {}
+    identity_data = result_data.get("identity") or {}
+    exam_type = str(result_data.get("exam") or "").strip().upper()
+
+    identity_roll = _clean_roll_number(
+        identity_data.get("roll_number")
+    )
+
+    if exam_type == "JEE":
+        return identity_roll
+
+    return (
+        _clean_roll_number(student_info.get("roll_number"))
+        or identity_roll
+        or _clean_roll_number(result_data.get("roll_number"))
+        or f"ROLL-{result_data.get('scan_id', '000')[:6]}"
+    )
+
+
+def _find_student_by_roll_number(roll_number):
+    if not roll_number:
+        return None
+
+    rows = _supabase_request(
+        "students",
+        method="GET",
+        query_params={
+            "roll_number": f"eq.{roll_number}",
+            "select": "id,name,roll_number,class_name,section,batch",
+            "limit": "1",
+        },
+    ) or []
+
+    return rows[0] if rows else None
+
+
+def _get_or_create_student_by_roll(student_payload):
+    roll_number = _clean_roll_number(
+        student_payload.get("roll_number")
+    )
+
+    if not roll_number:
+        return None
+
+    existing = _find_student_by_roll_number(roll_number)
+
+    if existing:
+        return existing.get("id")
+
+    created = _supabase_request(
+        "students",
+        method="POST",
+        data=student_payload,
+    )
+
+    if not created:
+        return None
+
+    return created[0].get("id")
+
+
+
 def save_omr_result_to_db(result_data, student_info=None):
     """
     Saves an OMR evaluation result to Supabase database tables:
@@ -78,32 +147,71 @@ def save_omr_result_to_db(result_data, student_info=None):
         return None
 
     try:
-        # Default student info if not provided. Prefer identity bubbles read
-        # from the OMR itself before falling back to generated placeholders.
+        # For JEE, the roll-number bubble block printed on the OMR is the
+        # canonical student identity. Never replace a failed JEE roll read
+        # with a generated ROLL-* placeholder.
         if not student_info:
             student_info = {}
 
         identity_data = result_data.get("identity") or {}
 
+        canonical_roll = _resolve_canonical_student_roll(
+            result_data,
+            student_info,
+        )
+
+        exam_type_for_identity = str(
+            result_data.get("exam")
+            or ""
+        ).strip().upper()
+
+        if (
+            exam_type_for_identity == "JEE"
+            and not canonical_roll
+        ):
+            print(
+                "Database save skipped: "
+                "JEE roll number was not detected "
+                "from the OMR roll-number block."
+            )
+            return None
+
         student_payload = {
-            "name": student_info.get("name") or "Student Candidate",
-            "roll_number": (
-                student_info.get("roll_number")
-                or identity_data.get("roll_number")
-                or result_data.get("roll_number")
-                or f"ROLL-{result_data.get('scan_id', '000')[:6]}"
-            ),
-            "class_name": str(
-                student_info.get("class_name")
-                or identity_data.get("class")
-                or result_data.get("class")
-                or "12"
-            ),
-            "section": str(student_info.get("section") or "A"),
-            "batch": str(student_info.get("batch") or "2026")
+            "name":
+                student_info.get("name")
+                or "Student Candidate",
+
+            "roll_number":
+                canonical_roll,
+
+            "class_name":
+                str(
+                    student_info.get("class_name")
+                    or identity_data.get("class")
+                    or result_data.get("class")
+                    or "12"
+                ),
+
+            "section":
+                str(
+                    student_info.get("section")
+                    or "A"
+                ),
+
+            "batch":
+                str(
+                    student_info.get("batch")
+                    or "2026"
+                ),
         }
-        students_resp = _supabase_request("students", method="POST", data=student_payload)
-        student_id = students_resp[0]["id"] if students_resp else None
+
+        # Reuse one student row for the same roll number.
+        student_id = _get_or_create_student_by_roll(
+            student_payload
+        )
+
+        if student_id is None:
+            return None
 
         # Exam info
         exam_type = (result_data.get("exam") or "NEET").upper()
