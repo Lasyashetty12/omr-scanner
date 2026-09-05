@@ -1059,13 +1059,17 @@ function isReadyForAutoCapture(
     priorDetection
 ) {
     /*
-        CORNER-ONLY AUTOCAPTURE.
+        RESTORED CORNER-ONLY AUTOCAPTURE CONTRACT
 
-        The ONLY automatic-capture condition is:
-        all four Manchester black registration blocks are detected.
+        Automatic capture depends ONLY on detection of all four Manchester
+        black registration blocks.
 
-        No focus, sharpness, movement, tilt, margin, bubble, brightness,
-        page-size, or answer-recognition condition is allowed here.
+        No bubble state, focus score, sharpness, brightness, page margin,
+        page size, movement, tilt, alignment, metadata, or recognition result
+        is allowed to delay automatic capture here.
+
+        detectDocumentCorners() remains responsible for verifying that the
+        four candidates are genuine TL/TR/BR/BL registration blocks.
     */
     void videoWidth;
     void videoHeight;
@@ -1263,10 +1267,10 @@ function findSolidMarkerInZone(
         if (componentWidth > maxSide || componentHeight > maxSide) continue;
 
         const aspect = componentWidth / Math.max(componentHeight, 1);
-        if (aspect < 0.72 || aspect > 1.38) continue;
+        if (aspect < 0.50 || aspect > 1.90) continue;
 
         const fill = area / Math.max(componentWidth * componentHeight, 1);
-        if (fill < 0.82) continue;
+        if (fill < 0.65) continue;
 
         // A filled response bubble is circular: the four corners of its
         // bounding box remain mostly white. A registration mark is a solid
@@ -1297,10 +1301,6 @@ function findSolidMarkerInZone(
             cornerOccupancies.reduce((sum, value) => sum + value, 0)
             / cornerOccupancies.length
         );
-        if (
-            minimumCornerOccupancy < 0.65
-            || averageCornerOccupancy < 0.82
-        ) continue;
         // Perspective and blur can clip one physical square corner, especially
         // lower registration boxes touching the printed border. A round
         // response bubble still has low occupancy across MOST bounding-box
@@ -1684,7 +1684,7 @@ function detectDocumentCorners() {
     );
     const smallestMarkerSide = Math.min(...markerSides);
     const largestMarkerSide = Math.max(...markerSides);
-    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 1.85) {
+    if (largestMarkerSide / Math.max(smallestMarkerSide, 1) > 1.95) {
         return null;
     }
 
@@ -1724,7 +1724,7 @@ function detectDocumentCorners() {
         / markerSides.length
     ) * (videoWidth / analysisWidth);
     const markerToSheetRatio = averageMarkerSide / Math.max(averageSheetWidth, 1);
-    if (markerToSheetRatio < 0.005 || markerToSheetRatio > 0.035) {
+    if (markerToSheetRatio < 0.009 || markerToSheetRatio > 0.038) {
         return null;
     }
 
@@ -1766,54 +1766,45 @@ function monitorCornerBlocks(timestamp) {
         lastCornerCheckAt = timestamp;
 
         const detection = detectDocumentCorners();
+        const videoWidth = camera.videoWidth;
+        const videoHeight = camera.videoHeight;
 
-        const fourCornerBlocksDetected = Boolean(
-            detection
-            && detection.sourcePoints
-            && detection.markerCount === 4
+        const readinessCheck = isReadyForAutoCapture(
+            detection,
+            videoWidth,
+            videoHeight,
+            previousDetection
         );
 
-        /*
-            RESTORED EARLIER AUTOCAPTURE BEHAVIOUR:
+        if (readinessCheck.ready) {
+            stableCornerChecks += 1;
+        } else {
+            stableCornerChecks = 0;
+        }
 
-            detect 4 real black registration blocks
-            -> capture immediately.
-
-            Do not wait for:
-            - sharpness/focus
-            - movement stability
-            - tilt/alignment
-            - margins
-            - bubble state
-            - brightness
-            - recognition result
-        */
-        stableCornerChecks =
-            fourCornerBlocksDetected ? 1 : 0;
+        const markersStable = (
+            readinessCheck.ready
+            && stableCornerChecks >= AUTO_CAPTURE_STABLE_CHECKS
+        );
 
         setCornerDetectionState(
-            fourCornerBlocksDetected,
-            fourCornerBlocksDetected
+            Boolean(markersStable),
+            markersStable
                 ? "Four black corner blocks detected — capturing…"
-                : "Show all four black corner blocks"
+                : readinessCheck.reason
         );
 
         drawDocumentBoundary(
             detection?.displayPoints || null,
-            fourCornerBlocksDetected
+            Boolean(detection)
         );
 
-        if (fourCornerBlocksDetected) {
-            detectedDocumentBounds =
-                detection.sourcePoints;
+        if (markersStable && detection) {
+            detectedDocumentBounds = detection.sourcePoints;
 
             if (!autoCaptureTriggered) {
                 autoCaptureTriggered = true;
                 captureCameraImage(true);
-
-                captureCameraImage(
-                    true
-                );
             }
         } else {
             detectedDocumentBounds = null;
@@ -1822,23 +1813,9 @@ function monitorCornerBlocks(timestamp) {
         previousDetection = detection;
     }
 
-    cornerDetectionFrame =
-        requestAnimationFrame(
-            monitorCornerBlocks
-        );
-}
-
-
-function cropFromDetectedDocument(
-    videoWidth,
-    videoHeight
-) {
-    return {
-        x: 0,
-        y: 0,
-        width: videoWidth,
-        height: videoHeight,
-    };
+    cornerDetectionFrame = requestAnimationFrame(
+        monitorCornerBlocks
+    );
 }
 
 
