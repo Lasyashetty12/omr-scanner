@@ -1,7 +1,6 @@
 # app.py
 
 import json
-import hmac
 import os
 import uuid
 from datetime import datetime
@@ -16,7 +15,6 @@ from fastapi import (
     HTTPException,
     UploadFile,
     Query,
-    Header,
 )
 
 from fastapi.responses import FileResponse
@@ -1725,31 +1723,8 @@ def get_result(
 @app.delete("/api/omr-results/{result_id}")
 def delete_result(
     result_id: str,
-    dashboard_delete_key: str | None = Header(
-        None,
-        alias="X-Dashboard-Delete-Key",
-    ),
 ):
-    """Delete a dashboard result after server-side teacher-key validation."""
-    configured_key = os.environ.get("TEACHER_DASHBOARD_DELETE_KEY", "")
-    if not configured_key:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Result deletion is disabled. Configure "
-                "TEACHER_DASHBOARD_DELETE_KEY on the server."
-            ),
-        )
-
-    if not dashboard_delete_key or not hmac.compare_digest(
-        dashboard_delete_key,
-        configured_key,
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid teacher delete key.",
-        )
-
+    """Delete one dashboard result after the UI confirmation."""
     if not result_id.isdigit():
         raise HTTPException(
             status_code=400,

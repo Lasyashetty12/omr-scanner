@@ -130,12 +130,6 @@ async function fetchAndRenderDashboard() {
                 if (!resultId || resultId === "undefined") return;
                 if (!window.confirm(`Delete the result for ${rollNumber}? This cannot be undone.`)) return;
 
-                let deleteKey = sessionStorage.getItem("teacher-dashboard-delete-key") || "";
-                if (!deleteKey) {
-                    deleteKey = window.prompt("Enter the teacher delete key:") || "";
-                }
-                if (!deleteKey) return;
-
                 button.disabled = true;
                 button.textContent = "Deleting…";
                 try {
@@ -143,17 +137,12 @@ async function fetchAndRenderDashboard() {
                         `/api/omr-results/${encodeURIComponent(resultId)}`,
                         {
                             method: "DELETE",
-                            headers: {"X-Dashboard-Delete-Key": deleteKey},
                         }
                     );
                     const payload = await deleteResponse.json().catch(() => ({}));
                     if (!deleteResponse.ok) {
-                        if (deleteResponse.status === 403) {
-                            sessionStorage.removeItem("teacher-dashboard-delete-key");
-                        }
                         throw new Error(payload.detail || `Server returned HTTP ${deleteResponse.status}`);
                     }
-                    sessionStorage.setItem("teacher-dashboard-delete-key", deleteKey);
                     await fetchAndRenderDashboard();
                 } catch (error) {
                     window.alert(`Could not delete result: ${error.message || "API failure"}`);

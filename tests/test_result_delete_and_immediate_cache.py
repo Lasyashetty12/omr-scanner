@@ -30,8 +30,7 @@ def test_database_delete_removes_children_before_parent(monkeypatch):
     assert calls[-1][:2] == ("exams", "DELETE")
 
 
-def test_delete_api_requires_teacher_key(monkeypatch):
-    monkeypatch.setenv("TEACHER_DASHBOARD_DELETE_KEY", "test-secret")
+def test_delete_api_uses_confirmation_without_teacher_key(monkeypatch):
     monkeypatch.setattr(
         app,
         "delete_omr_result_from_db",
@@ -39,11 +38,7 @@ def test_delete_api_requires_teacher_key(monkeypatch):
     )
     client = TestClient(app.app)
 
-    assert client.delete("/api/omr-results/42").status_code == 403
-    response = client.delete(
-        "/api/omr-results/42",
-        headers={"X-Dashboard-Delete-Key": "test-secret"},
-    )
+    response = client.delete("/api/omr-results/42")
     assert response.status_code == 200
     assert response.json() == {"id": 42, "deleted": True}
 
@@ -58,3 +53,6 @@ def test_result_page_uses_scan_cache_and_dashboard_has_delete_button():
     assert 'sessionStorage.getItem("omr-result:latest")' in result_js
     assert 'class="action-delete-btn"' in dashboard_js
     assert 'method: "DELETE"' in dashboard_js
+    assert "window.confirm" in dashboard_js
+    assert "window.prompt" not in dashboard_js
+    assert "teacher-dashboard-delete-key" not in dashboard_js
