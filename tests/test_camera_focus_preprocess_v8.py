@@ -40,12 +40,15 @@ def test_v8_server_rejects_soft_camera_sheet():
         / "scanner.py"
     ).read_text(encoding="utf-8")
 
-    assert "camera_min_sharpness = 900.0" in source
+    # v10.15 supersedes the old v8 hard >=900 sharpness gate.
+    # Soft camera sheets must continue through Document Mode enhancement.
+    assert "camera_min_sharpness = 900.0" not in source
     assert "camera_document_sharpness" in source
     assert "camera_min_document_sharpness" not in source
     assert "camera_sharpness" in source
-    assert "not sharp enough for reliable bubble detection" in source
-
+    assert "camera_quality_needs_help" in source
+    assert "continue_with_document_mode_enhancement" in source
+    assert "not sharp enough for reliable bubble detection" not in source
 
 def test_v8_soft_preprocessing_extends_to_moderately_soft_images():
     source = (

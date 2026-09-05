@@ -10,10 +10,18 @@ def test_camera_capture_has_strict_server_blur_gate():
     ).read_text(encoding="utf-8")
 
     assert '== "camera_omr.jpg"' in source
-    # v8 intentionally raises the live-camera server blur gate.
-    assert "camera_min_sharpness = 900.0" in source
-    # v8.1 keeps post-warp document sharpness diagnostic only.\n    assert "camera_min_document_sharpness" not in source\n    assert "camera_document_sharpness" in source\n    assert "Camera image is not sharp enough for reliable bubble detection." in source
 
+    # v10.15 replaces the old strict server blur rejection with:
+    # low-quality metrics -> Document Mode enhancement -> recognition.
+    assert "camera_min_sharpness = 900.0" not in source
+    assert "camera_min_document_sharpness" not in source
+    assert "camera_document_sharpness" in source
+    assert "camera_quality_needs_help" in source
+    assert "continue_with_document_mode_enhancement" in source
+    assert (
+        "Camera image is not sharp enough for reliable bubble detection."
+        not in source
+    )
 
 def test_soft_document_mode_preserves_edges_and_sharpens_moderately():
     source = (

@@ -9,13 +9,15 @@ def test_canonical_document_sharpness_is_diagnostic_only():
         / "scanner.py"
     ).read_text(encoding="utf-8")
 
-    assert "camera_min_sharpness = 900.0" in source
+    # Raw and canonical sharpness remain diagnostics, but neither uses
+    # the removed v8 hard >=900 camera rejection.
+    assert "camera_min_sharpness = 900.0" not in source
     assert "camera_document_sharpness" in source
     assert "camera_min_document_sharpness" not in source
     assert "camera_capture" in source
     assert "camera_sharpness" in source
-    assert "< camera_min_sharpness" in source
-
+    assert "camera_quality_needs_help" in source
+    assert "continue_with_document_mode_enhancement" in source
 
 def test_quality_module_keeps_raw_and_canonical_sharpness_separate():
     source = (

@@ -6686,8 +6686,6 @@ def process_omr(
         == "camera_omr.jpg"
     )
 
-    camera_min_sharpness = 900.0
-
     camera_sharpness = float(
         document_quality.get(
             "sharpness",
@@ -6702,20 +6700,92 @@ def process_omr(
         )
     )
 
-    # Only original camera sharpness is a hard gate.
-    # document_sharpness is measured after perspective correction and
-    # canonical resizing, so its Laplacian-variance scale is different.
-    if (
-        camera_capture
-        and camera_sharpness
-        < camera_min_sharpness
-    ):
-        raise ValueError(
-            "Camera image is not sharp enough for reliable bubble detection. "
-            f"Camera sharpness: {camera_sharpness:.2f}. "
-            "Keep all four black corner blocks visible and hold the phone "
-            "steady until autofocus locks, then scan again."
+    camera_brightness = float(
+        document_quality.get(
+            "brightness",
+            0.0,
         )
+    )
+
+    camera_contrast = float(
+        document_quality.get(
+            "contrast",
+            0.0,
+        )
+    )
+
+    # v10.15:
+    # Do not reject a readable camera OMR because one generic camera metric
+    # is below an arbitrary threshold. prepare_omr_document_mode() has
+    # already enhanced illumination, contrast, soft edges, and paper whites.
+    # Keep the metrics as diagnostics and continue with the enhanced image.
+    camera_quality_needs_help = bool(
+        camera_capture
+        and (
+            camera_sharpness < 900.0
+            or camera_brightness < 105.0
+            or camera_brightness > 245.0
+            or camera_contrast < 20.0
+        )
+    )
+
+    if camera_capture:
+        document_quality[
+            "camera_quality_action"
+        ] = (
+            "continue_with_document_mode_enhancement"
+            if camera_quality_needs_help
+            else "ready"
+        )
+
+        document_quality[
+            "camera_enhancement_already_applied"
+        ] = True
+
+        document_quality[
+            "camera_quality_gate_removed_version"
+        ] = "v10_15"
+
+        alignment_debug[
+            "camera_quality_policy"
+        ] = {
+            "action":
+                document_quality[
+                    "camera_quality_action"
+                ],
+
+            "original_sharpness":
+                round(
+                    camera_sharpness,
+                    2,
+                ),
+
+            "document_sharpness":
+                round(
+                    camera_document_sharpness,
+                    2,
+                ),
+
+            "brightness":
+                round(
+                    camera_brightness,
+                    2,
+                ),
+
+            "contrast":
+                round(
+                    camera_contrast,
+                    2,
+                ),
+
+            "hard_sharpness_gate":
+                False,
+
+            "enhancement_profile":
+                document_mode_debug.get(
+                    "profile"
+                ),
+        }
 
     if not document_quality[
         "can_scan"
