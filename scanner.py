@@ -1,5 +1,9 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
+from ml_omr.json_anchor_reader import (
+    scan_answers_json_anchored,
+    recover_identity_choices_ml,
+)
 from omr_preprocess import canonicalize_omr
 from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
@@ -2853,31 +2857,15 @@ def scan_answers(
         )
 
     raw_answers, ml_debug = (
-        scan_answers_ml(
+        scan_answers_json_anchored(
             gray=gray,
-            coordinates=fitted_coordinates,
+            template=template,
+            fitted_coordinates=fitted_coordinates,
             crop_radius=int(
                 template.get(
                     "ml_crop_radius",
                     16,
                 )
-            ),
-            filled_confidence=float(
-                template.get(
-                    "ml_filled_confidence",
-                    0.70,
-                )
-            ),
-            ambiguous_confidence=float(
-                template.get(
-                    "ml_ambiguous_confidence",
-                    0.60,
-                )
-            ),
-            questions_per_column=int(
-                template[
-                    "questions_per_column"
-                ]
             ),
         )
     )
@@ -6886,6 +6874,27 @@ def process_omr(
                 identity,
                 corrected_identity,
             )
+
+        if (
+            template_exam_name in ("NEET", "KCET")
+            and any(
+                not (identity or {}).get(field)
+                for field in ("class", "exam")
+            )
+        ):
+            json_ml_identity = recover_identity_choices_ml(
+                corrected,
+                template,
+            )
+
+            identity = merge_identity_fallback(
+                identity,
+                json_ml_identity,
+            )
+
+            identity[
+                "json_ml_identity_reader"
+            ] = "kcet_neet_identity_json_ml_v10_19"
 
         if (
             template_exam_name == "JEE"

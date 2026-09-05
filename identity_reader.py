@@ -640,14 +640,434 @@ def _detect_roll_number_ml_fallback(
 
 
 
-def _detect_choice_row(
+
+def _choice_cv_mark_metrics(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    config: Dict[str, Any],
+    template: Dict[str, Any],
+) -> Dict[str, float]:
+    """
+    Measure one identity choice bubble using only local CV evidence.
+
+    The JSON coordinate is the anchor.  Thin printed rings should score low,
+    while a genuinely filled bubble should retain a broad solid dark region.
+    All thresholds/radii are configurable from the template JSON.
+    """
+    xi = int(round(float(x)))
+    yi = int(round(float(y)))
+
+    bubble_radius = int(
+        template.get(
+            "bubble_radius",
+            10,
+        )
+    )
+
+    core_radius = int(
+        config.get(
+            "cv_core_radius",
+            max(
+                3,
+                int(round(bubble_radius * 0.45)),
+            ),
+        )
+    )
+
+    disk_radius = int(
+        config.get(
+            "cv_disk_radius",
+            max(
+                core_radius + 2,
+                int(round(bubble_radius * 0.75)),
+            ),
+        )
+    )
+
+    ring_inner = int(
+        config.get(
+            "cv_ring_inner_radius",
+            max(
+                disk_radius + 2,
+                bubble_radius,
+            ),
+        )
+    )
+
+    ring_outer = int(
+        config.get(
+            "cv_ring_outer_radius",
+            ring_inner + 5,
+        )
+    )
+
+    ring_outer = max(
+        ring_outer,
+        ring_inner + 2,
+    )
+
+    height, width = gray.shape[:2]
+
+    x0 = max(
+        0,
+        xi - ring_outer,
+    )
+    x1 = min(
+        width,
+        xi + ring_outer + 1,
+    )
+    y0 = max(
+        0,
+        yi - ring_outer,
+    )
+    y1 = min(
+        height,
+        yi + ring_outer + 1,
+    )
+
+    roi = gray[
+        y0:y1,
+        x0:x1,
+    ]
+
+    if roi.size == 0:
+        return {
+            "combined_score": 0.0,
+            "core_dark_ratio": 0.0,
+            "disk_dark_ratio": 0.0,
+            "solid_dark_ratio": 0.0,
+            "darkness_score": 0.0,
+            "local_paper": 255.0,
+            "dark_threshold": 140.0,
+            "core_mean": 255.0,
+        }
+
+    yy, xx = np.ogrid[
+        y0:y1,
+        x0:x1,
+    ]
+
+    distance_sq = (
+        (xx - xi) ** 2
+        + (yy - yi) ** 2
+    )
+
+    core_mask = (
+        distance_sq
+        <= core_radius ** 2
+    )
+
+    disk_mask = (
+        distance_sq
+        <= disk_radius ** 2
+    )
+
+    surround_mask = (
+        (
+            distance_sq
+            >= ring_inner ** 2
+        )
+        & (
+            distance_sq
+            <= ring_outer ** 2
+        )
+    )
+
+    core_pixels = (
+        roi[
+            core_mask
+        ].astype(
+            np.float32
+        )
+    )
+
+    disk_pixels = (
+        roi[
+            disk_mask
+        ].astype(
+            np.float32
+        )
+    )
+
+    surround_pixels = (
+        roi[
+            surround_mask
+        ].astype(
+            np.float32
+        )
+    )
+
+    if (
+        core_pixels.size == 0
+        or disk_pixels.size == 0
+    ):
+        return {
+            "combined_score": 0.0,
+            "core_dark_ratio": 0.0,
+            "disk_dark_ratio": 0.0,
+            "solid_dark_ratio": 0.0,
+            "darkness_score": 0.0,
+            "local_paper": 255.0,
+            "dark_threshold": 140.0,
+            "core_mean": 255.0,
+        }
+
+    if surround_pixels.size:
+        local_paper = float(
+            np.percentile(
+                surround_pixels,
+                float(
+                    config.get(
+                        "cv_paper_percentile",
+                        75.0,
+                    )
+                ),
+            )
+        )
+    else:
+        local_paper = float(
+            np.percentile(
+                roi,
+                80.0,
+            )
+        )
+
+    dark_offset = float(
+        config.get(
+            "cv_dark_offset",
+            25.0,
+        )
+    )
+
+    dark_threshold = float(
+        np.clip(
+            local_paper
+            - dark_offset,
+            float(
+                config.get(
+                    "cv_min_dark_threshold",
+                    55.0,
+                )
+            ),
+            float(
+                config.get(
+                    "cv_max_dark_threshold",
+                    205.0,
+                )
+            ),
+        )
+    )
+
+    core_dark_ratio = float(
+        np.mean(
+            core_pixels
+            < dark_threshold
+        )
+    )
+
+    disk_dark_ratio = float(
+        np.mean(
+            disk_pixels
+            < dark_threshold
+        )
+    )
+
+    # Morphological opening removes most thin printed-circle strokes.
+    # A filled bubble remains as a broad solid component.
+    dark_binary = (
+        (
+            roi
+            < dark_threshold
+        )
+        .astype(
+            np.uint8
+        )
+        * 255
+    )
+
+    solid_kernel_size = int(
+        config.get(
+            "cv_solid_kernel",
+            3,
+        )
+    )
+
+    solid_kernel_size = max(
+        1,
+        solid_kernel_size,
+    )
+
+    if (
+        solid_kernel_size
+        % 2 == 0
+    ):
+        solid_kernel_size += 1
+
+    if solid_kernel_size > 1:
+        solid_binary = (
+            cv2.morphologyEx(
+                dark_binary,
+                cv2.MORPH_OPEN,
+                cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE,
+                    (
+                        solid_kernel_size,
+                        solid_kernel_size,
+                    ),
+                ),
+                iterations=1,
+            )
+        )
+    else:
+        solid_binary = dark_binary
+
+    solid_pixels = (
+        solid_binary[
+            disk_mask
+        ]
+    )
+
+    solid_dark_ratio = float(
+        np.mean(
+            solid_pixels > 0
+        )
+    )
+
+    core_mean = float(
+        np.mean(
+            core_pixels
+        )
+    )
+
+    darkness_scale = max(
+        1.0,
+        float(
+            config.get(
+                "cv_darkness_scale",
+                105.0,
+            )
+        ),
+    )
+
+    darkness_score = float(
+        np.clip(
+            (
+                local_paper
+                - core_mean
+            )
+            / darkness_scale,
+            0.0,
+            1.0,
+        )
+    )
+
+    solid_weight = float(
+        config.get(
+            "cv_solid_weight",
+            0.45,
+        )
+    )
+
+    core_weight = float(
+        config.get(
+            "cv_core_weight",
+            0.25,
+        )
+    )
+
+    disk_weight = float(
+        config.get(
+            "cv_disk_weight",
+            0.20,
+        )
+    )
+
+    darkness_weight = float(
+        config.get(
+            "cv_darkness_weight",
+            0.10,
+        )
+    )
+
+    weight_sum = max(
+        1e-6,
+        solid_weight
+        + core_weight
+        + disk_weight
+        + darkness_weight,
+    )
+
+    combined_score = (
+        solid_weight
+        * solid_dark_ratio
+        + core_weight
+        * core_dark_ratio
+        + disk_weight
+        * disk_dark_ratio
+        + darkness_weight
+        * darkness_score
+    ) / weight_sum
+
+    return {
+        "combined_score":
+            float(
+                combined_score
+            ),
+
+        "core_dark_ratio":
+            float(
+                core_dark_ratio
+            ),
+
+        "disk_dark_ratio":
+            float(
+                disk_dark_ratio
+            ),
+
+        "solid_dark_ratio":
+            float(
+                solid_dark_ratio
+            ),
+
+        "darkness_score":
+            float(
+                darkness_score
+            ),
+
+        "local_paper":
+            float(
+                local_paper
+            ),
+
+        "dark_threshold":
+            float(
+                dark_threshold
+            ),
+
+        "core_mean":
+            float(
+                core_mean
+            ),
+    }
+
+
+def _detect_choice_row_v10_16_impl(
     gray: np.ndarray,
     config: Dict[str, Any],
     template: Dict[str, Any],
 ) -> Dict[str, Any]:
     choices = config.get("choices", {})
     if not choices:
-        return {"value": None, "scores": {}}
+        return {
+            "value": None,
+            "scores": {},
+            "grid_calibrated": False,
+            "x_calibrated": False,
+            "y_calibrated": False,
+            "sampling_y": None,
+            "circle_count": 0,
+        }
 
     labels = list(choices.keys())
     expected = [choices[label] for label in labels]
@@ -733,6 +1153,7 @@ def _detect_choice_row(
     absolute_scores = {}
     relative_scores = {}
     scores = {}
+
     for index, label in enumerate(labels_by_x):
         absolute_score = _core_fill_ratio(
             gray,
@@ -741,48 +1162,88 @@ def _detect_choice_row(
             radius=core_radius,
             dark_threshold=dark_threshold,
         )
+
         relative_score = _relative_core_fill_ratio(
             gray,
             actual_x[index],
             sampling_y,
             core_radius=core_radius,
-            outer_radius=max(core_radius + 5, bubble_radius + 3),
+            outer_radius=max(
+                core_radius + 5,
+                bubble_radius + 3,
+            ),
         )
+
         absolute_scores[label] = absolute_score
         relative_scores[label] = relative_score
-        scores[label] = max(absolute_score, relative_score)
+        scores[label] = max(
+            absolute_score,
+            relative_score,
+        )
 
-    absolute_ranked = sorted(absolute_scores.values(), reverse=True)
-    relative_ranked = sorted(relative_scores.values(), reverse=True)
+    absolute_ranked = sorted(
+        absolute_scores.values(),
+        reverse=True,
+    )
+
+    relative_ranked = sorted(
+        relative_scores.values(),
+        reverse=True,
+    )
+
     absolute_gap = (
         absolute_ranked[0] - absolute_ranked[1]
         if len(absolute_ranked) > 1
         else absolute_ranked[0]
     )
+
     relative_gap = (
         relative_ranked[0] - relative_ranked[1]
         if len(relative_ranked) > 1
         else relative_ranked[0]
     )
-    dim_page = float(np.percentile(gray, 75.0)) < 170.0
+
+    dim_page = float(
+        np.percentile(
+            gray,
+            75.0,
+        )
+    ) < 170.0
+
     if dim_page or (
         absolute_gap < minimum_gap
         and relative_gap > absolute_gap
     ):
         scores = relative_scores.copy()
 
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
     best_label, best_score = ranked[0]
-    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
-    gap = float(best_score - second_score)
+    second_score = (
+        ranked[1][1]
+        if len(ranked) > 1
+        else 0.0
+    )
+
+    gap = float(
+        best_score - second_score
+    )
 
     value = (
         best_label
-        if best_score >= filled_threshold and gap >= minimum_gap
+        if (
+            best_score >= filled_threshold
+            and gap >= minimum_gap
+        )
         else None
     )
 
     return {
+        "reader": "cv_json_choice_v10_16",
         "value": value,
         "best_score": round(float(best_score), 4),
         "confidence_gap": round(float(gap), 4),
@@ -798,12 +1259,48 @@ def _detect_choice_row(
             key: round(float(score), 4)
             for key, score in relative_scores.items()
         },
-        "grid_calibrated": bool(x_calibrated and y_calibrated),
+        "grid_calibrated": bool(
+            x_calibrated
+            and y_calibrated
+        ),
         "x_calibrated": bool(x_calibrated),
         "y_calibrated": bool(y_calibrated),
-        "sampling_y": round(float(sampling_y), 2),
+        "sampling_y": round(
+            float(sampling_y),
+            2,
+        ),
         "circle_count": len(circles),
     }
+
+
+
+def _detect_choice_row(
+    gray: np.ndarray,
+    config: Dict[str, Any],
+    template: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    v10.16a compatibility wrapper.
+
+    Preserve the existing cv/json recognition result exactly, while
+    guaranteeing decision_method metadata is present for consumers/tests.
+    """
+    result = _detect_choice_row_v10_16_impl(
+        gray,
+        config,
+        template,
+    )
+
+    if not isinstance(result, dict):
+        return result
+
+    if "decision_method" not in result:
+        if result.get("value") is not None:
+            result["decision_method"] = "cv_json_solid_fill"
+        else:
+            result["decision_method"] = "no_confident_fill"
+
+    return result
 
 
 def detect_identity_fields(

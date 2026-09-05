@@ -685,13 +685,35 @@ async def scan_omr(
 
     if exam in {"neet", "kcet", "kcet_neet"}:
         if detected_exam not in {"NEET", "KCET"}:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Could not detect the KCET/NEET exam bubble "
-                    "from the OMR sheet."
-                ),
-            )
+            if exam in {"neet", "kcet"}:
+                detected_exam = exam.upper()
+
+                identity_data[
+                    "exam"
+                ] = detected_exam
+
+                identity_data[
+                    "exam_details"
+                ] = {
+                    "reader":
+                        "selected_exam_fallback_v10_19",
+
+                    "reason":
+                        "printed_exam_bubble_unresolved_after_json_ml",
+                }
+
+                result[
+                    "identity"
+                ] = identity_data
+
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Could not detect the KCET/NEET exam bubble "
+                        "from the OMR sheet."
+                    ),
+                )
 
         if not result.get("roll_number"):
             raise HTTPException(
