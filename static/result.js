@@ -197,22 +197,57 @@ function displayResultData(data) {
 
     renderQuestionTable(result.question_results);
 
-    const bubbleDebugUrl = result.bubble_debug_image_url || data.bubble_debug_image_url;
-    if (bubbleDebugUrl && bubbleDebugPreview) {
-        bubbleDebugPreview.onerror = () => {
+    const bubbleDebugUrl =
+        result.bubble_debug_image_url
+        || data.bubble_debug_image_url
+        || "";
+
+    const bubbleDebugInline =
+        result.bubble_debug_image_data_url
+        || data.bubble_debug_image_data_url
+        || "";
+
+    if (bubbleDebugPreview) {
+        let inlineFallbackUsed = false;
+
+        const hideEvaluatedOmr = () => {
             bubbleDebugPreview.removeAttribute("src");
             if (bubbleAnalysisCard) {
                 bubbleAnalysisCard.hidden = true;
                 bubbleAnalysisCard.classList.add("hidden");
             }
         };
-        bubbleDebugPreview.onload = () => {
+
+        const showEvaluatedOmr = () => {
             if (bubbleAnalysisCard) {
                 bubbleAnalysisCard.hidden = false;
                 bubbleAnalysisCard.classList.remove("hidden");
             }
         };
-        bubbleDebugPreview.src = bubbleDebugUrl + "?t=" + Date.now();
+
+        bubbleDebugPreview.onload = showEvaluatedOmr;
+
+        bubbleDebugPreview.onerror = () => {
+            if (!inlineFallbackUsed && bubbleDebugInline) {
+                inlineFallbackUsed = true;
+                bubbleDebugPreview.src = bubbleDebugInline;
+                return;
+            }
+            hideEvaluatedOmr();
+        };
+
+        if (bubbleDebugUrl) {
+            bubbleDebugPreview.src = (
+                bubbleDebugUrl.startsWith("data:")
+                ? bubbleDebugUrl
+                : bubbleDebugUrl + "?t=" + Date.now()
+            );
+        } else if (bubbleDebugInline) {
+            inlineFallbackUsed = true;
+            bubbleDebugPreview.src = bubbleDebugInline;
+        } else {
+            hideEvaluatedOmr();
+        }
     }
 
     if (resultSection) {

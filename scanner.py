@@ -2856,16 +2856,36 @@ def scan_answers(
             grid_detection_debug,
         )
 
+    # _stable_neet_kcet_mapping_v10_20
+    # Restore the proven answer-grid path used before the JSON-anchor
+    # regression. Identity recovery can still use JSON/ML, but answer
+    # bubbles use the locally fitted/calibrated grid coordinates.
     raw_answers, ml_debug = (
-        scan_answers_json_anchored(
+        scan_answers_ml(
             gray=gray,
-            template=template,
-            fitted_coordinates=fitted_coordinates,
+            coordinates=fitted_coordinates,
             crop_radius=int(
                 template.get(
                     "ml_crop_radius",
                     16,
                 )
+            ),
+            filled_confidence=float(
+                template.get(
+                    "ml_filled_confidence",
+                    0.70,
+                )
+            ),
+            ambiguous_confidence=float(
+                template.get(
+                    "ml_ambiguous_confidence",
+                    0.60,
+                )
+            ),
+            questions_per_column=int(
+                template[
+                    "questions_per_column"
+                ]
             ),
         )
     )

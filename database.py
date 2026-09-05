@@ -656,10 +656,17 @@ def get_omr_result_by_id_from_db(result_id):
 
             "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",
             "corrected_image_url": raw_data.get("corrected_image_url") or f"/uploads/{scan_id}.jpg",
-            # Debug images are optional and may not exist (especially on
-            # ephemeral/serverless storage). Never invent a URL for a file
-            # that was not actually recorded with the result.
-            "bubble_debug_image_url": raw_data.get("bubble_debug_image_url")
+            # Prefer a durable remote URL when available. For deployments
+            # without Cloudinary, v10.20 stores a compact evaluated preview
+            # in raw_result_json for Teacher Dashboard -> View.
+            "bubble_debug_image_url":
+                raw_data.get("bubble_debug_image_url"),
+
+            "bubble_debug_image_data_url":
+                raw_data.get("bubble_debug_image_data_url"),
+
+            "bubble_debug_storage":
+                raw_data.get("bubble_debug_storage"),
         }
 
         return result_obj

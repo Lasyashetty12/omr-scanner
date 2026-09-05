@@ -105,10 +105,15 @@ def test_json_answer_is_primary_and_fitted_only_rescues_blank(monkeypatch):
     assert debug["_json_anchor"]["template_is_geometry_authority"] is True
 
 
-def test_scanner_uses_json_ml_reader():
+def test_scanner_uses_stable_calibrated_ml_answer_reader():
     source = (ROOT / "scanner.py").read_text(encoding="utf-8")
 
-    assert "scan_answers_json_anchored(" in source
+    # v10.20 restores the pre-regression answer-grid reader.
+    assert "_stable_neet_kcet_mapping_v10_20" in source
+    assert "scan_answers_ml(" in source
+    assert "coordinates=fitted_coordinates" in source
+
+    # Keep newer JSON/ML recovery for identity choices only.
     assert "recover_identity_choices_ml(" in source
 
 

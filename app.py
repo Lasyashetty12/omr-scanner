@@ -1,5 +1,6 @@
 # app.py
 
+import base64
 import json
 import os
 import uuid
@@ -159,6 +160,47 @@ def sanitize_optional_result_assets(result):
             result["bubble_debug_image_url"] = None
 
     return result
+
+
+
+def encode_evaluated_preview_data_url(
+    image,
+    *,
+    max_width=1100,
+    jpeg_quality=76,
+):
+    """Encode a compact evaluated OMR preview for durable DB fallback."""
+    if image is None:
+        return None
+
+    preview = image
+    height, width = preview.shape[:2]
+
+    if width > int(max_width):
+        scale = float(max_width) / float(width)
+        preview = cv2.resize(
+            preview,
+            (
+                int(max_width),
+                max(1, int(round(height * scale))),
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    success, encoded = cv2.imencode(
+        ".jpg",
+        preview,
+        [cv2.IMWRITE_JPEG_QUALITY, int(jpeg_quality)],
+    )
+
+    if not success:
+        return None
+
+    return (
+        "data:image/jpeg;base64,"
+        + base64.b64encode(encoded.tobytes()).decode("ascii")
+    )
+
 
 
 def save_json(
@@ -1502,6 +1544,29 @@ async def scan_omr(
                 "OMR evaluation completed, but Cloudinary upload failed: "
                 f"{str(error)}"
             )
+
+    # v10.20: /results files are ephemeral on serverless deployments.
+    # Cloudinary remains preferred. If it did not provide a durable URL,
+    # persist a compact evaluated preview inside raw_result_json so
+    # Teacher Dashboard -> View can always display the evaluated OMR.
+    durable_debug_url = str(
+        result.get("bubble_debug_image_url") or ""
+    )
+
+    if (
+        not durable_debug_url
+        or durable_debug_url.startswith("/results/")
+    ):
+        inline_evaluated_preview = encode_evaluated_preview_data_url(
+            processing.get("debug")
+        )
+
+        if inline_evaluated_preview:
+            result["bubble_debug_image_data_url"] = inline_evaluated_preview
+            result["bubble_debug_storage"] = "database_inline_fallback"
+    else:
+        result["bubble_debug_storage"] = "cloudinary"
+
 
     # ========================================================
     # SAVE RESULT
