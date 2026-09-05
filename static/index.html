@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=4.1">
+    <link rel="stylesheet" href="/static/style.css?v=4.2">
 </head>
 
 <body>
@@ -45,8 +45,7 @@
                 <div class="field-box">
                     <label for="exam">TARGET EXAM</label>
                     <select id="exam">
-                        <option value="kcet" selected>KCET (Karnataka CET)</option>
-                        <option value="neet">NEET (Medical Entrance — 180Q)</option>
+                        <option value="kcet_neet" selected>KCET / NEET (Detect from OMR)</option>
                         <option value="jee">JEE (Engineering Entrance)</option>
                     </select>
                 </div>
@@ -62,6 +61,33 @@
                             PCM (180 Questions — No Bio)
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <!-- KCET / NEET OPERATOR-SELECTED METADATA -->
+            <div id="kcetNeetMetadataSection" class="form-section">
+                <div class="field-box">
+                    <label for="kcetNeetExamDate">EXAM DATE</label>
+                    <input id="kcetNeetExamDate" type="date">
+                </div>
+
+                <div class="field-box">
+                    <label for="kcetNeetSection">SECTION</label>
+                    <select id="kcetNeetSection">
+                        <option value="" selected>Select Section</option>
+                        <option value="A">Section A</option>
+                        <option value="B">Section B</option>
+                        <option value="C">Section C</option>
+                    </select>
+                </div>
+
+                <div class="field-box">
+                    <label for="kcetNeetSession">SESSION / SHIFT</label>
+                    <select id="kcetNeetSession">
+                        <option value="" selected>Select Session</option>
+                        <option value="Morning">Morning (Shift 1)</option>
+                        <option value="Afternoon">Afternoon (Shift 2)</option>
+                    </select>
                 </div>
             </div>
 
@@ -312,7 +338,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=4.3"></script>
+    <script src="/static/app.js?v=4.4"></script>
 </body>
 
 </html>

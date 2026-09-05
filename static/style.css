@@ -359,7 +359,8 @@ body {
   margin-bottom: 8px;
 }
 
-select {
+select,
+input[type="date"] {
   width: 100%;
   background: var(--field-bg);
   border: 1px solid var(--border);
@@ -373,7 +374,8 @@ select {
   cursor: pointer;
 }
 
-select:focus {
+select:focus,
+input[type="date"]:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.15);
 }

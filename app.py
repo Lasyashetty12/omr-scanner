@@ -71,6 +71,10 @@ ANSWER_KEY_DIR = os.path.join(
     "answer_keys",
 )
 
+NEET_QUESTION_LIMIT = 180
+KCET_PCM_QUESTION_LIMIT = 180
+KCET_PCMB_QUESTION_LIMIT = 240
+
 
 # ============================================================
 # STATIC FILES
@@ -96,6 +100,34 @@ def safe_filename(name):
     return os.path.basename(
         str(name)
     )
+
+
+def normalize_detected_class(value):
+    """Convert the printed I/II/LT class bubbles to dashboard values."""
+    normalized = str(value or "").strip().upper()
+    return {
+        "I": "11",
+        "II": "12",
+        "11": "11",
+        "12": "12",
+        "LT": "LT",
+    }.get(normalized, "")
+
+
+def limit_question_mapping(question_mapping, question_limit):
+    """Return only valid question entries up to the evaluation limit."""
+    limited = {}
+
+    for question_number, value in (question_mapping or {}).items():
+        try:
+            numeric_question = int(question_number)
+        except (TypeError, ValueError):
+            continue
+
+        if 1 <= numeric_question <= question_limit:
+            limited[numeric_question] = value
+
+    return limited
 
 
 def sanitize_optional_result_assets(result):
@@ -352,6 +384,7 @@ async def scan_omr(
     allowed_exams = [
         "neet",
         "kcet",
+        "kcet_neet",
         "jee",
     ]
 
@@ -361,7 +394,7 @@ async def scan_omr(
             status_code=400,
             detail=(
                 "Exam must be "
-                "NEET, KCET or JEE."
+                "KCET/NEET auto-detect or JEE."
             ),
         )
 
@@ -414,14 +447,49 @@ async def scan_omr(
                 ),
             )
 
+    elif exam in {"neet", "kcet", "kcet_neet"}:
+        if (
+            section not in {"A", "B", "C"}
+            or session not in {"Morning", "Afternoon"}
+            or not exam_date
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "KCET/NEET scan requires Section, "
+                    "Exam Date and Session. Roll number, Class, "
+                    "Series and Exam are detected from the OMR."
+                ),
+            )
+
+        try:
+            datetime.strptime(
+                exam_date,
+                "%Y-%m-%d",
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Exam Date must be a valid date "
+                    "in YYYY-MM-DD format."
+                ),
+            )
+
 
     # ========================================================
     # TEMPLATE
     # ========================================================
 
+    template_exam = (
+        "kcet"
+        if exam == "kcet_neet"
+        else exam
+    )
+
     template_path = os.path.join(
         TEMPLATE_DIR,
-        f"{exam}.json",
+        f"{template_exam}.json",
     )
 
     if not os.path.exists(
@@ -432,7 +500,7 @@ async def scan_omr(
             status_code=404,
             detail=(
                 f"Template not found "
-                f"for {exam.upper()}."
+                f"for {template_exam.upper()}."
             ),
         )
 
@@ -602,42 +670,52 @@ async def scan_omr(
             ]
         )
 
-    if identity_data.get(
-        "class"
-    ):
-        result["class"] = (
-            identity_data[
-                "class"
-            ]
-        )
+    detected_class = normalize_detected_class(
+        identity_data.get("class")
+    )
 
-    if identity_data.get(
-        "exam"
-    ):
-        result["detected_exam"] = (
-            identity_data[
-                "exam"
-            ]
-        )
+    if detected_class:
+        result["class"] = detected_class
 
-        if (
-            str(
-                identity_data[
-                    "exam"
-                ]
-            ).strip().upper()
-            !=
-            str(
-                result.get(
-                    "exam",
-                    ""
-                )
-            ).strip().upper()
-        ):
-            result["identity_warning"] = (
-                "Printed exam bubble does not match "
-                "the exam selected in the scanner."
+    detected_exam = str(
+        identity_data.get("exam")
+        or ""
+    ).strip().upper()
+
+    if exam in {"neet", "kcet", "kcet_neet"}:
+        if detected_exam not in {"NEET", "KCET"}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could not detect the KCET/NEET exam bubble "
+                    "from the OMR sheet."
+                ),
             )
+
+        if not result.get("roll_number"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could not detect a complete roll number "
+                    "from the OMR sheet."
+                ),
+            )
+
+        if not detected_class:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could not detect the Class bubble "
+                    "from the OMR sheet."
+                ),
+            )
+
+        exam = detected_exam.lower()
+        result["exam"] = detected_exam
+        result["detected_exam"] = detected_exam
+        result["section"] = section
+        result["exam_date"] = exam_date
+        result["session"] = session
 
     if exam == "jee":
         result["class"] = class_name
@@ -645,20 +723,6 @@ async def scan_omr(
         result["exam_date"] = exam_date
         result["session"] = session
         result["stream"] = "PCM"
-
-        result["student"] = {
-            "name": "Student Candidate",
-            "roll_number":
-                result.get("roll_number"),
-            "class": class_name,
-            "section": section,
-        }
-
-        result["exam_info"] = {
-            "exam_type": "JEE",
-            "exam_date": exam_date,
-            "session": session,
-        }
 
 
     # ========================================================
@@ -733,20 +797,15 @@ async def scan_omr(
             )
 
 
-        detected_answers = (
-            processing.get(
-                "answers",
-                {},
-            )
+        detected_answers = limit_question_mapping(
+            processing.get("answers", {}),
+            NEET_QUESTION_LIMIT,
         )
 
-        template_total = int(
-            processing.get("template", {}).get("total_questions", 208)
-        )
         neet_answer_key = {
             key: value
             for key, value in answer_key_data["answers"].items()
-            if int(key) <= template_total
+            if int(key) <= NEET_QUESTION_LIMIT
         }
 
 
@@ -843,6 +902,9 @@ async def scan_omr(
                         "questions"
                     ],
 
+                "total_questions":
+                    NEET_QUESTION_LIMIT,
+
             }
         )
 
@@ -920,11 +982,15 @@ async def scan_omr(
             )
 
 
-        detected_answers = (
-            processing.get(
-                "answers",
-                {},
-            )
+        question_limit = (
+            KCET_PCM_QUESTION_LIMIT
+            if stream and stream.lower().strip() == "pcm"
+            else KCET_PCMB_QUESTION_LIMIT
+        )
+
+        detected_answers = limit_question_mapping(
+            processing.get("answers", {}),
+            question_limit,
         )
 
 
@@ -936,19 +1002,11 @@ async def scan_omr(
         )
 
 
-        template_total = int(
-            processing.get("template", {}).get("total_questions", 208)
-        )
         kcet_answer_key = {
             key: value
             for key, value in answer_key_data["answers"].items()
-            if int(key) <= template_total
+            if int(key) <= question_limit
         }
-        if stream and stream.lower().strip() == "pcm":
-            kcet_answer_key = {
-                k: v for k, v in kcet_answer_key.items()
-                if int(k) <= 180
-            }
 
         score_data = calculate_score(
 
@@ -1037,6 +1095,9 @@ async def scan_omr(
                     score_data[
                         "questions"
                     ],
+
+                "total_questions":
+                    question_limit,
 
             }
         )
@@ -1268,6 +1329,21 @@ async def scan_omr(
                 }
             )
 
+    result["student"] = {
+        "name": "Student Candidate",
+        "roll_number": result.get("roll_number"),
+        "class": result.get("class"),
+        "section": section,
+    }
+
+    result["exam_info"] = {
+        "exam_type": result.get("exam"),
+        "paper_code": result.get("paper_code") or result.get("series"),
+        "paper_series": result.get("paper_code") or result.get("series"),
+        "exam_date": exam_date,
+        "session": session,
+    }
+
 
     # ========================================================
     # SAVE DEBUG IMAGES
@@ -1360,15 +1436,13 @@ async def scan_omr(
     # SAVE TO DATABASE
     # ========================================================
 
-    db_student_info = None
-
-    if exam == "jee":
-        db_student_info = {
-            "name": "Student Candidate",
-            "class_name": class_name,
-            "section": section,
-            "batch": exam_date[:4],
-        }
+    db_student_info = {
+        "name": "Student Candidate",
+        "roll_number": result.get("roll_number"),
+        "class_name": result.get("class"),
+        "section": section,
+        "batch": exam_date[:4],
+    }
 
     db_id = save_omr_result_to_db(
         result,

@@ -181,6 +181,26 @@ const kcetStreamSection =
         "kcetStreamSection"
     );
 
+const kcetNeetMetadataSection =
+    document.getElementById(
+        "kcetNeetMetadataSection"
+    );
+
+const kcetNeetExamDate =
+    document.getElementById(
+        "kcetNeetExamDate"
+    );
+
+const kcetNeetSection =
+    document.getElementById(
+        "kcetNeetSection"
+    );
+
+const kcetNeetSession =
+    document.getElementById(
+        "kcetNeetSession"
+    );
+
 const jeeMetadataSection =
     document.getElementById(
         "jeeMetadataSection"
@@ -3021,7 +3041,9 @@ async function scanOMR() {
 
         formData.append(
             "stream",
-            exam === "kcet" ? selectedStream : "pcm"
+            (exam === "kcet" || exam === "kcet_neet")
+                ? selectedStream
+                : "pcm"
         );
 
         appendJeeScanMetadata(
@@ -3418,10 +3440,26 @@ function updateExamStreamVisibility() {
     const selected = examSelect?.value?.toLowerCase()?.trim();
 
     if (kcetStreamSection) {
-        if (selected === "kcet") {
+        if (selected === "kcet" || selected === "kcet_neet") {
             kcetStreamSection.classList.remove("hidden");
         } else {
             kcetStreamSection.classList.add("hidden");
+        }
+    }
+
+
+    if (kcetNeetMetadataSection) {
+        if (["kcet", "neet", "kcet_neet"].includes(selected)) {
+            kcetNeetMetadataSection.classList.remove("hidden");
+
+            if (
+                kcetNeetExamDate
+                && !kcetNeetExamDate.value
+            ) {
+                kcetNeetExamDate.value = localTodayIsoDate();
+            }
+        } else {
+            kcetNeetMetadataSection.classList.add("hidden");
         }
     }
 
@@ -3446,6 +3484,20 @@ function getJeeScanMetadata(examValue) {
     const exam = String(
         examValue || ""
     ).trim().toLowerCase();
+
+    if (["kcet", "neet", "kcet_neet"].includes(exam)) {
+        const section = (kcetNeetSection?.value || "").trim();
+        const examDate = (kcetNeetExamDate?.value || "").trim();
+        const session = (kcetNeetSession?.value || "").trim();
+
+        return {
+            valid: Boolean(section && examDate && session),
+            className: "",
+            section,
+            examDate,
+            session,
+        };
+    }
 
     if (exam !== "jee") {
         return {
@@ -3483,8 +3535,14 @@ function validateJeeScanMetadata(examValue) {
     );
 
     if (!metadata.valid) {
+        const exam = String(
+            examValue || ""
+        ).trim().toLowerCase();
+
         showError(
-            "For JEE, select Class, Section, Exam Date and Session before scanning."
+            exam === "jee"
+                ? "For JEE, select Class, Section, Exam Date and Session before scanning."
+                : "For KCET/NEET, select Exam Date, Section and Session before scanning. Roll number, Class, Series and Exam are read from the OMR."
         );
         return null;
     }
@@ -3501,19 +3559,20 @@ function appendJeeScanMetadata(
         examValue
     );
 
-    if (
-        String(
-            examValue || ""
-        ).trim().toLowerCase()
-        !== "jee"
-    ) {
+    const exam = String(
+        examValue || ""
+    ).trim().toLowerCase();
+
+    if (!["jee", "kcet", "neet", "kcet_neet"].includes(exam)) {
         return;
     }
 
-    formData.append(
-        "class_name",
-        metadata.className
-    );
+    if (exam === "jee") {
+        formData.append(
+            "class_name",
+            metadata.className
+        );
+    }
 
     formData.append(
         "section",
@@ -3663,4 +3722,3 @@ window.addEventListener(
             true;
     }
 })();
-
