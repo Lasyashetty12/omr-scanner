@@ -48,6 +48,23 @@ def test_exam_choice_row_calibrates_mobile_vertical_offset():
     assert result["sampling_y"] == kcet_y + vertical_offset
 
 
+def test_exam_choice_row_uses_local_contrast_on_dim_page():
+    template = load_kcet_template()
+    config = template["identity"]["exam"]
+    image = np.full((2200, 1600), 102, dtype=np.uint8)
+
+    for x, y in config["choices"].values():
+        cv2.circle(image, (int(x), int(y)), 11, 72, 2)
+
+    kcet_x, kcet_y = config["choices"]["KCET"]
+    cv2.circle(image, (int(kcet_x), int(kcet_y)), 7, 34, -1)
+
+    result = _detect_choice_row(image, config, template)
+
+    assert result["value"] == "KCET"
+    assert result["relative_scores"]["KCET"] > result["relative_scores"]["NEET"]
+
+
 def test_corrected_image_fallback_recovers_only_missing_identity_fields():
     primary = {
         "roll_number": "40316817",

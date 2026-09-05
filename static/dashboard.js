@@ -102,9 +102,16 @@ async function fetchAndRenderDashboard() {
                 <td>${escapeHtml(row.blank ?? 0)}</td>
                 <td>${formatDate(row.exam_date || row.date)}</td>
                 <td>${escapeHtml(row.session || "-")}</td>
-                <td>
+                <td class="dashboard-actions">
                     <button type="button" class="action-view-btn" data-result-id="${escapeHtml(row.id || row.scan_id)}">
                         View Result
+                    </button>
+                    <button
+                        type="button"
+                        class="action-delete-btn"
+                        data-result-id="${escapeHtml(row.id)}"
+                        data-roll-number="${escapeHtml(row.roll_number || "this student")}">
+                        Delete
                     </button>
                 </td>
             </tr>
@@ -113,6 +120,46 @@ async function fetchAndRenderDashboard() {
         dashboardTableBody.querySelectorAll(".action-view-btn").forEach((button) => {
             button.addEventListener("click", () => {
                 openIndividualResult(button.dataset.resultId);
+            });
+        });
+
+        dashboardTableBody.querySelectorAll(".action-delete-btn").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const resultId = button.dataset.resultId;
+                const rollNumber = button.dataset.rollNumber || "this student";
+                if (!resultId || resultId === "undefined") return;
+                if (!window.confirm(`Delete the result for ${rollNumber}? This cannot be undone.`)) return;
+
+                let deleteKey = sessionStorage.getItem("teacher-dashboard-delete-key") || "";
+                if (!deleteKey) {
+                    deleteKey = window.prompt("Enter the teacher delete key:") || "";
+                }
+                if (!deleteKey) return;
+
+                button.disabled = true;
+                button.textContent = "Deleting…";
+                try {
+                    const deleteResponse = await fetch(
+                        `/api/omr-results/${encodeURIComponent(resultId)}`,
+                        {
+                            method: "DELETE",
+                            headers: {"X-Dashboard-Delete-Key": deleteKey},
+                        }
+                    );
+                    const payload = await deleteResponse.json().catch(() => ({}));
+                    if (!deleteResponse.ok) {
+                        if (deleteResponse.status === 403) {
+                            sessionStorage.removeItem("teacher-dashboard-delete-key");
+                        }
+                        throw new Error(payload.detail || `Server returned HTTP ${deleteResponse.status}`);
+                    }
+                    sessionStorage.setItem("teacher-dashboard-delete-key", deleteKey);
+                    await fetchAndRenderDashboard();
+                } catch (error) {
+                    window.alert(`Could not delete result: ${error.message || "API failure"}`);
+                    button.disabled = false;
+                    button.textContent = "Delete";
+                }
             });
         });
     } catch (error) {

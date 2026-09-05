@@ -14,15 +14,18 @@ def test_jee_class_supports_lt_in_ui_and_server():
     dashboard = read("static/dashboard.html")
     app = read("app.py")
 
-    assert '<option value="LT">LT</option>' in index
-    assert '<option value="LT">LT</option>' in dashboard
+    assert index.count('<option value="LT">') == 1
+    assert dashboard.count('<option value="LT">') == 1
+    assert '<option value="LT">Long Term (LT)</option>' in index
+    assert '<option value="LT">Long Term (LT)</option>' in dashboard
     assert '{"11", "12", "LT"}' in app
 
 
-def test_new_result_prefers_durable_database_id():
+def test_new_result_prefers_immediately_available_scan_id():
     source = read("static/app.js")
 
-    assert "data?.id || data?.scan_id || null" in source
+    assert "data?.scan_id || data?.id || null" in source
+    assert 'sessionStorage.setItem("omr-result:latest"' in source
     assert "lastResult?.id" in source
     assert "lastResult?.scan_id" in source
 

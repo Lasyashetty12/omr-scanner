@@ -45,6 +45,43 @@ def _core_fill_ratio(
     return float(np.count_nonzero((roi < dark_threshold) & mask)) / float(count)
 
 
+def _relative_core_fill_ratio(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    *,
+    core_radius: int = 6,
+    outer_radius: int = 13,
+) -> float:
+    """Score a mark relative to its local paper tone for dim phone images."""
+    xi = int(round(float(x)))
+    yi = int(round(float(y)))
+    core_radius = max(2, int(core_radius))
+    outer_radius = max(core_radius + 3, int(outer_radius))
+    height, width = gray.shape[:2]
+    x0 = max(0, xi - outer_radius)
+    x1 = min(width, xi + outer_radius + 1)
+    y0 = max(0, yi - outer_radius)
+    y1 = min(height, yi + outer_radius + 1)
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0:
+        return 0.0
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    distance_sq = (xx - xi) ** 2 + (yy - yi) ** 2
+    core = roi[distance_sq <= core_radius ** 2].astype(np.float32)
+    surround = roi[
+        (distance_sq >= (core_radius + 3) ** 2)
+        & (distance_sq <= outer_radius ** 2)
+    ].astype(np.float32)
+    if core.size == 0 or surround.size == 0:
+        return 0.0
+
+    local_paper = float(np.percentile(surround, 72.0))
+    threshold = float(np.clip(local_paper - 24.0, 45.0, 205.0))
+    return float(np.mean(core < threshold))
+
+
 def _cluster_1d(values: List[float], k: int) -> List[float] | None:
     if len(values) < k:
         return None
@@ -693,16 +730,46 @@ def _detect_choice_row(
     filled_threshold = float(config.get("filled_threshold", 0.68))
     minimum_gap = float(config.get("minimum_confidence_gap", 0.12))
 
-    scores = {
-        label: _core_fill_ratio(
+    absolute_scores = {}
+    relative_scores = {}
+    scores = {}
+    for index, label in enumerate(labels_by_x):
+        absolute_score = _core_fill_ratio(
             gray,
             actual_x[index],
             sampling_y,
             radius=core_radius,
             dark_threshold=dark_threshold,
         )
-        for index, label in enumerate(labels_by_x)
-    }
+        relative_score = _relative_core_fill_ratio(
+            gray,
+            actual_x[index],
+            sampling_y,
+            core_radius=core_radius,
+            outer_radius=max(core_radius + 5, bubble_radius + 3),
+        )
+        absolute_scores[label] = absolute_score
+        relative_scores[label] = relative_score
+        scores[label] = max(absolute_score, relative_score)
+
+    absolute_ranked = sorted(absolute_scores.values(), reverse=True)
+    relative_ranked = sorted(relative_scores.values(), reverse=True)
+    absolute_gap = (
+        absolute_ranked[0] - absolute_ranked[1]
+        if len(absolute_ranked) > 1
+        else absolute_ranked[0]
+    )
+    relative_gap = (
+        relative_ranked[0] - relative_ranked[1]
+        if len(relative_ranked) > 1
+        else relative_ranked[0]
+    )
+    dim_page = float(np.percentile(gray, 75.0)) < 170.0
+    if dim_page or (
+        absolute_gap < minimum_gap
+        and relative_gap > absolute_gap
+    ):
+        scores = relative_scores.copy()
 
     ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     best_label, best_score = ranked[0]
@@ -722,6 +789,14 @@ def _detect_choice_row(
         "scores": {
             key: round(float(score), 4)
             for key, score in scores.items()
+        },
+        "absolute_scores": {
+            key: round(float(score), 4)
+            for key, score in absolute_scores.items()
+        },
+        "relative_scores": {
+            key: round(float(score), 4)
+            for key, score in relative_scores.items()
         },
         "grid_calibrated": bool(x_calibrated and y_calibrated),
         "x_calibrated": bool(x_calibrated),

@@ -25,7 +25,7 @@ def test_document_mode_removes_colour_and_shadow_without_geometry_change():
     assert np.array_equal(recognition[:, :, 0], recognition[:, :, 1])
     assert np.array_equal(recognition[:, :, 1], recognition[:, :, 2])
     assert debug["geometry_changed"] is False
-    assert debug["recognition_source"] == "shadow_normalized_grayscale_document"
+    assert debug["recognition_source"] == "adaptive_capture_enhanced_grayscale_document"
 
     before_range = float(
         np.percentile(horizontal_shadow, 95) - np.percentile(horizontal_shadow, 5)
@@ -39,3 +39,17 @@ def test_document_mode_removes_colour_and_shadow_without_geometry_change():
     )
     assert after_range < before_range * 0.65
 
+
+def test_dim_low_saturation_capture_is_adaptively_enhanced():
+    image = np.full((500, 400, 3), (92, 96, 100), dtype=np.uint8)
+    cv2.rectangle(image, (30, 30), (370, 470), (65, 67, 72), 3)
+    cv2.rectangle(image, (80, 100), (320, 180), (72, 78, 88), -1)
+    cv2.circle(image, (200, 300), 15, (55, 42, 40), -1)
+
+    _preview, recognition, debug = prepare_omr_document_mode(image)
+    stats = debug["image_characteristics"]
+
+    assert recognition.shape == image.shape
+    assert stats["low_brightness_enhanced"] is True
+    assert stats["low_saturation_enhanced"] is True
+    assert stats["enhanced_brightness"] > stats["brightness"]

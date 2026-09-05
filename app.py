@@ -1,6 +1,7 @@
 # app.py
 
 import json
+import hmac
 import os
 import uuid
 from datetime import datetime
@@ -15,6 +16,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
     Query,
+    Header,
 )
 
 from fastapi.responses import FileResponse
@@ -42,6 +44,7 @@ from database import (
     get_omr_result_by_scan_id_from_db,
     get_database_diagnostics,
     is_db_configured,
+    delete_omr_result_from_db,
 )
 
 from cloudinary_storage import (
@@ -1544,6 +1547,14 @@ async def scan_omr(
                 "to Supabase. Check /api/storage-status."
             )
 
+    # Persist the final response (including the database ID) after the
+    # database write. The result page can then resolve the scan UUID
+    # immediately even if database replication/network visibility lags.
+    try:
+        save_json(result_path, result)
+    except Exception as error:
+        print("Final result save warning:", error)
+
     return result
 
 
@@ -1709,6 +1720,57 @@ def get_result(
         status_code=404,
         detail="Result not found.",
     )
+
+
+@app.delete("/api/omr-results/{result_id}")
+def delete_result(
+    result_id: str,
+    dashboard_delete_key: str | None = Header(
+        None,
+        alias="X-Dashboard-Delete-Key",
+    ),
+):
+    """Delete a dashboard result after server-side teacher-key validation."""
+    configured_key = os.environ.get("TEACHER_DASHBOARD_DELETE_KEY", "")
+    if not configured_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Result deletion is disabled. Configure "
+                "TEACHER_DASHBOARD_DELETE_KEY on the server."
+            ),
+        )
+
+    if not dashboard_delete_key or not hmac.compare_digest(
+        dashboard_delete_key,
+        configured_key,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid teacher delete key.",
+        )
+
+    if not result_id.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail="A numeric database result ID is required.",
+        )
+
+    try:
+        deleted = delete_omr_result_from_db(int(result_id))
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Database deletion failed: {error}",
+        ) from error
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail="Result not found.",
+        )
+
+    return deleted
 
 
 

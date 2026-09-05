@@ -667,3 +667,60 @@ def get_omr_result_by_id_from_db(result_id):
     except Exception as e:
         print("Database get by id error:", e)
         return None
+
+
+def delete_omr_result_from_db(result_id):
+    """Delete one result and its dependent rows without deleting the student."""
+    if not is_db_configured():
+        raise ValueError("Supabase database environment variables are missing.")
+
+    records = _supabase_request(
+        "omr_results",
+        method="GET",
+        query_params={
+            "id": f"eq.{result_id}",
+            "select": "id,exam_id",
+            "limit": "1",
+        },
+    ) or []
+
+    if not records:
+        return None
+
+    record = records[0]
+    exam_id = record.get("exam_id")
+
+    # The current Supabase schema uses NO ACTION foreign keys, so children
+    # must be removed before their parent result.
+    for table in ("question_results", "scans"):
+        _supabase_request(
+            table,
+            method="DELETE",
+            query_params={"omr_result_id": f"eq.{result_id}"},
+        )
+
+    _supabase_request(
+        "omr_results",
+        method="DELETE",
+        query_params={"id": f"eq.{result_id}"},
+    )
+
+    # Each scan creates an exam row. Remove it only if no other result uses it.
+    if exam_id is not None:
+        remaining = _supabase_request(
+            "omr_results",
+            method="GET",
+            query_params={
+                "exam_id": f"eq.{exam_id}",
+                "select": "id",
+                "limit": "1",
+            },
+        ) or []
+        if not remaining:
+            _supabase_request(
+                "exams",
+                method="DELETE",
+                query_params={"id": f"eq.{exam_id}"},
+            )
+
+    return {"id": int(result_id), "deleted": True}

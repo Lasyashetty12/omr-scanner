@@ -2892,20 +2892,25 @@ async function scanBatchOMRs() {
 
         for (const item of payload.results || []) {
             const result = item.result || {};
-            const key = result.scan_id || result.id;
-
-            if (key) {
-                try {
-                    localStorage.setItem(
-                        `omr-result:${key}`,
-                        JSON.stringify(result)
-                    );
-                } catch (storageError) {
-                    console.debug(
-                        "Result cache unavailable:",
-                        storageError
-                    );
-                }
+            try {
+                [result.scan_id, result.id]
+                    .filter(Boolean)
+                    .forEach((key) => {
+                        localStorage.setItem(
+                            `omr-result:${key}`,
+                            JSON.stringify(result)
+                        );
+                        sessionStorage.setItem(
+                            `omr-result:${key}`,
+                            JSON.stringify(result)
+                        );
+                    });
+                sessionStorage.setItem("omr-result:latest", JSON.stringify(result));
+            } catch (storageError) {
+                console.debug(
+                    "Result cache unavailable:",
+                    storageError
+                );
             }
         }
 
@@ -2915,8 +2920,8 @@ async function scanBatchOMRs() {
             const lastResult = successful[successful.length - 1].result;
 
             latestResultId = (
-                lastResult?.id
-                || lastResult?.scan_id
+                lastResult?.scan_id
+                || lastResult?.id
                 || null
             );
 
@@ -3072,9 +3077,10 @@ async function scanOMR() {
                 response
             );
 
-        // Prefer the durable database ID. The scan UUID remains a fallback for
-        // local development and deployments without a configured database.
-        latestResultId = data?.id || data?.scan_id || null;
+        // The scan UUID is returned in the same response and maps both to the
+        // browser cache and to Supabase. It avoids a just-inserted numeric-ID
+        // lookup race on serverless deployments.
+        latestResultId = data?.scan_id || data?.id || null;
 
         // Serverless local files may not survive the next request. Keep the
         // just-created result available to the individual-result page in this
@@ -3087,7 +3093,12 @@ async function scanOMR() {
                         `omr-result:${resultKey}`,
                         JSON.stringify(data)
                     );
+                    sessionStorage.setItem(
+                        `omr-result:${resultKey}`,
+                        JSON.stringify(data)
+                    );
                 });
+            sessionStorage.setItem("omr-result:latest", JSON.stringify(data));
         } catch (storageError) {
             console.warn("Could not cache the OMR result locally:", storageError);
         }

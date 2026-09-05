@@ -107,8 +107,19 @@ function hideLoading() {
 
 function readCachedResult(resultId) {
     try {
-        const cached = localStorage.getItem(`omr-result:${resultId}`);
-        return cached ? JSON.parse(cached) : null;
+        const exact = (
+            sessionStorage.getItem(`omr-result:${resultId}`)
+            || localStorage.getItem(`omr-result:${resultId}`)
+        );
+        if (exact) return JSON.parse(exact);
+
+        const latest = sessionStorage.getItem("omr-result:latest");
+        if (!latest) return null;
+        const parsed = JSON.parse(latest);
+        return (
+            String(parsed?.id ?? "") === String(resultId)
+            || String(parsed?.scan_id ?? "") === String(resultId)
+        ) ? parsed : null;
     } catch (storageError) {
         console.warn("Could not read cached OMR result:", storageError);
         return null;
@@ -235,6 +246,7 @@ async function loadResult() {
         const data = await fetchResultWithRetry(resultId);
         try {
             localStorage.setItem(`omr-result:${resultId}`, JSON.stringify(data));
+            sessionStorage.setItem(`omr-result:${resultId}`, JSON.stringify(data));
         } catch (storageError) {
             console.warn("Could not cache fetched OMR result:", storageError);
         }
