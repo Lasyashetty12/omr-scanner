@@ -646,6 +646,14 @@ def get_omr_result_by_id_from_db(result_id):
                     or "Morning"
             },
             "question_results": q_dict if q_dict else raw_data.get("question_results", {}),
+
+            "message": raw_data.get("message"),
+            "marking_scheme": raw_data.get("marking_scheme"),
+            "evaluation_status": raw_data.get("evaluation_status"),
+            "answer_key_mode": raw_data.get("answer_key_mode"),
+            "answer_key_dummy": raw_data.get("answer_key_dummy", False),
+            "answer_key_warning": raw_data.get("answer_key_warning"),
+
             "original_image_url": raw_data.get("original_image_url") or f"/uploads/{scan_id}.jpg",
             "corrected_image_url": raw_data.get("corrected_image_url") or f"/uploads/{scan_id}.jpg",
             # Debug images are optional and may not exist (especially on

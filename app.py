@@ -1165,6 +1165,21 @@ async def scan_omr(
             )
 
 
+        jee_answer_key_is_dummy = bool(
+            answer_key_data.get(
+                "dummy",
+                False,
+            )
+        )
+
+        jee_answer_key_warning = str(
+            answer_key_data.get(
+                "warning",
+                "",
+            )
+            or ""
+        ).strip()
+
         detected = (
             processing.get(
                 "answers",
@@ -1326,6 +1341,59 @@ async def scan_omr(
                     "numerical_answers": numerical_detected,
                     "question_results": jee_question_results,
                     "score_details": score_data,
+
+                    "answer_key_dummy":
+                        jee_answer_key_is_dummy,
+
+                    "answer_key_mode":
+                        (
+                            "TEST"
+                            if jee_answer_key_is_dummy
+                            else "PRODUCTION"
+                        ),
+
+                    "answer_key_warning":
+                        (
+                            jee_answer_key_warning
+                            if jee_answer_key_is_dummy
+                            else None
+                        ),
+
+                    "evaluation_status":
+                        (
+                            "NEEDS_REVIEW"
+                            if score_data.get(
+                                "uncertain",
+                                0,
+                            )
+                            else "FINAL"
+                        ),
+
+                    "message":
+                        (
+                            (
+                                "TEST ANSWER KEY — this score is for scanner "
+                                "calibration only and is not a production JEE result. "
+                                + (
+                                    jee_answer_key_warning
+                                    or "Replace the JEE series answer key before real use."
+                                )
+                            )
+                            if jee_answer_key_is_dummy
+                            else (
+                                "JEE Main 2026 scoring applied: "
+                                "+4 correct, -1 incorrect, 0 unanswered."
+                                + (
+                                    " One or more responses are UNCERTAIN and "
+                                    "should be reviewed before treating the score as final."
+                                    if score_data.get(
+                                        "uncertain",
+                                        0,
+                                    )
+                                    else ""
+                                )
+                            )
+                        ),
                 }
             )
 
@@ -1444,21 +1512,37 @@ async def scan_omr(
         "batch": exam_date[:4],
     }
 
-    db_id = save_omr_result_to_db(
-        result,
-        student_info=db_student_info,
-    )
-    if db_id:
-        result["id"] = db_id
-        result["database_saved"] = True
-        result["database_result_id"] = db_id
-    else:
+    if (
+        exam == "jee"
+        and result.get(
+            "answer_key_dummy"
+        )
+    ):
+        db_id = None
         result["id"] = scan_id
         result["database_saved"] = False
         result["database_warning"] = (
-            "Evaluation completed, but the result was not persisted "
-            "to Supabase. Check /api/storage-status."
+            "TEST ANSWER KEY result was not stored in the production "
+            "results database. Replace the JEE answer key and set "
+            "dummy=false before real student scanning."
         )
+    else:
+        db_id = save_omr_result_to_db(
+            result,
+            student_info=db_student_info,
+        )
+
+        if db_id:
+            result["id"] = db_id
+            result["database_saved"] = True
+            result["database_result_id"] = db_id
+        else:
+            result["id"] = scan_id
+            result["database_saved"] = False
+            result["database_warning"] = (
+                "Evaluation completed, but the result was not persisted "
+                "to Supabase. Check /api/storage-status."
+            )
 
     return result
 

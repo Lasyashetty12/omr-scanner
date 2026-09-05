@@ -40,12 +40,17 @@ def test_autocapture_still_fires_on_one_valid_four_block_detection():
         ready_start + 1,
     )
 
-    ready = source[
-        ready_start:ready_end
-    ]
+    ready = source[ready_start:ready_end]
 
     assert "detection.markerCount === 4" in ready
     assert "ready: true" in ready
+
+    # Accuracy must come from genuine corner-block classification only.
+    # Do not reintroduce focus/movement/tilt/page-margin delays.
+    assert "AUTO_CAPTURE_MIN_SHARPNESS" not in ready
+    assert "hasExcessiveMovement(" not in ready
+    assert "isSheetReasonablyAligned(" not in ready
+    assert "isCompleteSheetInFrame(" not in ready
 
 
 def test_active_corner_detector_never_uses_generic_contrast_fallback():
@@ -56,20 +61,29 @@ def test_active_corner_detector_never_uses_generic_contrast_fallback():
     assert "STRICT REGISTRATION-BLOCK CONTRACT" in detector
 
 
-def test_response_bubbles_cannot_use_generic_missing_corner_fallback():
+def test_registration_marker_shape_is_strict_again():
     source = _source()
 
-    assert "aspect < 0.50 || aspect > 1.90" in source
-    assert "fill < 0.65" in source
-    assert "0.60 + 0.40 * averageCornerOccupancy" in source
+    assert "aspect < 0.72 || aspect > 1.38" in source
+    assert "fill < 0.82" in source
+    assert "minimumCornerOccupancy < 0.65" in source
+    assert "averageCornerOccupancy < 0.82" in source
 
     detector = _detect_document_corners_block()
     assert "findSolidSquareByContrast(" not in detector
 
+
 def test_four_markers_must_have_consistent_physical_size():
     detector = _detect_document_corners_block()
 
-    assert "> 1.95" in detector
-    assert "markerToSheetRatio < 0.009" in detector
-    assert "markerToSheetRatio > 0.038" in detector
+    assert "> 1.85" in detector
+    assert "markerToSheetRatio < 0.005" in detector
+    assert "markerToSheetRatio > 0.035" in detector
     assert "outerCornerGeometry" in detector
+
+
+def test_all_four_real_blocks_remain_mandatory():
+    detector = _detect_document_corners_block()
+
+    assert "if (!markers.every(Boolean))" in detector
+    assert "markerCount: 4" in detector
