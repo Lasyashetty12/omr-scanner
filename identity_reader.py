@@ -290,6 +290,319 @@ def _detect_roll_number(
     }
 
 
+
+def _roll_disk_dark_ratio(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    radius: int = 8,
+) -> float:
+    xi = int(round(float(x)))
+    yi = int(round(float(y)))
+    radius = max(4, int(radius))
+
+    h, w = gray.shape[:2]
+    x0 = max(0, xi - radius)
+    x1 = min(w, xi + radius + 1)
+    y0 = max(0, yi - radius)
+    y1 = min(h, yi + radius + 1)
+
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0:
+        return 0.0
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    mask = (
+        (xx - xi) ** 2
+        + (yy - yi) ** 2
+        <= radius ** 2
+    )
+
+    pixels = roi[mask].astype(np.float32)
+    if pixels.size == 0:
+        return 0.0
+
+    paper = float(np.percentile(roi, 80))
+    dark_threshold = float(
+        np.clip(
+            paper - 38.0,
+            85.0,
+            165.0,
+        )
+    )
+
+    return float(
+        np.mean(
+            pixels < dark_threshold
+        )
+    )
+
+
+def _crop_roll_bubble(
+    gray: np.ndarray,
+    x: float,
+    y: float,
+    radius: int = 10,
+) -> np.ndarray:
+    xi = int(round(float(x)))
+    yi = int(round(float(y)))
+    radius = max(8, int(radius))
+
+    h, w = gray.shape[:2]
+    x0 = max(0, xi - radius)
+    x1 = min(w, xi + radius + 1)
+    y0 = max(0, yi - radius)
+    y1 = min(h, yi + radius + 1)
+
+    return gray[y0:y1, x0:x1]
+
+
+def _detect_roll_number_ml_fallback(
+    gray: np.ndarray,
+    config: Dict[str, Any],
+    template: Dict[str, Any],
+) -> Dict[str, Any]:
+    from ml_omr.inference import classify_batch
+
+    expected_x = [float(value) for value in config["x_positions"]]
+    expected_y = [float(value) for value in config["y_positions"]]
+    values = [
+        str(value)
+        for value in config.get("values", list(range(10)))
+    ]
+
+    bubble_radius = int(template.get("bubble_radius", 10))
+    margin = int(config.get("hough_margin", 20))
+    max_delta = float(config.get("max_calibration_delta", 22))
+
+    circles = _hough(
+        gray,
+        (
+            min(expected_x) - margin,
+            min(expected_y) - margin,
+            max(expected_x) + margin,
+            max(expected_y) + margin,
+        ),
+        bubble_radius=bubble_radius,
+    )
+
+    actual_x = None
+    actual_y = None
+
+    minimum_circles = max(
+        28,
+        int(len(expected_x) * len(expected_y) * 0.40),
+    )
+
+    if len(circles) >= minimum_circles:
+        actual_x = _cluster_1d(
+            [point[0] for point in circles],
+            len(expected_x),
+        )
+        actual_y = _cluster_1d(
+            [point[1] for point in circles],
+            len(expected_y),
+        )
+
+    calibrated = (
+        actual_x is not None
+        and actual_y is not None
+        and max(
+            abs(a - b)
+            for a, b in zip(actual_x, sorted(expected_x))
+        ) <= max_delta
+        and max(
+            abs(a - b)
+            for a, b in zip(actual_y, sorted(expected_y))
+        ) <= max_delta
+    )
+
+    if not calibrated:
+        actual_x = sorted(expected_x)
+        actual_y = sorted(expected_y)
+
+    crop_radius = int(config.get("ml_crop_radius", 10))
+
+    crops = []
+    locations = []
+
+    for column_index, x in enumerate(actual_x):
+        for row_index, value in enumerate(values):
+            y = actual_y[row_index]
+            crops.append(
+                _crop_roll_bubble(
+                    gray,
+                    x,
+                    y,
+                    radius=crop_radius,
+                )
+            )
+            locations.append(
+                (
+                    column_index,
+                    row_index,
+                    value,
+                    x,
+                    y,
+                )
+            )
+
+    predictions = classify_batch(crops)
+
+    by_column: Dict[int, List[Dict[str, Any]]] = {
+        index: []
+        for index in range(len(actual_x))
+    }
+
+    for location, prediction in zip(locations, predictions):
+        (
+            column_index,
+            row_index,
+            value,
+            x,
+            y,
+        ) = location
+
+        probabilities = (
+            prediction.get("probabilities", {})
+            if isinstance(prediction, dict)
+            else {}
+        )
+
+        filled_probability = float(
+            probabilities.get("filled", 0.0)
+        )
+        blank_probability = float(
+            probabilities.get("blank", 0.0)
+        )
+
+        disk_ratio = _roll_disk_dark_ratio(
+            gray,
+            x,
+            y,
+            radius=int(config.get("ml_disk_radius", 8)),
+        )
+
+        combined = (
+            0.72 * filled_probability
+            + 0.28 * disk_ratio
+        )
+
+        by_column[column_index].append(
+            {
+                "row": row_index,
+                "value": value,
+                "filled_probability": filled_probability,
+                "blank_probability": blank_probability,
+                "disk_dark_ratio": disk_ratio,
+                "combined_score": combined,
+                "center": [
+                    int(round(x)),
+                    int(round(y)),
+                ],
+            }
+        )
+
+    digits: List[str | None] = []
+    column_details = []
+
+    for column_index in range(len(actual_x)):
+        ranked = sorted(
+            by_column[column_index],
+            key=lambda item: (
+                float(item["combined_score"]),
+                float(item["filled_probability"]),
+                float(item["disk_dark_ratio"]),
+            ),
+            reverse=True,
+        )
+
+        best = ranked[0]
+        second = ranked[1]
+
+        combined_gap = (
+            float(best["combined_score"])
+            - float(second["combined_score"])
+        )
+        ml_gap = (
+            float(best["filled_probability"])
+            - float(second["filled_probability"])
+        )
+        disk_gap = (
+            float(best["disk_dark_ratio"])
+            - float(second["disk_dark_ratio"])
+        )
+
+        strong_ml = (
+            float(best["filled_probability"]) >= 0.52
+            and ml_gap >= 0.10
+        )
+        strong_disk = (
+            float(best["disk_dark_ratio"]) >= 0.46
+            and disk_gap >= 0.10
+        )
+        balanced = (
+            float(best["combined_score"]) >= 0.46
+            and combined_gap >= 0.085
+            and (
+                float(best["filled_probability"]) >= 0.42
+                or float(best["disk_dark_ratio"]) >= 0.42
+            )
+        )
+
+        digit = (
+            str(best["value"])
+            if (
+                strong_ml
+                or strong_disk
+                or balanced
+            )
+            else None
+        )
+
+        digits.append(digit)
+
+        column_details.append(
+            {
+                "column": column_index + 1,
+                "value": digit,
+                "best_value": str(best["value"]),
+                "best_combined": round(
+                    float(best["combined_score"]),
+                    4,
+                ),
+                "combined_gap": round(combined_gap, 4),
+                "ml_filled": round(
+                    float(best["filled_probability"]),
+                    4,
+                ),
+                "ml_gap": round(ml_gap, 4),
+                "disk_dark_ratio": round(
+                    float(best["disk_dark_ratio"]),
+                    4,
+                ),
+                "disk_gap": round(disk_gap, 4),
+                "center": list(best["center"]),
+            }
+        )
+
+    complete = all(value is not None for value in digits)
+
+    return {
+        "value": (
+            "".join(digits)
+            if complete
+            else None
+        ),
+        "complete": bool(complete),
+        "columns": column_details,
+        "grid_calibrated": bool(calibrated),
+        "circle_count": len(circles),
+        "reader": "jee_roll_ml_disk_v10_14",
+    }
+
+
+
 def _detect_choice_row(
     gray: np.ndarray,
     config: Dict[str, Any],
@@ -410,6 +723,31 @@ def detect_identity_fields(
             config["roll_number"],
             template,
         )
+
+        if not roll.get("value"):
+            try:
+                ml_roll = (
+                    _detect_roll_number_ml_fallback(
+                        gray,
+                        config["roll_number"],
+                        template,
+                    )
+                )
+            except Exception as ml_roll_error:
+                ml_roll = {
+                    "value": None,
+                    "complete": False,
+                    "reader":
+                        "jee_roll_ml_disk_v10_14",
+                    "warning":
+                        str(ml_roll_error),
+                }
+
+            if ml_roll.get("value"):
+                roll = ml_roll
+            else:
+                roll["ml_fallback"] = ml_roll
+
         result["roll_number"] = roll.get("value")
         result["roll_number_details"] = roll
 

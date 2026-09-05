@@ -6319,6 +6319,161 @@ def _last_row_geometry_debug(corrected_image, template):
     }
 
 
+
+def _orientation_ink_map(
+    image: np.ndarray,
+    width: int = 320,
+) -> np.ndarray:
+    if image.ndim == 3:
+        gray = cv2.cvtColor(
+            image,
+            cv2.COLOR_BGR2GRAY,
+        )
+    else:
+        gray = image.copy()
+
+    h, w = gray.shape[:2]
+    target_h = max(
+        1,
+        int(round(h * width / max(w, 1))),
+    )
+
+    small = cv2.resize(
+        gray,
+        (width, target_h),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    background = cv2.GaussianBlur(
+        small,
+        (0, 0),
+        sigmaX=7.0,
+        sigmaY=7.0,
+    )
+
+    ink = cv2.subtract(
+        background,
+        small,
+    ).astype(np.float32)
+
+    return np.clip(
+        ink / 80.0,
+        0.0,
+        1.0,
+    )
+
+
+def _neet_kcet_orientation_score(
+    candidate: np.ndarray,
+    reference: np.ndarray,
+) -> float:
+    candidate_map = _orientation_ink_map(candidate)
+    reference_map = _orientation_ink_map(reference)
+
+    if candidate_map.shape != reference_map.shape:
+        candidate_map = cv2.resize(
+            candidate_map,
+            (
+                reference_map.shape[1],
+                reference_map.shape[0],
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    h, w = reference_map.shape[:2]
+
+    mask = np.zeros((h, w), dtype=np.float32)
+
+    mask[:int(h * 0.24), :] = 1.0
+    mask[:, :int(w * 0.34)] = 1.0
+    mask[int(h * 0.90):, :] = 1.0
+
+    candidate_values = (
+        candidate_map * mask
+    ).reshape(-1)
+
+    reference_values = (
+        reference_map * mask
+    ).reshape(-1)
+
+    c_norm = float(np.linalg.norm(candidate_values))
+    r_norm = float(np.linalg.norm(reference_values))
+
+    if c_norm <= 1e-6 or r_norm <= 1e-6:
+        return 0.0
+
+    return float(
+        np.dot(
+            candidate_values,
+            reference_values,
+        )
+        / (c_norm * r_norm)
+    )
+
+
+def ensure_neet_kcet_upright(
+    corrected: np.ndarray,
+    reference_path,
+):
+    reference = cv2.imread(
+        str(reference_path),
+        cv2.IMREAD_COLOR,
+    )
+
+    if reference is None:
+        return corrected, {
+            "applied": False,
+            "reason": "reference_unavailable",
+        }
+
+    if reference.shape[:2] != corrected.shape[:2]:
+        reference = cv2.resize(
+            reference,
+            (
+                corrected.shape[1],
+                corrected.shape[0],
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    upright_score = _neet_kcet_orientation_score(
+        corrected,
+        reference,
+    )
+
+    rotated = cv2.rotate(
+        corrected,
+        cv2.ROTATE_180,
+    )
+
+    rotated_score = _neet_kcet_orientation_score(
+        rotated,
+        reference,
+    )
+
+    improvement = rotated_score - upright_score
+
+    rotate = (
+        rotated_score >= 0.18
+        and improvement >= 0.035
+    )
+
+    return (
+        rotated
+        if rotate
+        else corrected
+    ), {
+        "applied": bool(rotate),
+        "rotation_degrees": 180 if rotate else 0,
+        "upright_score": round(upright_score, 5),
+        "rotated_180_score": round(rotated_score, 5),
+        "score_improvement": round(improvement, 5),
+        "reader":
+            "neet_kcet_reference_orientation_v10_14",
+    }
+
+
+
 def process_omr(
     image_path,
     template_path,
@@ -6441,6 +6596,19 @@ def process_omr(
         ecc_minimum_score=0.80,
         debug_dir=local_debug_dir,
     )
+    if template_exam_name in ("NEET", "KCET"):
+        (
+            corrected,
+            orientation_debug,
+        ) = ensure_neet_kcet_upright(
+            corrected,
+            reference_path,
+        )
+
+        alignment_debug[
+            "orientation"
+        ] = orientation_debug
+
     alignment_debug["input"] = input_debug
 
     document_preview, recognition_image, document_mode_debug = (
@@ -6607,6 +6775,49 @@ def process_omr(
             recognition_image,
             template,
         )
+
+        if (
+            template_exam_name == "JEE"
+            and not (
+                identity
+                or {}
+            ).get(
+                "roll_number"
+            )
+        ):
+            corrected_identity = (
+                detect_identity_fields(
+                    corrected,
+                    template,
+                )
+            )
+
+            corrected_roll = (
+                corrected_identity
+                or {}
+            ).get(
+                "roll_number"
+            )
+
+            if corrected_roll:
+                identity[
+                    "roll_number"
+                ] = corrected_roll
+
+                identity[
+                    "roll_number_details"
+                ] = (
+                    corrected_identity.get(
+                        "roll_number_details"
+                    )
+                )
+
+                identity[
+                    "roll_number_source"
+                ] = (
+                    "jee_identity_corrected_retry_v10_14"
+                )
+
     except Exception as identity_error:
         identity = {
             "warning": str(identity_error),
