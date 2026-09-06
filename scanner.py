@@ -40,6 +40,9 @@ from ml_omr.grid_detector import (
     fit_response_grid,
     draw_grid_detection_debug,
 )
+from ml_omr.row_ring_alignment import (
+    refine_fitted_grid_to_printed_rings,
+)
 
 
 # ============================================================
@@ -3065,6 +3068,24 @@ def scan_answers(
         )
     )
 
+    # v10.22: after the proven pin/RANSAC grid fit, make only a tiny shared
+    # row correction against the actual printed bubble rings. A/B/C/D move
+    # together, so a filled answer or stray contour cannot drag one option
+    # independently. The search remains inside the current safe grid limits.
+    fitted_coordinates, row_ring_debug = (
+        refine_fitted_grid_to_printed_rings(
+            gray,
+            fitted_coordinates,
+            coordinates,
+            template,
+        )
+    )
+
+    for column_index, row_details in row_ring_debug.items():
+        column_debug = grid_debug_info.get(column_index)
+        if isinstance(column_debug, dict):
+            column_debug["row_ring_alignment"] = row_details
+
     if not os.environ.get(
         "VERCEL"
     ):
@@ -3340,8 +3361,10 @@ def draw_answer_analysis(
         debug_image = corrected_image.copy()
         scale_ratio = 1.0
 
-    # Reduced bubble and pin point radius for subtle, compact indicators
-    base_radius = max(3.0, float(template.get("bubble_radius", 11)) - 6.0)
+    # Draw the analysis ring at the physical template bubble radius. The
+    # previous -6 px display shrink made correctly centered overlays look
+    # visibly misplaced inside the real printed bubble.
+    base_radius = max(3.0, float(template.get("bubble_radius", 11)))
     bubble_radius = max(
         3,
         int(round(base_radius * scale_ratio)),
