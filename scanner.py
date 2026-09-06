@@ -2759,6 +2759,252 @@ def detect_question_answer(
     }
 
 
+
+def prepare_neet_kcet_answer_image_v10_21(
+    corrected_bgr,
+):
+    """
+    Restore the proven pre-adaptive preprocessing used by NEET/KCET
+    answer recognition before adaptive_document_mode_v3.
+
+    IMPORTANT:
+    - answer bubbles only
+    - no gamma lift
+    - no saturation amplification
+    - no geometry changes
+    - JEE and identity paths keep the newer preprocessing
+    """
+    if corrected_bgr is None or corrected_bgr.size == 0:
+        raise ValueError(
+            "NEET/KCET answer preprocessing received an empty image."
+        )
+
+    if corrected_bgr.ndim == 2:
+        original = corrected_bgr.copy()
+    else:
+        original = cv2.cvtColor(
+            corrected_bgr,
+            cv2.COLOR_BGR2GRAY,
+        )
+
+    background_stats = cv2.GaussianBlur(
+        original,
+        (0, 0),
+        sigmaX=35,
+        sigmaY=35,
+    )
+
+    illumination_range = float(
+        np.percentile(background_stats, 95.0)
+        - np.percentile(background_stats, 5.0)
+    )
+
+    brightness = float(np.mean(original))
+    contrast = float(np.std(original))
+    blur_score = float(
+        cv2.Laplacian(
+            original,
+            cv2.CV_64F,
+        ).var()
+    )
+
+    short_side = min(original.shape[:2])
+    kernel_side = int(
+        np.clip(
+            round(short_side / 28.0),
+            31,
+            71,
+        )
+    )
+
+    if kernel_side % 2 == 0:
+        kernel_side += 1
+
+    illumination_background = cv2.morphologyEx(
+        original,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (
+                kernel_side,
+                kernel_side,
+            ),
+        ),
+    )
+
+    illumination_background = cv2.GaussianBlur(
+        illumination_background,
+        (0, 0),
+        sigmaX=max(5.0, kernel_side / 7.0),
+        sigmaY=max(5.0, kernel_side / 7.0),
+    )
+
+    paper_level = min(
+        max(
+            float(
+                np.percentile(
+                    illumination_background,
+                    92.0,
+                )
+            ),
+            1.0,
+        ),
+        245.0,
+    )
+
+    normalized = cv2.divide(
+        original,
+        np.maximum(
+            illumination_background,
+            1,
+        ).astype(np.uint8),
+        scale=paper_level,
+    )
+
+    illumination_strength = float(
+        np.clip(
+            0.48
+            + illumination_range / 220.0,
+            0.50,
+            0.78,
+        )
+    )
+
+    lighting = cv2.addWeighted(
+        original,
+        1.0 - illumination_strength,
+        normalized,
+        illumination_strength,
+        0,
+    )
+
+    soft_input = blur_score < 900.0
+
+    if soft_input:
+        denoise_strength = float(
+            np.clip(
+                8.0
+                + (30.0 - contrast) * 0.16,
+                8.0,
+                14.0,
+            )
+        )
+        denoise_d = 3
+    else:
+        denoise_strength = float(
+            np.clip(
+                14.0
+                + (34.0 - contrast) * 0.28,
+                12.0,
+                22.0,
+            )
+        )
+        denoise_d = 5
+
+    denoised = cv2.bilateralFilter(
+        lighting,
+        d=denoise_d,
+        sigmaColor=denoise_strength,
+        sigmaSpace=denoise_strength,
+    )
+
+    clahe = cv2.createCLAHE(
+        clipLimit=float(
+            np.clip(
+                1.05
+                + (32.0 - contrast) / 80.0,
+                1.05,
+                1.38,
+            )
+        ),
+        tileGridSize=(
+            16,
+            16,
+        ),
+    )
+
+    contrasted = clahe.apply(
+        denoised
+    )
+
+    soft = cv2.GaussianBlur(
+        contrasted,
+        (0, 0),
+        sigmaX=0.65,
+        sigmaY=0.65,
+    )
+
+    if soft_input:
+        sharpen_amount = float(
+            np.clip(
+                0.22
+                + (
+                    900.0
+                    - blur_score
+                )
+                / 3000.0,
+                0.22,
+                0.34,
+            )
+        )
+    else:
+        sharpen_amount = float(
+            np.clip(
+                0.12
+                + (
+                    110.0
+                    - blur_score
+                )
+                / 900.0,
+                0.10,
+                0.20,
+            )
+        )
+
+    sharpened = cv2.addWeighted(
+        contrasted,
+        1.0 + sharpen_amount,
+        soft,
+        -sharpen_amount,
+        0,
+    )
+
+    values = sharpened.astype(
+        np.float32
+    )
+
+    light_mask = values > 180.0
+
+    lift = float(
+        np.clip(
+            (
+                210.0
+                - brightness
+            )
+            / 120.0,
+            0.18,
+            0.42,
+        )
+    )
+
+    values[light_mask] += (
+        255.0
+        - values[light_mask]
+    ) * lift
+
+    whitened = np.clip(
+        values,
+        0,
+        255,
+    ).astype(np.uint8)
+
+    return cv2.cvtColor(
+        whitened,
+        cv2.COLOR_GRAY2BGR,
+    )
+
+
+
 # ============================================================
 # SCAN NEET / KCET ANSWERS WITH ML
 # ============================================================
@@ -6652,6 +6898,39 @@ def process_omr(
     )
     alignment_debug["document_mode"] = document_mode_debug
 
+    # v10.21:
+    # Keep adaptive_document_mode_v3 for preview, identity recovery and JEE,
+    # but restore the earlier proven gentle preprocessing for NEET/KCET
+    # answer bubbles. The newer gamma/saturation recovery was changing the
+    # appearance of printed rings and camera shadows before classification.
+    if template_exam_name in ("NEET", "KCET"):
+        neet_kcet_answer_image = (
+            prepare_neet_kcet_answer_image_v10_21(
+                corrected
+            )
+        )
+
+        alignment_debug[
+            "answer_preprocessing"
+        ] = {
+            "profile":
+                "gentle_neet_kcet_answers_v10_21",
+
+            "source":
+                "canonical_corrected",
+
+            "gamma_recovery":
+                False,
+
+            "saturation_recovery":
+                False,
+
+            "geometry_changed":
+                False,
+        }
+    else:
+        neet_kcet_answer_image = recognition_image
+
     expected_width = int(template["sheet_width"])
     expected_height = int(template["sheet_height"])
     if corrected.shape[:2] != (expected_height, expected_width):
@@ -6986,7 +7265,7 @@ def process_omr(
         # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
-                recognition_image,
+                neet_kcet_answer_image,
                 template,
             )
         )
@@ -7027,7 +7306,7 @@ def process_omr(
         # Scan every physical response row in the generated sheet.
         answers = (
             scan_answers(
-                recognition_image,
+                neet_kcet_answer_image,
                 template,
             )
         )
