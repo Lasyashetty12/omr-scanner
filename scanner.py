@@ -1,8 +1,8 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
-from ml_omr.final_ml_consensus import (
-    refine_neet_kcet_answers_with_ml,
-    rescue_jee_multiple_from_ml_debug,
+from ml_omr.final_guard_v10_29 import (
+    detect_series_cv_fallback,
+    resolve_strict_jee_secondary_multiple,
 )
 from ml_omr.json_anchor_reader import (
     scan_answers_json_anchored,
@@ -3163,19 +3163,6 @@ def scan_answers(
         )
     )
 
-    # _final_ml_consensus_v10_28
-    # Use the ONNX model as the primary filled/blank classifier, then
-    # validate it against the blank reference and the physical solid centre.
-    raw_answers, ml_debug = (
-        refine_neet_kcet_answers_with_ml(
-            gray=gray,
-            coordinates=fitted_coordinates,
-            template=template,
-            raw_answers=raw_answers,
-            ml_debug=ml_debug,
-        )
-    )
-
     answers = {}
 
     for question in coordinates:
@@ -3928,7 +3915,7 @@ def detect_paper_code(
 # EXAM SERIES (P/Q/R/S)
 # ============================================================
 
-def detect_exam_series(
+def _detect_exam_series_legacy(
     gray_image,
     template,
     exam_name=None,
@@ -4113,6 +4100,38 @@ def detect_exam_series(
 
         "sampling_centres": sampling_centres,
     }
+
+
+# _series_cv_fallback_wrapper_v10_29
+def detect_exam_series(
+    gray_image,
+    template,
+    exam_name=None,
+):
+    try:
+        return _detect_exam_series_legacy(
+            gray_image,
+            template,
+            exam_name=exam_name,
+        )
+
+    except ValueError as legacy_error:
+        fallback = detect_series_cv_fallback(
+            gray_image,
+            template,
+            exam_name=exam_name,
+        )
+
+        if fallback is not None:
+            fallback[
+                "legacy_error"
+            ] = str(
+                legacy_error
+            )
+
+            return fallback
+
+        raise
 
 
 def detect_jee_series(gray_image, template):
@@ -4550,52 +4569,6 @@ def resolve_jee_camera_mcq_ambiguities(
         )
     )
 
-    # _jee_final_solid_multiple_v10_28
-    # Run after hybrid ML so even an initial BLANK/AMBIGUOUS row can recover
-    # two independently solid physical marks.
-    for _question_key, _decision in list(
-        ml_debug.items()
-    ):
-        try:
-            _question_number = int(
-                _question_key
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            continue
-
-        if not isinstance(
-            _decision,
-            dict,
-        ):
-            continue
-
-        _current_answer = ml_answers.get(
-            _question_key,
-            ml_answers.get(
-                _question_number
-            ),
-        )
-
-        (
-            _rescued_answer,
-            _rescued_decision,
-        ) = rescue_jee_multiple_from_ml_debug(
-            gray=recognition_image,
-            ml_answer=_current_answer,
-            ml_decision=_decision,
-        )
-
-        ml_answers[
-            _question_number
-        ] = _rescued_answer
-
-        ml_debug[
-            _question_number
-        ] = _rescued_decision
-
     merged = {}
 
     question_numbers = sorted(
@@ -4711,35 +4684,39 @@ def resolve_jee_camera_mcq_ambiguities(
         if _is_jee_mcq_choice(
             stable_answer
         ):
-            verified_ml_multiple = (
+            # _strict_jee_secondary_multiple_v10_29
+            # Keep the proven stable single unless exactly ONE other bubble
+            # is strongly supported by the existing ONNX model + fill metrics.
+            (
+                strict_ml_answer,
+                strict_ml_decision,
+            ) = resolve_strict_jee_secondary_multiple(
+                stable_answer=stable_answer,
+                ml_answer=ml_answer,
+                ml_decision=ml_decision,
+            )
+
+            if (
                 str(
-                    ml_answer
+                    strict_ml_answer
                     or ""
                 ).upper()
                 == "MULTIPLE"
                 and bool(
-                    ml_decision.get(
-                        "jee_solid_multiple_rescue",
+                    strict_ml_decision.get(
+                        "strict_jee_secondary_multiple",
                         False,
                     )
                 )
-                and len(
-                    ml_decision.get(
-                        "multiple_options",
-                        [],
-                    )
-                    or []
-                )
-                >= 2
-            )
-
-            if verified_ml_multiple:
+            ):
                 final_answer = "MULTIPLE"
+                ml_answer = strict_ml_answer
+                ml_decision = strict_ml_decision
 
                 selected[
                     "camera_resolver"
                 ] = (
-                    "verified_ml_multiple_over_stable_single_v10_28"
+                    "strict_jee_secondary_multiple_v10_29"
                 )
 
                 changed_questions.append(
