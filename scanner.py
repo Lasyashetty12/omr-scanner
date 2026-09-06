@@ -9,8 +9,10 @@ from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
 from jee_precise_reader import scan_jee_numerical_precise
+from jee_cv_mcq_reader import (
+    scan_jee_mcq_sections_cv_robust as scan_jee_mcq_sections_robust,
+)
 from jee_reader import (
-    scan_jee_mcq_sections_robust,
     scan_jee_numerical_sections_robust,
 )
 import json
