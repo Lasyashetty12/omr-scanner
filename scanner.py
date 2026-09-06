@@ -40,7 +40,7 @@ from ml_omr.grid_detector import (
     fit_response_grid,
     draw_grid_detection_debug,
 )
-from ml_omr.row_ring_alignment import (
+from ml_omr.cv_lattice_alignment import (
     refine_fitted_grid_to_printed_rings,
 )
 
