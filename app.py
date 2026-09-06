@@ -465,7 +465,7 @@ async def scan_omr(
         if (
             class_name not in {"11", "12", "LT"}
             or section not in {"A", "B", "C"}
-            or session not in {"Morning", "Afternoon"}
+            or session not in {"Morning", "Afternoon", "Evening"}
             or not exam_date
         ):
             raise HTTPException(
@@ -1322,6 +1322,37 @@ async def scan_omr(
 
             )
 
+            # v10.21: JEE Main 2026 Paper 1 score audit.
+            audit_score = (
+                int(score_data.get("correct") or 0) * 4
+                - int(score_data.get("wrong") or 0)
+                - int(score_data.get("multiple") or 0)
+            )
+
+            calculated_score = int(
+                score_data.get("score")
+                or 0
+            )
+
+            if calculated_score != audit_score:
+                raise ValueError(
+                    "JEE scoring consistency check failed: "
+                    f"calculated={calculated_score}, "
+                    f"audited={audit_score}."
+                )
+
+            score_data["audit"] = {
+                "scheme": "JEE Main 2026 Paper 1",
+                "correct_marks": 4,
+                "incorrect_marks": -1,
+                "blank_marks": 0,
+                "multiple_mcq_marks": -1,
+                "uncertain_marks": 0,
+                "audited_score": audit_score,
+                "passed": True,
+            }
+
+
         except Exception as error:
 
             # Allows calibration/testing even if
@@ -1387,6 +1418,7 @@ async def scan_omr(
                     "series_details": series_data,
                     "stream": "PCM",
                     "max_score": 300,
+                    "total_questions": 75,
                     "marking_scheme": {
                         "name": "JEE Main 2026 Paper 1",
                         "mcq_correct": 4,
@@ -1600,37 +1632,37 @@ async def scan_omr(
         "batch": exam_date[:4],
     }
 
+    # Persist every completed analysis so it is visible on Teacher Dashboard.
+    # Test-key JEE runs remain explicitly labelled TEST in raw_result_json.
     if (
         exam == "jee"
         and result.get(
             "answer_key_dummy"
         )
     ):
-        db_id = None
+        result["database_test_result"] = True
+        result["database_warning"] = (
+            "TEST ANSWER KEY result saved for scanner/dashboard testing. "
+            "Replace the JEE answer key and set dummy=false before using "
+            "the score as a production student result."
+        )
+
+    db_id = save_omr_result_to_db(
+        result,
+        student_info=db_student_info,
+    )
+
+    if db_id:
+        result["id"] = db_id
+        result["database_saved"] = True
+        result["database_result_id"] = db_id
+    else:
         result["id"] = scan_id
         result["database_saved"] = False
         result["database_warning"] = (
-            "TEST ANSWER KEY result was not stored in the production "
-            "results database. Replace the JEE answer key and set "
-            "dummy=false before real student scanning."
+            "Evaluation completed, but the result was not persisted "
+            "to Supabase. Check /api/storage-status."
         )
-    else:
-        db_id = save_omr_result_to_db(
-            result,
-            student_info=db_student_info,
-        )
-
-        if db_id:
-            result["id"] = db_id
-            result["database_saved"] = True
-            result["database_result_id"] = db_id
-        else:
-            result["id"] = scan_id
-            result["database_saved"] = False
-            result["database_warning"] = (
-                "Evaluation completed, but the result was not persisted "
-                "to Supabase. Check /api/storage-status."
-            )
 
     # Persist the final response (including the database ID) after the
     # database write. The result page can then resolve the scan UUID
