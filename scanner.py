@@ -1,5 +1,6 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
+from ml_omr.jee_solid_profile import apply_jee_solid_profile_overrides
 from ml_omr.final_guard_v10_29 import (
     detect_series_cv_fallback,
 )
@@ -4566,6 +4567,23 @@ def resolve_jee_camera_mcq_ambiguities(
         )
     )
 
+
+
+    # jee_solid_profile_ml_v10_34
+    # JEE only: broad physical fill profile + existing ml_omr probabilities.
+    # No question numbers or answer-key values are used.
+    (
+        stable_mcq,
+        ml_answers,
+        ml_debug,
+    ) = apply_jee_solid_profile_overrides(
+        gray=recognition_image,
+        coordinates=coordinates,
+        stable_mcq=stable_mcq,
+        ml_answers=ml_answers,
+        ml_debug=ml_debug,
+        template=template,
+    )
 
     merged = {}
 
