@@ -1,9 +1,7 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
-from ml_omr.jee_multiscale_multiple import refine_jee_multiscale_multiples
 from ml_omr.final_guard_v10_29 import (
     detect_series_cv_fallback,
-    resolve_strict_jee_secondary_multiple,
 )
 from ml_omr.json_anchor_reader import (
     scan_answers_json_anchored,
@@ -14,10 +12,8 @@ from omr_preprocess.document_mode import prepare_omr_document_mode
 from omr_preprocess.quality import assess_document_quality
 from identity_reader import detect_identity_fields
 from jee_precise_reader import scan_jee_numerical_precise
-from jee_cv_mcq_reader import (
-    scan_jee_mcq_sections_cv_robust as scan_jee_mcq_sections_robust,
-)
 from jee_reader import (
+    scan_jee_mcq_sections_robust,
     scan_jee_numerical_sections_robust,
 )
 import json
@@ -4571,21 +4567,6 @@ def resolve_jee_camera_mcq_ambiguities(
     )
 
 
-    # _jee_multiscale_ml_v10_31
-    # JEE-only: reuse the existing ml_omr ONNX model at radius 12/14/16
-    # around the same CV-fitted bubble centres. KCET/NEET never enter here.
-    (
-        ml_answers,
-        ml_debug,
-    ) = (
-        refine_jee_multiscale_multiples(
-            gray=recognition_image,
-            stable_mcq=stable_mcq,
-            ml_answers=ml_answers,
-            ml_debug=ml_debug,
-        )
-    )
-
     merged = {}
 
     question_numbers = sorted(
@@ -4697,130 +4678,21 @@ def resolve_jee_camera_mcq_ambiguities(
 
         # ----------------------------------------------------
         # Preserve stable single answers.
+        # Reference: Sapthagiri_pu_college commit dbc73846026ace637f0bf356ca63d069ea6fc3e5
+        # jee_reference_gate_dbc738_v10_33
         # ----------------------------------------------------
         if _is_jee_mcq_choice(
             stable_answer
         ):
-
-            multiscale_blank_veto = bool(
-                ml_decision.get(
-                    "jee_multiscale_ml_blank_veto",
-                    False,
-                )
+            final_answer = (
+                stable_answer
             )
 
-            if multiscale_blank_veto:
-                final_answer = "BLANK"
-
-                selected[
-                    "camera_resolver"
-                ] = (
-                    "jee_ml_vote_blank_v10_32"
-                )
-
-                changed_questions.append(
-                    int(
-                        question_number
-                    )
-                )
-
-            multiscale_options = list(
-                ml_decision.get(
-                    "multiple_options",
-                    [],
-                )
-                or []
+            selected[
+                "camera_resolver"
+            ] = (
+                "stable_single_kept_v10_11"
             )
-
-            multiscale_multiple = bool(
-                str(
-                    ml_answer
-                    or ""
-                ).upper()
-                == "MULTIPLE"
-                and ml_decision.get(
-                    "jee_multiscale_ml_multiple",
-                    False,
-                )
-                and len(
-                    multiscale_options
-                )
-                == 2
-                and stable_answer
-                in multiscale_options
-            )
-
-            if multiscale_blank_veto:
-                pass
-
-            elif multiscale_multiple:
-                final_answer = "MULTIPLE"
-
-                selected[
-                    "camera_resolver"
-                ] = (
-                    "jee_multiscale_ml_multiple_v10_31"
-                )
-
-                changed_questions.append(
-                    int(
-                        question_number
-                    )
-                )
-
-            else:
-                # _strict_jee_secondary_multiple_v10_29
-                # Keep the proven stable single unless exactly ONE other bubble
-                # is strongly supported by the existing ONNX model + fill metrics.
-                (
-                    strict_ml_answer,
-                    strict_ml_decision,
-                ) = resolve_strict_jee_secondary_multiple(
-                    stable_answer=stable_answer,
-                    ml_answer=ml_answer,
-                    ml_decision=ml_decision,
-                    gray=recognition_image,
-                )
-
-                if (
-                    str(
-                        strict_ml_answer
-                        or ""
-                    ).upper()
-                    == "MULTIPLE"
-                    and bool(
-                        strict_ml_decision.get(
-                            "strict_jee_secondary_multiple",
-                            False,
-                        )
-                    )
-                ):
-                    final_answer = "MULTIPLE"
-                    ml_answer = strict_ml_answer
-                    ml_decision = strict_ml_decision
-
-                    selected[
-                        "camera_resolver"
-                    ] = (
-                        "strict_jee_secondary_multiple_v10_29"
-                    )
-
-                    changed_questions.append(
-                        int(
-                            question_number
-                        )
-                    )
-
-                else:
-                    final_answer = (
-                        stable_answer
-                    )
-
-                    selected[
-                        "camera_resolver"
-                    ] = (
-                        "stable_single_kept_v10_11"
-                    )
 
         # ----------------------------------------------------
         # For MULTIPLE / UNCERTAIN / BLANK, trust the

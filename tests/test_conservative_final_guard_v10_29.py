@@ -234,4 +234,8 @@ def test_install_targets_exist_after_script():
 
     assert "apply_strict_ml_blank_veto(" in hybrid
     assert "_detect_exam_series_legacy(" in scanner
-    assert "resolve_strict_jee_secondary_multiple(" in scanner
+
+    # v10.33 restores the accurate Sapthagiri JEE gate.
+    # KCET/NEET v10.29 guards remain intact.
+    assert "jee_reference_gate_dbc738_v10_33" in scanner
+    assert "resolve_strict_jee_secondary_multiple(" not in scanner
