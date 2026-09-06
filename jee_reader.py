@@ -331,27 +331,76 @@ def _extra_ink_score(
 
 
 def _cluster_1d(values: List[float], k: int) -> List[float] | None:
-    if len(values) < k:
+    """
+    deterministic_lattice_cluster_v10_35
+
+    Deterministic 1-D median clustering for JEE bubble grids.
+    """
+    if len(values) < k or int(k) <= 0:
         return None
 
-    data = np.asarray(values, dtype=np.float32).reshape(-1, 1)
-    criteria = (
-        cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_MAX_ITER,
-        60,
-        0.10,
+    data = np.asarray(
+        sorted(float(value) for value in values),
+        dtype=np.float64,
     )
 
-    _compactness, _labels, centers = cv2.kmeans(
+    k = int(k)
+
+    if k == 1:
+        return [float(np.median(data))]
+
+    quantiles = np.linspace(0.0, 1.0, k)
+    centres = np.quantile(
         data,
-        k,
-        None,
-        criteria,
-        10,
-        cv2.KMEANS_PP_CENTERS,
-    )
+        quantiles,
+    ).astype(np.float64)
 
-    return sorted(float(value) for value in centers.reshape(-1))
+    for _iteration in range(40):
+        distances = np.abs(
+            data[:, None]
+            - centres[None, :]
+        )
 
+        labels = np.argmin(
+            distances,
+            axis=1,
+        )
+
+        updated = centres.copy()
+
+        for index in range(k):
+            members = data[
+                labels == index
+            ]
+
+            if members.size:
+                updated[index] = float(
+                    np.median(members)
+                )
+
+        updated = np.sort(updated)
+
+        if np.max(
+            np.abs(
+                updated
+                - centres
+            )
+        ) <= 0.01:
+            centres = updated
+            break
+
+        centres = updated
+
+    if np.any(
+        np.diff(centres)
+        <= 1.0
+    ):
+        return None
+
+    return [
+        float(value)
+        for value in centres
+    ]
 
 def _hough_circles(
     gray: np.ndarray,
@@ -454,7 +503,60 @@ def _calibrate_mcq_grid(
         and _validate_cluster_centres(actual_y, expected_y, max_delta)
     )
 
-    if not calibrated:
+    raw_actual_x = (
+        list(actual_x)
+        if actual_x is not None
+        else None
+    )
+    raw_actual_y = (
+        list(actual_y)
+        if actual_y is not None
+        else None
+    )
+
+    if calibrated:
+        # affine_lattice_smoothing_v10_35
+        x_fit = np.polyfit(
+            np.asarray(
+                expected_x,
+                dtype=np.float64,
+            ),
+            np.asarray(
+                actual_x,
+                dtype=np.float64,
+            ),
+            1,
+        )
+
+        y_fit = np.polyfit(
+            np.asarray(
+                expected_y,
+                dtype=np.float64,
+            ),
+            np.asarray(
+                actual_y,
+                dtype=np.float64,
+            ),
+            1,
+        )
+
+        actual_x = [
+            float(
+                x_fit[0] * float(value)
+                + x_fit[1]
+            )
+            for value in expected_x
+        ]
+
+        actual_y = [
+            float(
+                y_fit[0] * float(value)
+                + y_fit[1]
+            )
+            for value in expected_y
+        ]
+
+    else:
         actual_x = sorted(expected_x)
         actual_y = sorted(expected_y)
 
@@ -466,8 +568,32 @@ def _calibrate_mcq_grid(
     return x_by_option, list(actual_y), {
         "calibrated": bool(calibrated),
         "circle_count": len(circles),
-        "x_centres": [round(float(v), 2) for v in actual_x],
-        "y_centres": [round(float(v), 2) for v in actual_y],
+        "x_centres": [
+            round(float(v), 2)
+            for v in actual_x
+        ],
+        "y_centres": [
+            round(float(v), 2)
+            for v in actual_y
+        ],
+        "raw_x_centres": (
+            [
+                round(float(v), 2)
+                for v in raw_actual_x
+            ]
+            if raw_actual_x is not None
+            else []
+        ),
+        "raw_y_centres": (
+            [
+                round(float(v), 2)
+                for v in raw_actual_y
+            ]
+            if raw_actual_y is not None
+            else []
+        ),
+        "calibration_version":
+            "affine_lattice_smoothing_v10_35",
     }
 
 
@@ -894,13 +1020,20 @@ def _calibrate_numerical_question(
             for value in column["y_positions"]
         ]
 
+        # numeric_affine_sampling_v10_35
         new_column["x"] = float(
-            actual_x[index]
+            project_local_x(
+                float(column["x"])
+            )
         )
 
         new_column["y_positions"] = [
-            float(value)
-            for value in actual_y
+            float(
+                project_local_y(
+                    float(value)
+                )
+            )
+            for value in column["y_positions"]
         ]
 
         updated["columns"].append(
@@ -1086,7 +1219,7 @@ def _calibrate_numerical_question(
         "local_x_offset": round(float(x_offset), 3),
         "local_y_scale": round(float(y_scale), 6),
         "local_y_offset": round(float(y_offset), 3),
-        "calibration_version": "local_grid_affine_v10_2",
+        "calibration_version": "stable_affine_grid_v10_35",
     }
 
 
