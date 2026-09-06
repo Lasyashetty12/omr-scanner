@@ -2456,70 +2456,228 @@ def _shape_based_secondary_rescue(
     # ----------------------------------------------------------
     # B) Hidden second mark -> MULTIPLE
     # ----------------------------------------------------------
-    # Only consider when current decision is a single. Require the
-    # current answer to be unquestionably filled and one other option
-    # to independently show a compact, dark local component.
+    # JEE uses a small crop radius, so it must not be mistaken for KCET.
+    # More importantly, MULTIPLE detection must be symmetric: the currently
+    # selected option may be the weaker of two real marks. Q16/Q60 are exactly
+    # that failure mode.
     if (
         current_status == "answered"
         and
         current_answer in options
     ):
-        cur = probe[current_answer]["best_broad"]
+        is_jee = (
+            int(questions_per_column) >= 1000
+        )
+        is_kcet = (
+            not is_jee
+            and (
+                questions_per_column == 60
+                or crop_radius <= 12
+            )
+        )
 
-        if (
-            cur["center_darkness"] >= 110.0
-            and
-            cur["core_dark_ratio"] >= 0.90
-            and
-            cur["disk_dark_ratio"] >= 0.80
-        ):
-            second_candidates = []
+        if is_jee:
+            # JEE-specific image-only rescue.
+            #
+            # A real filled bubble must be independently dark at the tiny
+            # centre AND across the ordinary core/disk. This rejects empty
+            # printed rings even when a local +/-4 px search lands on part of
+            # the outline.
+            fill_candidates = []
+
             for option in options:
-                if option == current_answer:
-                    continue
+                broad = probe[
+                    option
+                ][
+                    "best_broad"
+                ]
+                compact = probe[
+                    option
+                ][
+                    "best_compact"
+                ]
 
-                p = probe[option]["best_compact"]
+                filled_like = (
+                    compact["micro_darkness"] >= 185.0
+                    and
+                    compact["center_darkness"] >= 85.0
+                    and
+                    compact["core_dark_ratio"] >= 0.80
+                    and
+                    broad["disk_dark_ratio"] >= 0.55
+                )
 
-                is_kcet = (questions_per_column == 60 or crop_radius <= 12)
-                min_sec_micro = 145.0 if is_kcet else 170.0
-                min_sec_dark = 95.0 if is_kcet else 82.0
-                min_sec_disk = 0.65 if is_kcet else 0.42
-
-                # Deliberately strict; intended for a real second fill,
-                # not printed bubble ring.
-                if (
-                    p["micro_darkness"] >= min_sec_micro
-                    and
-                    p["center_darkness"] >= min_sec_dark
-                    and
-                    p["core_dark_ratio"] >= 0.70
-                    and
-                    p["disk_dark_ratio"] >= min_sec_disk
-                ):
-                    second_candidates.append(
+                if filled_like:
+                    fill_candidates.append(
                         (
-                            p["compact"],
+                            max(
+                                float(
+                                    broad[
+                                        "broad"
+                                    ]
+                                ),
+                                float(
+                                    compact[
+                                        "compact"
+                                    ]
+                                ),
+                            ),
                             option,
-                            p,
+                            broad,
+                            compact,
                         )
                     )
 
-            if len(second_candidates) == 1:
-                _, second_option, second_probe = second_candidates[0]
+            # Only convert a SINGLE to MULTIPLE when the original answer is
+            # one of the independently verified physical fills. This prevents
+            # a dark printed artifact elsewhere in the row from overriding an
+            # otherwise valid single.
+            verified_options = [
+                item[1]
+                for item
+                in fill_candidates
+            ]
 
-                rescued = dict(decision)
-                rescued["answer"] = "MULTIPLE"
-                rescued["status"] = "multiple"
-                rescued["best_option"] = current_answer
-                rescued["multiple_options"] = [
-                    current_answer,
-                    second_option,
-                ]
-                rescued["shape_hidden_multiple_rescue"] = True
-                rescued["shape_second_option"] = second_option
-                rescued["shape_second_dx"] = second_probe["dx"]
-                rescued["shape_second_dy"] = second_probe["dy"]
+            if (
+                len(
+                    verified_options
+                )
+                >= 2
+                and
+                current_answer
+                in verified_options
+            ):
+                rescued = dict(
+                    decision
+                )
+                rescued[
+                    "answer"
+                ] = "MULTIPLE"
+                rescued[
+                    "status"
+                ] = "multiple"
+                rescued[
+                    "best_option"
+                ] = current_answer
+                rescued[
+                    "multiple_options"
+                ] = verified_options
+                rescued[
+                    "jee_hidden_multiple_rescue"
+                ] = True
+                rescued[
+                    "jee_verified_fill_options"
+                ] = verified_options
+
                 return rescued
+
+        else:
+            # Preserve the previous NEET/KCET behaviour.
+            cur = probe[
+                current_answer
+            ][
+                "best_broad"
+            ]
+
+            if (
+                cur["center_darkness"] >= 110.0
+                and
+                cur["core_dark_ratio"] >= 0.90
+                and
+                cur["disk_dark_ratio"] >= 0.80
+            ):
+                second_candidates = []
+
+                for option in options:
+                    if option == current_answer:
+                        continue
+
+                    p = probe[
+                        option
+                    ][
+                        "best_compact"
+                    ]
+
+                    min_sec_micro = (
+                        145.0
+                        if is_kcet
+                        else 170.0
+                    )
+                    min_sec_dark = (
+                        95.0
+                        if is_kcet
+                        else 82.0
+                    )
+                    min_sec_disk = (
+                        0.65
+                        if is_kcet
+                        else 0.42
+                    )
+
+                    if (
+                        p["micro_darkness"] >= min_sec_micro
+                        and
+                        p["center_darkness"] >= min_sec_dark
+                        and
+                        p["core_dark_ratio"] >= 0.70
+                        and
+                        p["disk_dark_ratio"] >= min_sec_disk
+                    ):
+                        second_candidates.append(
+                            (
+                                p["compact"],
+                                option,
+                                p,
+                            )
+                        )
+
+                if len(
+                    second_candidates
+                ) == 1:
+                    (
+                        _,
+                        second_option,
+                        second_probe,
+                    ) = second_candidates[
+                        0
+                    ]
+
+                    rescued = dict(
+                        decision
+                    )
+                    rescued[
+                        "answer"
+                    ] = "MULTIPLE"
+                    rescued[
+                        "status"
+                    ] = "multiple"
+                    rescued[
+                        "best_option"
+                    ] = current_answer
+                    rescued[
+                        "multiple_options"
+                    ] = [
+                        current_answer,
+                        second_option,
+                    ]
+                    rescued[
+                        "shape_hidden_multiple_rescue"
+                    ] = True
+                    rescued[
+                        "shape_second_option"
+                    ] = second_option
+                    rescued[
+                        "shape_second_dx"
+                    ] = second_probe[
+                        "dx"
+                    ]
+                    rescued[
+                        "shape_second_dy"
+                    ] = second_probe[
+                        "dy"
+                    ]
+
+                    return rescued
 
     # ----------------------------------------------------------
     # C) Wrong-single compactness correction
@@ -2673,6 +2831,7 @@ def _postprocess_known_failure_classes(
     # not satisfy these conditions.
     if (
         decision.get("status") in ("blank", "ambiguous")
+        and questions_per_column < 1000
         and (questions_per_column == 60 or crop_radius <= 12)
     ):
         local_probe = _tight_local_shape_probe(gray, option_data)
@@ -2819,6 +2978,14 @@ def _postprocess_known_failure_classes(
 
                 return corrected
 
+        decision = _shape_based_secondary_rescue(
+            gray,
+            option_data,
+            decision,
+            questions_per_column=questions_per_column,
+            crop_radius=crop_radius,
+        )
+
         return decision
 
     if (
@@ -2890,7 +3057,13 @@ def _postprocess_known_failure_classes(
     # --------------------------------------------------------------
     # Fix false UNCERTAIN on KCET where printed grid outlines near A/B
     # inflate baseline darkness but a single option is unambiguously filled.
-    is_kcet = (questions_per_column == 60 or crop_radius <= 12)
+    is_kcet = (
+        questions_per_column < 1000
+        and (
+            questions_per_column == 60
+            or crop_radius <= 12
+        )
+    )
     if decision.get("status") == "ambiguous" and is_kcet:
         best_option = decision.get("best_option")
         top_gap = float(decision.get("top_gap", 0.0))
