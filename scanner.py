@@ -4694,6 +4694,7 @@ def resolve_jee_camera_mcq_ambiguities(
                 stable_answer=stable_answer,
                 ml_answer=ml_answer,
                 ml_decision=ml_decision,
+                gray=recognition_image,
             )
 
             if (

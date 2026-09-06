@@ -121,7 +121,9 @@ def test_dummy_jee_answer_key_is_not_silent_production_data():
     assert "answer_key_dummy" in app
     assert "answer_key_mode" in app
     assert "TEST ANSWER KEY" in app
-    assert "not stored in the production" in app
+    assert "database_test_result" in app
+    assert "TEST ANSWER KEY result saved" in app
+    assert "save_omr_result_to_db(" in app
 
     p_key = json.loads(
         (ROOT / "answer_keys" / "jee" / "P.json").read_text(

@@ -189,137 +189,578 @@ def apply_strict_ml_blank_veto(
     return decision
 
 
-def resolve_strict_jee_secondary_multiple(
+def _jee_physical_fill_evidence(
+    gray,
+    center,
     *,
-    stable_answer: Any,
-    ml_answer: Any,
-    ml_decision: Dict[str, Any],
+    search_radius=4,
 ):
     """
-    Narrow JEE second-mark rescue.
+    Very strict JEE-only solid-fill probe.
 
-    Unlike the broad v10.26/v10.28 rescues, this runs ONLY when the proven
-    stable reader already has one concrete A/B/C/D answer. A second option is
-    added only if exactly one other bubble has strong ONNX + physical-fill
-    evidence. It never turns a blank/uncertain JEE row into MULTIPLE.
+    Printed empty rings/digits can be dark on a few pixels, but a genuinely
+    filled bubble darkens MOST of the small central core and a large fraction
+    of the inner disk. Search only +/-4 px around the already CV-fitted centre.
     """
-    stable = str(
-        stable_answer or ""
-    ).strip().upper()
+    if gray is None:
+        return {
+            "strong": False,
+            "supported": False,
+            "score": 0.0,
+        }
 
-    if stable not in ("A", "B", "C", "D"):
-        return ml_answer, ml_decision
+    if gray.ndim == 3:
+        gray = cv2.cvtColor(
+            gray,
+            cv2.COLOR_BGR2GRAY,
+        )
 
+    if (
+        not isinstance(center, (list, tuple))
+        or len(center) < 2
+    ):
+        return {
+            "strong": False,
+            "supported": False,
+            "score": 0.0,
+        }
+
+    base_x = int(round(float(center[0])))
+    base_y = int(round(float(center[1])))
+
+    radius = 14
+    height, width = gray.shape[:2]
+
+    yy, xx = np.ogrid[
+        -radius:radius + 1,
+        -radius:radius + 1,
+    ]
+    rr2 = xx * xx + yy * yy
+
+    core_mask = rr2 <= 4 * 4
+    inner_mask = rr2 <= 7 * 7
+    paper_mask = (
+        (rr2 >= 11 * 11)
+        & (rr2 <= 14 * 14)
+    )
+
+    best = None
+
+    for dy in range(-search_radius, search_radius + 1):
+        for dx in range(-search_radius, search_radius + 1):
+            cx = base_x + dx
+            cy = base_y + dy
+
+            if (
+                cx - radius < 0
+                or cy - radius < 0
+                or cx + radius >= width
+                or cy + radius >= height
+            ):
+                continue
+
+            patch = gray[
+                cy - radius:cy + radius + 1,
+                cx - radius:cx + radius + 1,
+            ].astype(np.float32)
+
+            core = patch[core_mask]
+            inner = patch[inner_mask]
+            paper = patch[paper_mask]
+
+            if (
+                core.size < 20
+                or inner.size < 60
+                or paper.size < 80
+            ):
+                continue
+
+            paper_level = float(
+                np.percentile(
+                    paper,
+                    75.0,
+                )
+            )
+
+            dark_threshold = float(
+                np.clip(
+                    paper_level - 42.0,
+                    70.0,
+                    188.0,
+                )
+            )
+
+            core_mean = float(np.mean(core))
+            core_p85 = float(
+                np.percentile(
+                    core,
+                    85.0,
+                )
+            )
+            inner_mean = float(np.mean(inner))
+
+            core_delta = paper_level - core_mean
+            p85_delta = paper_level - core_p85
+            inner_delta = paper_level - inner_mean
+
+            core_ratio = float(
+                np.mean(core < dark_threshold)
+            )
+            inner_ratio = float(
+                np.mean(inner < dark_threshold)
+            )
+
+            score = (
+                0.28
+                * float(
+                    np.clip(
+                        core_delta / 105.0,
+                        0.0,
+                        1.0,
+                    )
+                )
+                + 0.25
+                * float(
+                    np.clip(
+                        p85_delta / 85.0,
+                        0.0,
+                        1.0,
+                    )
+                )
+                + 0.18
+                * float(
+                    np.clip(
+                        inner_delta / 90.0,
+                        0.0,
+                        1.0,
+                    )
+                )
+                + 0.17 * core_ratio
+                + 0.12 * inner_ratio
+                - 0.008 * (abs(dx) + abs(dy))
+            )
+
+            record = {
+                "score": float(score),
+                "core_delta": float(core_delta),
+                "p85_delta": float(p85_delta),
+                "inner_delta": float(inner_delta),
+                "core_ratio": float(core_ratio),
+                "inner_ratio": float(inner_ratio),
+                "dx": int(dx),
+                "dy": int(dy),
+            }
+
+            if (
+                best is None
+                or record["score"] > best["score"]
+            ):
+                best = record
+
+    if best is None:
+        return {
+            "strong": False,
+            "supported": False,
+            "score": 0.0,
+        }
+
+    strong = bool(
+        best["score"] >= 0.67
+        and best["core_delta"] >= 62.0
+        and best["p85_delta"] >= 34.0
+        and best["inner_delta"] >= 42.0
+        and best["core_ratio"] >= 0.72
+        and best["inner_ratio"] >= 0.52
+    )
+
+    supported = bool(
+        best["score"] >= 0.56
+        and best["core_delta"] >= 50.0
+        and best["p85_delta"] >= 24.0
+        and best["inner_delta"] >= 32.0
+        and best["core_ratio"] >= 0.58
+        and best["inner_ratio"] >= 0.42
+    )
+
+    return {
+        **{
+            key: (
+                round(float(value), 4)
+                if key not in ("dx", "dy")
+                else int(value)
+            )
+            for key, value in best.items()
+        },
+        "strong": strong,
+        "supported": supported,
+    }
+
+
+def resolve_strict_jee_secondary_multiple(
+    *,
+    stable_answer,
+    ml_answer,
+    ml_decision,
+    gray=None,
+):
+    """
+    JEE-only MULTIPLE correction.
+
+    Rules are deliberately narrow:
+      1. KCET/NEET never call this function.
+      2. The physical bubble centres already produced by the JEE CV reader
+         are used; template geometry is not changed.
+      3. A printed empty ring is not enough: the central core must be solid.
+      4. Exactly TWO filled bubbles must be supported.
+      5. If the stable reader already has one option, only one additional
+         physical fill is allowed.
+      6. If the stable reader has no concrete option, both fills must be
+         independently STRONG before BLANK/UNCERTAIN can become MULTIPLE.
+    """
     if not isinstance(ml_decision, dict):
         return ml_answer, ml_decision
 
-    option_data = ml_decision.get("options", {})
+    option_data = ml_decision.get(
+        "options",
+        {},
+    )
 
     if not isinstance(option_data, dict):
         return ml_answer, ml_decision
 
-    if stable not in option_data:
+    options = [
+        option
+        for option in ("A", "B", "C", "D")
+        if option in option_data
+    ]
+
+    if len(options) != 4:
         return ml_answer, ml_decision
 
-    def evidence(option: str):
-        info = option_data.get(option, {})
-        metrics = info.get("metrics", {})
+    stable = str(
+        stable_answer or ""
+    ).strip().upper()
+
+    # Backward-compatible no-image path.
+    #
+    # The original v10.29 regression suite calls this helper directly without
+    # passing the JEE image. Production scanner.py DOES pass recognition_image,
+    # so real scans continue to use the stricter physical-center logic below.
+    if gray is None:
+        if stable not in ("A", "B", "C", "D"):
+            return ml_answer, ml_decision
+
+        if stable not in option_data:
+            return ml_answer, ml_decision
+
+        def _legacy_evidence(option):
+            info = option_data.get(option, {})
+            metrics = info.get("metrics", {})
+
+            if not isinstance(metrics, dict):
+                metrics = {}
+
+            filled = _ml_probability(info, "filled")
+            blank = _ml_probability(info, "blank")
+
+            def metric(name, default=0.0):
+                try:
+                    return float(metrics.get(name, default))
+                except (TypeError, ValueError):
+                    return float(default)
+
+            return {
+                "filled": filled,
+                "blank": blank,
+                "disk": metric("disk_dark_ratio"),
+                "core": metric("core_dark_ratio"),
+                "darkness": metric("center_darkness"),
+            }
+
+        primary = _legacy_evidence(stable)
+
+        primary_supported = bool(
+            (
+                primary["filled"] >= 0.55
+                and primary["blank"] <= 0.35
+            )
+            or (
+                primary["disk"] >= 0.72
+                and primary["darkness"] >= 82.0
+            )
+        )
+
+        if not primary_supported:
+            return ml_answer, ml_decision
+
+        candidates = []
+
+        for option in ("A", "B", "C", "D"):
+            if option == stable or option not in option_data:
+                continue
+
+            data = _legacy_evidence(option)
+
+            strong_model_path = bool(
+                data["filled"] >= 0.72
+                and data["blank"] <= 0.20
+                and data["disk"] >= 0.50
+                and data["darkness"] >= 65.0
+            )
+
+            strong_visual_path = bool(
+                data["filled"] >= 0.60
+                and data["blank"] <= 0.28
+                and data["disk"] >= 0.72
+                and data["core"] >= 0.70
+                and data["darkness"] >= 82.0
+            )
+
+            if strong_model_path or strong_visual_path:
+                candidates.append(
+                    (
+                        data["filled"],
+                        data["disk"],
+                        data["darkness"],
+                        option,
+                        data,
+                    )
+                )
+
+        if len(candidates) != 1:
+            return ml_answer, ml_decision
+
+        candidates.sort(reverse=True)
+        _, _, _, second_option, second_evidence = candidates[0]
+
+        rescued = dict(ml_decision)
+        rescued["answer"] = "MULTIPLE"
+        rescued["status"] = "multiple"
+        rescued["best_option"] = stable
+        rescued["multiple_options"] = [stable, second_option]
+        rescued["strict_jee_secondary_multiple"] = True
+        rescued["strict_jee_secondary_option"] = second_option
+        rescued["strict_jee_secondary_evidence"] = second_evidence
+        rescued["strict_jee_secondary_profile"] = (
+            "jee_legacy_no_image_compat_v10_30b"
+        )
+
+        return "MULTIPLE", rescued
+
+
+    evidence = {}
+
+    for option in options:
+        info = option_data.get(
+            option,
+            {},
+        )
+
+        center = info.get(
+            "crop_center"
+        )
+
+        physical = _jee_physical_fill_evidence(
+            gray,
+            center,
+            search_radius=4,
+        )
+
+        filled = _ml_probability(
+            info,
+            "filled",
+        )
+        blank = _ml_probability(
+            info,
+            "blank",
+        )
+
+        metrics = info.get(
+            "metrics",
+            {},
+        )
 
         if not isinstance(metrics, dict):
             metrics = {}
 
-        filled = _ml_probability(info, "filled")
-        blank = _ml_probability(info, "blank")
-
-        def metric(name, default=0.0):
+        def metric(name):
             try:
                 return float(
-                    metrics.get(name, default)
+                    metrics.get(
+                        name,
+                        0.0,
+                    )
                 )
             except (TypeError, ValueError):
-                return float(default)
+                return 0.0
 
-        return {
-            "filled": filled,
-            "blank": blank,
-            "disk": metric("disk_dark_ratio"),
-            "core": metric("core_dark_ratio"),
-            "darkness": metric("center_darkness"),
-        }
-
-    primary = evidence(stable)
-
-    primary_supported = bool(
-        (
-            primary["filled"] >= 0.55
-            and primary["blank"] <= 0.35
-        )
-        or (
-            primary["disk"] >= 0.72
-            and primary["darkness"] >= 82.0
-        )
-    )
-
-    if not primary_supported:
-        return ml_answer, ml_decision
-
-    candidates = []
-
-    for option in ("A", "B", "C", "D"):
-        if option == stable or option not in option_data:
-            continue
-
-        data = evidence(option)
-
-        strong_model_path = bool(
-            data["filled"] >= 0.72
-            and data["blank"] <= 0.20
-            and data["disk"] >= 0.50
-            and data["darkness"] >= 65.0
+        # ML supports but does not have veto power over an unmistakably solid
+        # physical fill. This is the specific failure seen in Q10/Q44/Q60/Q69:
+        # one dark real bubble can receive a weak model score.
+        model_supported = bool(
+            filled >= 0.58
+            and blank <= 0.34
         )
 
-        strong_visual_path = bool(
-            data["filled"] >= 0.60
-            and data["blank"] <= 0.28
-            and data["disk"] >= 0.72
-            and data["core"] >= 0.70
-            and data["darkness"] >= 82.0
+        legacy_supported = bool(
+            metric("disk_dark_ratio") >= 0.70
+            and metric("center_darkness") >= 82.0
+            and metric("core_dark_ratio") >= 0.62
         )
 
-        if strong_model_path or strong_visual_path:
-            candidates.append(
-                (
-                    data["filled"],
-                    data["disk"],
-                    data["darkness"],
-                    option,
-                    data,
+        verified = bool(
+            physical.get(
+                "strong",
+                False,
+            )
+            or (
+                physical.get(
+                    "supported",
+                    False,
+                )
+                and (
+                    model_supported
+                    or legacy_supported
                 )
             )
+        )
 
-    # Exactly one secondary fill is required. If two or three blank printed
-    # rings look suspicious, preserve the old stable single instead.
-    if len(candidates) != 1:
+        evidence[option] = {
+            "physical": physical,
+            "ml_filled": round(
+                float(filled),
+                4,
+            ),
+            "ml_blank": round(
+                float(blank),
+                4,
+            ),
+            "legacy_disk": round(
+                metric("disk_dark_ratio"),
+                4,
+            ),
+            "legacy_darkness": round(
+                metric("center_darkness"),
+                3,
+            ),
+            "legacy_core": round(
+                metric("core_dark_ratio"),
+                4,
+            ),
+            "verified": verified,
+        }
+
+    verified = [
+        option
+        for option in options
+        if evidence[option]["verified"]
+    ]
+
+    strong = [
+        option
+        for option in options
+        if bool(
+            evidence[option][
+                "physical"
+            ].get(
+                "strong",
+                False,
+            )
+        )
+    ]
+
+    # Never guess a multiple row. More than two candidates usually means
+    # printed text/ring contamination or bad geometry, so preserve the old
+    # result instead of turning the row red.
+    if len(verified) != 2:
         return ml_answer, ml_decision
 
-    candidates.sort(reverse=True)
-    _, _, _, second_option, second_evidence = candidates[0]
+    if stable in options:
+        # The stable reader must be one of the two fills, and there may be
+        # exactly one independently verified secondary bubble.
+        if stable not in verified:
+            return ml_answer, ml_decision
 
-    rescued = dict(ml_decision)
+        second = [
+            option
+            for option in verified
+            if option != stable
+        ]
+
+        if len(second) != 1:
+            return ml_answer, ml_decision
+
+        second_option = second[0]
+
+        # Secondary bubble must either be physically strong, or have both
+        # physical + ML/legacy support.
+        secondary = evidence[
+            second_option
+        ]
+
+        if not (
+            secondary["physical"].get(
+                "strong",
+                False,
+            )
+            or (
+                secondary["physical"].get(
+                    "supported",
+                    False,
+                )
+                and (
+                    secondary["ml_filled"] >= 0.58
+                    or secondary[
+                        "legacy_disk"
+                    ] >= 0.70
+                )
+            )
+        ):
+            return ml_answer, ml_decision
+
+        multiple_options = [
+            stable,
+            second_option,
+        ]
+
+    else:
+        # BLANK/UNCERTAIN -> MULTIPLE is allowed only when BOTH bubble centres
+        # are unquestionably solid. This keeps the broad v10.26 failure from
+        # returning.
+        if len(strong) != 2:
+            return ml_answer, ml_decision
+
+        multiple_options = [
+            option
+            for option in options
+            if option in strong
+        ]
+
+    rescued = dict(
+        ml_decision
+    )
+
     rescued["answer"] = "MULTIPLE"
     rescued["status"] = "multiple"
-    rescued["best_option"] = stable
-    rescued["multiple_options"] = [
-        stable,
-        second_option,
-    ]
-    rescued["strict_jee_secondary_multiple"] = True
-    rescued["strict_jee_secondary_option"] = second_option
-    rescued["strict_jee_secondary_evidence"] = second_evidence
-    rescued["strict_jee_secondary_profile"] = PROFILE
+    rescued["best_option"] = (
+        stable
+        if stable in multiple_options
+        else multiple_options[0]
+    )
+    rescued[
+        "multiple_options"
+    ] = multiple_options
+    rescued[
+        "strict_jee_secondary_multiple"
+    ] = True
+    rescued[
+        "strict_jee_secondary_profile"
+    ] = "jee_physical_multiple_v10_30"
+    rescued[
+        "strict_jee_secondary_evidence"
+    ] = evidence
 
     return "MULTIPLE", rescued
-
 
 def _series_local_score(
     gray: np.ndarray,
