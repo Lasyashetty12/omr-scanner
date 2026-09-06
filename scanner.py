@@ -1,5 +1,9 @@
 # scanner.py
 from ml_omr.hybrid_reader import scan_answers_ml
+from ml_omr.final_ml_consensus import (
+    refine_neet_kcet_answers_with_ml,
+    rescue_jee_multiple_from_ml_debug,
+)
 from ml_omr.json_anchor_reader import (
     scan_answers_json_anchored,
     recover_identity_choices_ml,
@@ -3159,6 +3163,19 @@ def scan_answers(
         )
     )
 
+    # _final_ml_consensus_v10_28
+    # Use the ONNX model as the primary filled/blank classifier, then
+    # validate it against the blank reference and the physical solid centre.
+    raw_answers, ml_debug = (
+        refine_neet_kcet_answers_with_ml(
+            gray=gray,
+            coordinates=fitted_coordinates,
+            template=template,
+            raw_answers=raw_answers,
+            ml_debug=ml_debug,
+        )
+    )
+
     answers = {}
 
     for question in coordinates:
@@ -4533,6 +4550,52 @@ def resolve_jee_camera_mcq_ambiguities(
         )
     )
 
+    # _jee_final_solid_multiple_v10_28
+    # Run after hybrid ML so even an initial BLANK/AMBIGUOUS row can recover
+    # two independently solid physical marks.
+    for _question_key, _decision in list(
+        ml_debug.items()
+    ):
+        try:
+            _question_number = int(
+                _question_key
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+        if not isinstance(
+            _decision,
+            dict,
+        ):
+            continue
+
+        _current_answer = ml_answers.get(
+            _question_key,
+            ml_answers.get(
+                _question_number
+            ),
+        )
+
+        (
+            _rescued_answer,
+            _rescued_decision,
+        ) = rescue_jee_multiple_from_ml_debug(
+            gray=recognition_image,
+            ml_answer=_current_answer,
+            ml_decision=_decision,
+        )
+
+        ml_answers[
+            _question_number
+        ] = _rescued_answer
+
+        ml_debug[
+            _question_number
+        ] = _rescued_decision
+
     merged = {}
 
     question_numbers = sorted(
@@ -4648,15 +4711,53 @@ def resolve_jee_camera_mcq_ambiguities(
         if _is_jee_mcq_choice(
             stable_answer
         ):
-            final_answer = (
-                stable_answer
+            verified_ml_multiple = (
+                str(
+                    ml_answer
+                    or ""
+                ).upper()
+                == "MULTIPLE"
+                and bool(
+                    ml_decision.get(
+                        "jee_solid_multiple_rescue",
+                        False,
+                    )
+                )
+                and len(
+                    ml_decision.get(
+                        "multiple_options",
+                        [],
+                    )
+                    or []
+                )
+                >= 2
             )
 
-            selected[
-                "camera_resolver"
-            ] = (
-                "stable_single_kept_v10_11"
-            )
+            if verified_ml_multiple:
+                final_answer = "MULTIPLE"
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "verified_ml_multiple_over_stable_single_v10_28"
+                )
+
+                changed_questions.append(
+                    int(
+                        question_number
+                    )
+                )
+
+            else:
+                final_answer = (
+                    stable_answer
+                )
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "stable_single_kept_v10_11"
+                )
 
         # ----------------------------------------------------
         # For MULTIPLE / UNCERTAIN / BLANK, trust the
