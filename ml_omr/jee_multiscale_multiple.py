@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 
-PROFILE = "jee_multiscale_onnx_v10_31"
+PROFILE = "jee_ml_vote_v10_32"
 
 
 def _probability(
@@ -120,109 +120,94 @@ def _crop(
 def _aggregate(
     views,
 ):
+    """
+    Conservative per-bubble ml_omr voting.
+
+    A single crop may be wrong. A bubble is accepted as FILLED only when
+    at least 3 independent crop scales vote filled. A bubble is decisively
+    BLANK only when at least 3 views strongly vote blank.
+    """
     filled = np.asarray(
-        [
-            float(view["filled"])
-            for view in views
-        ],
+        [float(view["filled"]) for view in views],
         dtype=np.float32,
     )
-
     blank = np.asarray(
-        [
-            float(view["blank"])
-            for view in views
-        ],
+        [float(view["blank"]) for view in views],
+        dtype=np.float32,
+    )
+    ambiguous = np.asarray(
+        [float(view["ambiguous"]) for view in views],
         dtype=np.float32,
     )
 
-    margin = filled - blank
+    fill_margin = filled - blank
+    blank_margin = blank - filled
 
-    positive_votes = int(
+    fill_votes = int(
         np.count_nonzero(
-            (filled >= 0.50)
-            & (margin >= 0.05)
+            (filled >= 0.58)
+            & (fill_margin >= 0.10)
         )
     )
 
-    strong_votes = int(
+    strong_fill_votes = int(
         np.count_nonzero(
-            (filled >= 0.62)
-            & (margin >= 0.12)
+            (filled >= 0.72)
+            & (fill_margin >= 0.20)
         )
     )
 
-    ordered = np.sort(filled)
-
-    top_two_mean = float(
-        np.mean(
-            ordered[
-                -min(
-                    2,
-                    len(ordered),
-                ):
-            ]
+    blank_votes = int(
+        np.count_nonzero(
+            (blank >= 0.70)
+            & (blank_margin >= 0.20)
         )
     )
 
-    median_filled = float(
-        np.median(filled)
-    )
-    median_blank = float(
-        np.median(blank)
-    )
-    median_margin = float(
-        np.median(margin)
-    )
-    max_filled = float(
-        np.max(filled)
+    strong_blank_votes = int(
+        np.count_nonzero(
+            (blank >= 0.82)
+            & (blank_margin >= 0.35)
+        )
     )
 
-    strong = bool(
-        len(views) >= 3
-        and positive_votes >= 2
-        and strong_votes >= 1
-        and top_two_mean >= 0.66
-        and median_filled >= 0.48
-        and median_margin >= 0.05
-        and median_blank <= 0.48
+    median_filled = float(np.median(filled))
+    median_blank = float(np.median(blank))
+    median_ambiguous = float(np.median(ambiguous))
+    median_fill_margin = float(np.median(fill_margin))
+    max_filled = float(np.max(filled))
+
+    is_filled = bool(
+        len(views) >= 4
+        and fill_votes >= 3
+        and strong_fill_votes >= 2
+        and median_filled >= 0.60
+        and median_fill_margin >= 0.12
+        and median_blank <= 0.30
     )
 
-    probable = bool(
-        len(views) >= 3
-        and positive_votes >= 2
-        and top_two_mean >= 0.58
-        and median_filled >= 0.40
-        and max_filled >= 0.68
-        and median_margin >= 0.00
+    is_decisive_blank = bool(
+        len(views) >= 4
+        and blank_votes >= 3
+        and strong_blank_votes >= 2
+        and median_blank >= 0.78
+        and median_filled <= 0.22
+        and max_filled <= 0.45
     )
 
     return {
         "views": views,
-        "positive_votes": positive_votes,
-        "strong_votes": strong_votes,
-        "top_two_filled_mean": round(
-            top_two_mean,
-            4,
-        ),
-        "median_filled": round(
-            median_filled,
-            4,
-        ),
-        "median_blank": round(
-            median_blank,
-            4,
-        ),
-        "median_margin": round(
-            median_margin,
-            4,
-        ),
-        "max_filled": round(
-            max_filled,
-            4,
-        ),
-        "strong": strong,
-        "probable": probable,
+        "fill_votes": fill_votes,
+        "strong_fill_votes": strong_fill_votes,
+        "blank_votes": blank_votes,
+        "strong_blank_votes": strong_blank_votes,
+        "median_filled": round(median_filled, 4),
+        "median_blank": round(median_blank, 4),
+        "median_ambiguous": round(median_ambiguous, 4),
+        "median_fill_margin": round(median_fill_margin, 4),
+        "max_filled": round(max_filled, 4),
+        "is_filled": is_filled,
+        "is_decisive_blank": is_decisive_blank,
     }
 
 
@@ -527,143 +512,25 @@ def refine_jee_multiscale_multiples(
             question,
         )
 
-        strong = [
+        filled_options = [
             option
             for option in options
             if summary[
                 option
             ][
-                "strong"
+                "is_filled"
             ]
         ]
 
-        supported = [
+        decisive_blank_options = [
             option
             for option in options
-            if (
-                summary[
-                    option
-                ][
-                    "strong"
-                ]
-                or summary[
-                    option
-                ][
-                    "probable"
-                ]
-            )
-        ]
-
-        multiple_options = None
-
-        if stable in options:
-            # Preserve the proven stable JEE answer and search only for ONE
-            # additional model-confirmed fill.
-            secondary = [
+            if summary[
                 option
-                for option in supported
-                if option != stable
+            ][
+                "is_decisive_blank"
             ]
-
-            if len(secondary) == 1:
-                candidate = secondary[0]
-
-                candidate_score = float(
-                    summary[
-                        candidate
-                    ][
-                        "top_two_filled_mean"
-                    ]
-                )
-
-                other_scores = [
-                    float(
-                        summary[
-                            option
-                        ][
-                            "top_two_filled_mean"
-                        ]
-                    )
-                    for option in options
-                    if option
-                    not in (
-                        stable,
-                        candidate,
-                    )
-                ]
-
-                best_other = (
-                    max(other_scores)
-                    if other_scores
-                    else 0.0
-                )
-
-                if (
-                    summary[
-                        candidate
-                    ][
-                        "strong"
-                    ]
-                    or (
-                        summary[
-                            candidate
-                        ][
-                            "probable"
-                        ]
-                        and (
-                            candidate_score
-                            -
-                            best_other
-                        )
-                        >= 0.10
-                    )
-                ):
-                    multiple_options = [
-                        stable,
-                        candidate,
-                    ]
-
-        else:
-            # BLANK/UNCERTAIN -> MULTIPLE is much stricter: exactly two
-            # strong options and no third probable option.
-            if (
-                len(strong) == 2
-                and len(supported) == 2
-            ):
-                second_score = min(
-                    float(
-                        summary[
-                            option
-                        ][
-                            "top_two_filled_mean"
-                        ]
-                    )
-                    for option in strong
-                )
-
-                best_other = max(
-                    [
-                        float(
-                            summary[
-                                option
-                            ][
-                                "top_two_filled_mean"
-                            ]
-                        )
-                        for option in options
-                        if option not in strong
-                    ]
-                    or [0.0]
-                )
-
-                if (
-                    second_score
-                    -
-                    best_other
-                ) >= 0.10:
-                    multiple_options = list(
-                        strong
-                    )
+        ]
 
         decision = final_debug.get(
             question,
@@ -683,36 +550,121 @@ def refine_jee_multiscale_multiples(
         updated[
             "jee_multiscale_ml_options"
         ] = summary
+        updated[
+            "jee_ml_filled_options"
+        ] = list(filled_options)
+        updated[
+            "jee_ml_decisive_blank_options"
+        ] = list(
+            decisive_blank_options
+        )
 
-        if multiple_options is not None:
-            updated[
-                "answer"
-            ] = "MULTIPLE"
-            updated[
-                "status"
-            ] = "multiple"
-            updated[
-                "best_option"
-            ] = (
-                stable
-                if stable
-                in multiple_options
-                else multiple_options[0]
-            )
-            updated[
-                "multiple_options"
-            ] = multiple_options
-            updated[
-                "jee_multiscale_ml_multiple"
-            ] = True
+        if stable in options:
+            secondary = [
+                option
+                for option in filled_options
+                if option != stable
+            ]
 
-            final_answers[
-                question
-            ] = "MULTIPLE"
+            # Exactly one secondary fill. Never invent a 3/4-option MULTIPLE.
+            if (
+                len(secondary) == 1
+                and len(filled_options) <= 2
+                and not summary[
+                    stable
+                ][
+                    "is_decisive_blank"
+                ]
+            ):
+                multiple_options = [
+                    stable,
+                    secondary[0],
+                ]
+
+                updated[
+                    "answer"
+                ] = "MULTIPLE"
+                updated[
+                    "status"
+                ] = "multiple"
+                updated[
+                    "best_option"
+                ] = stable
+                updated[
+                    "multiple_options"
+                ] = multiple_options
+                updated[
+                    "jee_multiscale_ml_multiple"
+                ] = True
+                updated[
+                    "jee_ml_vote_multiple"
+                ] = True
+
+                final_answers[
+                    question
+                ] = "MULTIPLE"
+
+            # Blank-as-filled correction is intentionally very strict:
+            # all A/B/C/D must independently look blank to ml_omr.
+            elif (
+                len(filled_options) == 0
+                and len(
+                    decisive_blank_options
+                ) == 4
+            ):
+                updated[
+                    "answer"
+                ] = None
+                updated[
+                    "status"
+                ] = "blank"
+                updated[
+                    "multiple_options"
+                ] = []
+                updated[
+                    "jee_multiscale_ml_blank_veto"
+                ] = True
+                updated[
+                    "jee_ml_vote_blank"
+                ] = True
+
+                final_answers[
+                    question
+                ] = None
+
+        else:
+            # Unstable/blank row becomes MULTIPLE only when exactly two
+            # physical bubble positions are independently ML-filled.
+            if len(filled_options) == 2:
+                updated[
+                    "answer"
+                ] = "MULTIPLE"
+                updated[
+                    "status"
+                ] = "multiple"
+                updated[
+                    "best_option"
+                ] = filled_options[0]
+                updated[
+                    "multiple_options"
+                ] = list(
+                    filled_options
+                )
+                updated[
+                    "jee_multiscale_ml_multiple"
+                ] = True
+                updated[
+                    "jee_ml_vote_multiple"
+                ] = True
+
+                final_answers[
+                    question
+                ] = "MULTIPLE"
 
         final_debug[
             question
         ] = updated
+
 
     return (
         final_answers,

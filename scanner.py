@@ -4702,6 +4702,28 @@ def resolve_jee_camera_mcq_ambiguities(
             stable_answer
         ):
 
+            multiscale_blank_veto = bool(
+                ml_decision.get(
+                    "jee_multiscale_ml_blank_veto",
+                    False,
+                )
+            )
+
+            if multiscale_blank_veto:
+                final_answer = "BLANK"
+
+                selected[
+                    "camera_resolver"
+                ] = (
+                    "jee_ml_vote_blank_v10_32"
+                )
+
+                changed_questions.append(
+                    int(
+                        question_number
+                    )
+                )
+
             multiscale_options = list(
                 ml_decision.get(
                     "multiple_options",
@@ -4728,7 +4750,10 @@ def resolve_jee_camera_mcq_ambiguities(
                 in multiscale_options
             )
 
-            if multiscale_multiple:
+            if multiscale_blank_veto:
+                pass
+
+            elif multiscale_multiple:
                 final_answer = "MULTIPLE"
 
                 selected[
